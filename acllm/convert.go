@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/cloudwego/eino/schema"
+	"github.com/eino-contrib/jsonschema"
 )
 
 // schema-side markers. eino's schema.Message carries no error flag on tool
@@ -217,6 +218,26 @@ func mustJSON(v any) []byte {
 	}
 	b, _ := json.Marshal(v)
 	return b
+}
+
+// ToolSchemaToInfo converts a DTO tool definition into eino's ToolInfo for
+// model.WithTools: name and description verbatim, the JSON-schema input schema
+// carried as ParamsOneOf. A tool without an input schema yields a ToolInfo with
+// nil ParamsOneOf (eino's "no parameters" signal).
+func ToolSchemaToInfo(ts ToolSchema) (*schema.ToolInfo, error) {
+	info := &schema.ToolInfo{Name: ts.Name, Desc: ts.Description}
+	if len(ts.InputSchema) > 0 {
+		raw, err := json.Marshal(ts.InputSchema)
+		if err != nil {
+			return nil, err
+		}
+		var js jsonschema.Schema
+		if err := json.Unmarshal(raw, &js); err != nil {
+			return nil, err
+		}
+		info.ParamsOneOf = schema.NewParamsOneOfByJSONSchema(&js)
+	}
+	return info, nil
 }
 
 // UsageFromToken normalizes an eino TokenUsage into the DTO Usage. eino's
