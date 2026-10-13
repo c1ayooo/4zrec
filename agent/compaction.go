@@ -27,13 +27,14 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/norma/llm"
-	"github.com/Autumn-27/norma/transcript"
+	"github.com/Autumn-27/artex/transcript"
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 )
 
 // Compactor performs background cold-node compaction for many explorations.
 type Compactor struct {
-	prov     llm.Provider
+	prov     model.ToolCallingChatModel // the digest body model (shared instance)
 	model    string
 	params   coldParams
 	n, m     int           // minor / major thresholds (§7 N=20, M=8)
@@ -47,7 +48,7 @@ type Compactor struct {
 
 // NewCompactor builds a compactor. prov/model are used for the §4 body LLM call
 // (same model the agent runs on, per §4). A nil Compactor is a safe no-op.
-func NewCompactor(prov llm.Provider, model string) *Compactor {
+func NewCompactor(prov model.ToolCallingChatModel, model string) *Compactor {
 	return &Compactor{
 		prov:     prov,
 		model:    model,
@@ -86,7 +87,7 @@ func (c *Compactor) OnPlannerRound(ctx context.Context, ts *db.ExplorationStore)
 		defer c.finish(ts.ID())
 		bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.maxDur)
 		defer cancel()
-		// 压缩是裸 provider 调用（compress 里直接 prov.Complete），不经过 agentcore
+		// 压缩是裸模型调用（compress 里直接 Generate），不经过内核
 		// 的会话循环，所以 ctx 上没有 session id；按 session-id 头做提示缓存/粘性
 		// 路由的网关（opencode zen 缺 x-opencode-session 直接 400）就收不到该头。
 		// 这里补一个按探索稳定的 id：同一探索的所有压缩请求共享它，既能带上头，
@@ -509,20 +510,23 @@ func buildCompressionInput(g *coldGraph, b block, nodeByID map[int64]*db.Node) s
 	return sb.String()
 }
 
-// compress runs the §4 body LLM call on one block. Uses the same model the agent
-// runs on; thinking disabled (a pure summarization step).
+// compress runs the §4 body LLM call on one block: a direct one-shot model call
+// (no agent loop, no tools). Uses the same model the agent runs on. (norma sent
+// a per-request thinking=disabled override; under the eino seam thinking params
+// are config-level, so the shared model's thinking setting applies here too.)
 func (c *Compactor) compress(ctx context.Context, g *coldGraph, b block, nodeByID map[int64]*db.Node) (string, error) {
-	req := llm.CompletionRequest{
-		System:    []string{compressionSystemPrompt},
-		Messages:  []llm.Message{llm.UserText(buildCompressionInput(g, b, nodeByID))},
-		MaxTokens: 1500,
-		Thinking:  "disabled",
+	input := []*schema.Message{
+		schema.SystemMessage(compressionSystemPrompt),
+		schema.UserMessage(buildCompressionInput(g, b, nodeByID)),
 	}
-	msg, _, _, err := c.prov.Complete(ctx, req)
+	msg, err := c.prov.Generate(ctx, input, model.WithMaxTokens(1500))
 	if err != nil {
 		return "", err
 	}
-	body := strings.TrimSpace(msg.Text())
+	if msg == nil {
+		return "", fmt.Errorf("empty body from model")
+	}
+	body := strings.TrimSpace(msg.Content)
 	if body == "" {
 		return "", fmt.Errorf("empty body from model")
 	}

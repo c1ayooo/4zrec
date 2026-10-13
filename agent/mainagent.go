@@ -4,13 +4,12 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/Autumn-27/artex/askernel"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
-	"github.com/Autumn-27/norma/agentcore"
-	"github.com/Autumn-27/norma/llm"
-	"github.com/Autumn-27/norma/permission"
-	actool "github.com/Autumn-27/norma/tool"
-	"github.com/Autumn-27/norma/transcript"
+	actool "github.com/Autumn-27/artex/tools"
+	"github.com/Autumn-27/artex/transcript"
+	"github.com/cloudwego/eino/components/model"
 )
 
 // MainAgent is the thin human-interface orchestrator (docs §4.2 / §7). The human
@@ -19,7 +18,7 @@ import (
 // autonomous intent-generation loop (that is the planner's job).
 type MainAgent struct {
 	findingRecorder FindingRecorder
-	prov            llm.Provider
+	prov            model.ToolCallingChatModel // the run's chat model (shared instance)
 	model           string
 	tx              *transcript.Store                      // raw LLM conversation persistence (nil = off)
 	window          int                                    // context window in tokens (for compaction)
@@ -57,7 +56,7 @@ func (m *MainAgent) maxTokens() int {
 	return m.maxTokensFn()
 }
 
-func NewMainAgent(prov llm.Provider, model, workDir string, tx *transcript.Store, window, maxTurns int) *MainAgent {
+func NewMainAgent(prov model.ToolCallingChatModel, model, workDir string, tx *transcript.Store, window, maxTurns int) *MainAgent {
 	return &MainAgent{prov: prov, model: model, workDir: workDir, tx: tx, window: window, maxTurns: maxTurns}
 }
 
@@ -131,40 +130,45 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 	// 本任务的工作目录 <workDir>/tasks/<taskID>，先建好。
 	mainDir := ensureRunDir(m.workDir, taskID, 0)
 	ctx = intercept.WithReviewWorkingDirectory(ctx, mainDir)
-	system, boundary := deferredSystem(mainAgentSystem(goal, m.workDir, mainDir), def)
-	opts := agentcore.Options{
-		Provider:        m.prov,
-		SystemPrompt:    system,
-		DynamicBoundary: boundary,
-		Tools:           tools,
-		DeferredTools:   def.Deferred,
-		UnlockSet:       def.Unlock,
-		PermissionMode:  permission.ModeBypass,
-		EnableWebFetch:  true, // 走记录代理留痕；载入代理 CA 验证 MITM 重签的 HTTPS 证书
-		WebFetchProxy:   m.proxyAddr,
-		WebFetchCACert:  m.proxyCACert,
+	system := deferredSystem(mainAgentSystem(goal, m.workDir, mainDir), def)
+	// 会话级临时待办（TodoWrite），纯规划用，退出即丢；norma 内核自动注入的
+	// TodoWrite + 后台任务工具在 askernel 由宿主装配（sessionTools）。
+	todos := actool.NewTodoStore()
+	opts := askernel.Options{
+		Model:          m.prov,
+		SystemPrompt:   system,
+		Tools:          sessionTools(tools, todos, true),
+		DeferredTools:  def.Deferred,
+		Unlock:         def.Unlock,
+		PermissionMode: actool.ModeBypass,
+		EnableWebFetch: true, // 走记录代理留痕；载入代理 CA 验证 MITM 重签的 HTTPS 证书
+		WebFetch:       actool.WebFetchConfig{Proxy: m.proxyAddr, CACert: m.proxyCACert},
 		// 联网搜索(可选)。ddgs 无需 key；brave-free 需 BraveKey；tavily 需 TavilyKey。
-		// WebSearchProxy 是独立出口代理(http/https/socks5)，与记录流量的 MITM 代理无关；空则直连。
-		EnableWebSearch:       m.webSearch.Enabled,
-		WebSearchBackend:      m.webSearch.Backend,
-		BraveSearchAPIKey:     m.webSearch.BraveKey,
-		TavilySearchAPIKey:    m.webSearch.TavilyKey,
-		DeepSeekSearchBaseURL: m.webSearch.DeepSeekBaseURL,
-		DeepSeekSearchAPIKey:  m.webSearch.DeepSeekAPIKey,
-		DeepSeekSearchModel:   m.webSearch.DeepSeekModel,
-		WebSearchProxy:        m.webSearch.Proxy,
-		BashEnv:               proxyEnv(m.proxyAddr, m.proxyCACert), // Bash 子命令默认走代理+信任 CA
-		WorkingDir:            mainDir,                              // 本任务工作目录 <workDir>/tasks/<taskID>
-		ToolOutputDir:         cmdOutDir(mainDir),
-		MaxTurns:              m.maxTurns,                             // 0 = unlimited (configurable in agent management)
-		Compaction:            compactionConfig(m.compactionWindow()), // long chats stay within the window
-		Todos:                 actool.NewTodoStore(),                  // 会话级临时待办（TodoWrite），纯规划用，退出即丢
-		// 命中预算(步数)→ SDK 跑收尾:向用户输出一句进展总结。Prompt 与收尾轮数可后台编辑(默认 10 轮)。
+		// Proxy 是独立出口代理(http/https/socks5)，与记录流量的 MITM 代理无关；空则直连。
+		EnableWebSearch: m.webSearch.Enabled,
+		WebSearch: actool.WebSearchConfig{
+			Backend:         m.webSearch.Backend,
+			BraveAPIKey:     m.webSearch.BraveKey,
+			TavilyAPIKey:    m.webSearch.TavilyKey,
+			DeepSeekBaseURL: m.webSearch.DeepSeekBaseURL,
+			DeepSeekAPIKey:  m.webSearch.DeepSeekAPIKey,
+			DeepSeekModel:   m.webSearch.DeepSeekModel,
+			Proxy:           m.webSearch.Proxy,
+		},
+		BashEnv:       proxyEnv(m.proxyAddr, m.proxyCACert), // Bash 子命令默认走代理+信任 CA
+		WorkingDir:    mainDir,                              // 本任务工作目录 <workDir>/tasks/<taskID>
+		ToolOutputDir: cmdOutDir(mainDir),
+		MaxTurns:      m.maxTurns,                             // 0 = unlimited (configurable in agent management)
+		Compaction:    compactionConfig(m.compactionWindow()), // long chats stay within the window
+		Todos:         todos,
+		// 命中预算(步数)→ 内核跑收尾:向用户输出一句进展总结。Prompt 与收尾轮数可后台编辑(默认 10 轮)。
 		Settlement:   wrapupSettlement("mainagent", nil),
-		NonStreaming: m.nonStreaming(), // 该 profile 选非流式时走 Provider.Complete
+		NonStreaming: m.nonStreaming(), // 该 profile 选非流式时按整发收发
 		MaxTokens:    m.maxTokens(),    // 0 = 不发上限,由服务端默认值决定
 	}
-	if m.tx != nil { // persist raw human↔AI conversation; one accumulating file per segment
+	runRef := &sessionRef{}
+	withRunTrace(&opts, runRef) // correlate tool calls into the intercept trace pre-review
+	if m.tx != nil {            // persist raw human↔AI conversation; one accumulating file per segment
 		opts.Transcript = m.tx
 		// Segment 0 keeps the legacy "exp%d-main" name so existing transcripts still
 		// load; each new session (seg>=1) gets its own file for a clean context.
@@ -181,7 +185,7 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 	}
 	enableNoa(&opts, m.noaEnabledFn, m.workDir, noaSession, noaWarn(noaSession))
 	ctx = attachSideCapture(ctx, &opts)
-	s := agentcore.NewSession(opts)
+	s := askernel.NewSession(opts)
 	defer s.Close()
 	// reload the prior conversation from the transcript so the agent has context
 	// across turns (each Chat is a fresh session; without this it can't see earlier
@@ -197,6 +201,6 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 			r.Worker = "mainagent"
 			emit(r)
 		}
-	})
+	}, runRef)
 	return text, err
 }

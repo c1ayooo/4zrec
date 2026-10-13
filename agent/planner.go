@@ -7,13 +7,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Autumn-27/artex/askernel"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
-	"github.com/Autumn-27/norma/agentcore"
-	"github.com/Autumn-27/norma/llm"
-	"github.com/Autumn-27/norma/permission"
-	actool "github.com/Autumn-27/norma/tool"
-	"github.com/Autumn-27/norma/transcript"
+	actool "github.com/Autumn-27/artex/tools"
+	"github.com/Autumn-27/artex/transcript"
+	"github.com/cloudwego/eino/components/model"
 )
 
 // Planner is the event-driven LLM planner (docs §4.3): each time the asset or
@@ -22,7 +21,7 @@ import (
 // into the frontier. It is the sole intent generator.
 type Planner struct {
 	findingRecorder   FindingRecorder
-	prov              llm.Provider
+	prov              model.ToolCallingChatModel // the run's chat model (shared instance)
 	model             string
 	tx                *transcript.Store                      // raw LLM conversation persistence (nil = off)
 	window            int                                    // context window in tokens (for compaction)
@@ -48,7 +47,7 @@ type Planner struct {
 	todos  map[int64]*actool.TodoStore
 }
 
-func NewPlanner(prov llm.Provider, model, workDir string, tx *transcript.Store, window, maxTurns int) *Planner {
+func NewPlanner(prov model.ToolCallingChatModel, model, workDir string, tx *transcript.Store, window, maxTurns int) *Planner {
 	return &Planner{prov: prov, model: model, workDir: workDir, tx: tx, window: window, maxTurns: maxTurns, todos: map[int64]*actool.TodoStore{}}
 }
 
@@ -394,7 +393,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	if p.wantConstraints() {
 		sysBody += constraintBlock(ts) // 操作约束(若有)注入系统提示,框定探索边界
 	}
-	system, boundary := deferredSystem(sysBody, def)
+	system := deferredSystem(sysBody, def)
 	// planner 无自身墙钟预算;有 deadline 时把 MaxDuration 夹逼到剩余,让在跑的规划轮在
 	// 任务到点时进收尾(因超时→任务超时词,因步数→per-run 词)。
 	maxDur, clamped := clampMaxDuration(tc.DeadlineUnix, 0)
@@ -402,40 +401,41 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	if tc.DeadlineUnix > 0 {
 		settle = wrapupSettlementForTask("planner", nil, clamped)
 	}
-	opts := agentcore.Options{
-		Provider:        p.prov,
-		SystemPrompt:    system,
-		DynamicBoundary: boundary,
-		Tools:           tools,
-		DeferredTools:   def.Deferred,
-		UnlockSet:       def.Unlock,
-		PermissionMode:  permission.ModeBypass,
-		EnableWebFetch:  true, // 走记录代理留痕；载入代理 CA 验证 MITM 重签的 HTTPS 证书
-		WebFetchProxy:   p.proxyAddr,
-		WebFetchCACert:  p.proxyCACert,
+	// 跨唤醒共享的规划待办：让串行链在多轮之间保留（session 是新的，store 不是）。
+	todos := p.todoFor(ts.ID())
+	opts := askernel.Options{
+		Model:          p.prov,
+		SystemPrompt:   system,
+		Tools:          sessionTools(tools, todos, true),
+		DeferredTools:  def.Deferred,
+		Unlock:         def.Unlock,
+		PermissionMode: actool.ModeBypass,
+		EnableWebFetch: true, // 走记录代理留痕；载入代理 CA 验证 MITM 重签的 HTTPS 证书
+		WebFetch:       actool.WebFetchConfig{Proxy: p.proxyAddr, CACert: p.proxyCACert},
 		// 联网搜索(可选)。ddgs 无需 key；brave-free 需 BraveKey；tavily 需 TavilyKey。
-		// WebSearchProxy 是独立出口代理(http/https/socks5)，与记录流量的 MITM 代理无关；空则直连。
-		EnableWebSearch:       p.webSearch.Enabled,
-		WebSearchBackend:      p.webSearch.Backend,
-		BraveSearchAPIKey:     p.webSearch.BraveKey,
-		TavilySearchAPIKey:    p.webSearch.TavilyKey,
-		DeepSeekSearchBaseURL: p.webSearch.DeepSeekBaseURL,
-		DeepSeekSearchAPIKey:  p.webSearch.DeepSeekAPIKey,
-		DeepSeekSearchModel:   p.webSearch.DeepSeekModel,
-		WebSearchProxy:        p.webSearch.Proxy,
-		BashEnv:               proxyEnv(p.proxyAddr, p.proxyCACert), // Bash 子命令默认走代理+信任 CA
-		WorkingDir:            taskDir,                              // 本任务工作目录 <workDir>/tasks/<taskID>
-		ToolOutputDir:         cmdOutDir(taskDir),
-		MaxTurns:              p.maxTurns, // 0 = unlimited (configurable in agent management)
-		MaxDuration:           maxDur,     // 0=不限;有 deadline 时=距 deadline 剩余
-		Compaction:            compactionConfig(p.compactionWindow()),
-		// 跨唤醒共享的规划待办：让串行链在多轮之间保留（session 是新的，store 不是）。
-		Todos: p.todoFor(ts.ID()),
-		// 命中【本轮】步数预算→ SDK 跑收尾:把本轮已想清楚的结论落地(该派的 add_intent、
+		// Proxy 是独立出口代理(http/https/socks5)，与记录流量的 MITM 代理无关；空则直连。
+		EnableWebSearch: p.webSearch.Enabled,
+		WebSearch: actool.WebSearchConfig{
+			Backend:         p.webSearch.Backend,
+			BraveAPIKey:     p.webSearch.BraveKey,
+			TavilyAPIKey:    p.webSearch.TavilyKey,
+			DeepSeekBaseURL: p.webSearch.DeepSeekBaseURL,
+			DeepSeekAPIKey:  p.webSearch.DeepSeekAPIKey,
+			DeepSeekModel:   p.webSearch.DeepSeekModel,
+			Proxy:           p.webSearch.Proxy,
+		},
+		BashEnv:       proxyEnv(p.proxyAddr, p.proxyCACert), // Bash 子命令默认走代理+信任 CA
+		WorkingDir:    taskDir,                              // 本任务工作目录 <workDir>/tasks/<taskID>
+		ToolOutputDir: cmdOutDir(taskDir),
+		MaxTurns:      p.maxTurns, // 0 = unlimited (configurable in agent management)
+		MaxDuration:   maxDur,     // 0=不限;有 deadline 时=距 deadline 剩余
+		Compaction:    compactionConfig(p.compactionWindow()),
+		Todos:         todos,
+		// 命中【本轮】步数预算→ 内核跑收尾:把本轮已想清楚的结论落地(该派的 add_intent、
 		// 能证的 prove_goal、串行链记 TodoWrite),而非停止规划——planner 之后仍会被反复唤醒。
 		// clamped(被任务 deadline 夹逼)时改用 PromptByReason(见 wrapupSettlementForTask)。
 		Settlement:   settle,
-		NonStreaming: p.nonStreaming(), // 该 profile 选非流式时走 Provider.Complete
+		NonStreaming: p.nonStreaming(), // 该 profile 选非流式时按整发收发
 		MaxTokens:    p.maxTokens(),    // 0 = 不发上限,由服务端默认值决定
 	}
 	if p.tx != nil { // persist raw LLM conversation; one accumulating file per task's planner
@@ -459,7 +459,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 		}
 	}
 	input := lead + situational + "\n\n据上面的态势，判定目标。目标已【真正达成】（已拿到目标成果/已确认目标漏洞）时用 prove_goal 逐个标记。**硬底线：只要目标尚未达成、且当前没有任何 open 或 running 意图（frontier_open=0 且 running_intents 为空），本轮就必须产出至少一个向目标推进的意图——此时没有在跑的 work 可等、也没有在排队的方向，产出 0 意图=任务停摆。仅当已有 open/running 意图在推进、或目标已达成时，本轮才可以不产出新意图。**" +
-		renderPlannerTodos(opts.Todos.List())
+		renderPlannerTodos(todos.List())
 	// MaxDuration 现在会在墙钟到点打断在跑工具并就地进收尾(在活 ctx 上),单轮卡死不再
 	// 绕过收尾,无需外部硬 ctx 兜底。ctx 只承载 pause / kill / shutdown。
 	_, _, err = captureRun(ctx, opts, input,

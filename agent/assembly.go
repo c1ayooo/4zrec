@@ -7,7 +7,7 @@ import (
 	"log"
 	"runtime/debug"
 
-	actool "github.com/Autumn-27/norma/tool"
+	actool "github.com/Autumn-27/artex/tools"
 )
 
 // DeferredInfo carries the deferred-tools wiring an agent needs to build its
@@ -67,11 +67,12 @@ func AugmentTools(ctx context.Context, agentKey string, base []actool.CoreTool) 
 	return out, def, cleanup
 }
 
-// guardPanic turns a panicking tool handler into an ordinary tool error. The
-// harness runs each tool on its own goroutine, so a panic inside a handler can't
+// guardPanic turns a panicking tool handler into an ordinary tool error. Tool
+// handlers run on the kernel's own goroutines, so a panic inside a handler can't
 // be recovered by the caller that started the run — it takes the whole process
 // down, and on restart the agent replays the same call and crashes again. Applied
-// last, so it covers every tool the agent can reach: domain, SDK, MCP and skill.
+// last, so it covers every tool the agent can reach: domain, kernel, MCP and skill
+// tools (and any direct Call from hosts/tests outside the kernel's own recovery).
 func guardPanic(t actool.CoreTool) actool.CoreTool { return &guardedTool{CoreTool: t} }
 
 type guardedTool struct{ actool.CoreTool }

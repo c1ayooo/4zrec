@@ -6,24 +6,23 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Autumn-27/artex/askernel"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/artex/intercept"
-	"github.com/Autumn-27/norma/agentcore"
-	"github.com/Autumn-27/norma/llm"
-	"github.com/Autumn-27/norma/permission"
-	actool "github.com/Autumn-27/norma/tool"
-	"github.com/Autumn-27/norma/transcript"
+	actool "github.com/Autumn-27/artex/tools"
+	"github.com/Autumn-27/artex/transcript"
+	"github.com/cloudwego/eino/components/model"
 )
 
 // ChatAgent is the generic, task-independent conversational runner behind the chat
 // page. It generalizes MainAgent.Chat: any agent (built-in OR a custom one, by
 // key) can be chatted with, multi-turn history resumed from the transcript. It is
-// a PURE ASSISTANT — base tools are the SDK DefaultTools (Bash/Read/Write/Edit/
+// a PURE ASSISTANT — base tools are the kernel DefaultTools (Bash/Read/Write/Edit/
 // LS/Glob/Grep) plus whatever skills/MCP the key is made visible; NO pentest
 // graph/task context is injected (that stays exclusive to MainAgent).
 type ChatAgent struct {
-	prov           llm.Provider
+	prov           model.ToolCallingChatModel // the run's chat model (shared instance)
 	model          string
 	workDir        string
 	tx             *transcript.Store
@@ -32,12 +31,12 @@ type ChatAgent struct {
 	proxyCACert    string
 	webSearch      WebSearchOpts
 	guard          *guard.Guard // optional; nil disables intercept hooks for chat
-	nonStreamingFn func() bool  // resolver: use non-streaming (Complete) path? (nil = streaming)
+	nonStreamingFn func() bool  // resolver: use non-streaming model path? (nil = streaming)
 	noaEnabledFn   func() bool  // resolver: use experimental noa compaction? (nil = off)
 	maxTokensFn    func() int   // resolver: per-reply output cap (nil/0 = send no cap)
 }
 
-func NewChatAgent(prov llm.Provider, model, workDir string, tx *transcript.Store, window int) *ChatAgent {
+func NewChatAgent(prov model.ToolCallingChatModel, model, workDir string, tx *transcript.Store, window int) *ChatAgent {
 	return &ChatAgent{prov: prov, model: model, workDir: workDir, tx: tx, window: window}
 }
 
@@ -123,54 +122,59 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 	tools, def, cleanup := AugmentTools(ctx, agentKey, base)
 	defer cleanup()
 
-	system, boundary := deferredSystem(chatSystem(agentKey, c.workDir, sessionWorkDir), def)
-	opts := agentcore.Options{
-		Provider:        c.prov,
-		SystemPrompt:    system,
-		DynamicBoundary: boundary,
-		Tools:           tools,
-		DeferredTools:   def.Deferred,
-		UnlockSet:       def.Unlock,
-		PermissionMode:  permission.ModeBypass,
-		EnableWebFetch:  true, // 走记录代理留痕；载入代理 CA 验证 MITM 重签的 HTTPS 证书
-		WebFetchProxy:   c.proxyAddr,
-		WebFetchCACert:  c.proxyCACert,
+	system := deferredSystem(chatSystem(agentKey, c.workDir, sessionWorkDir), def)
+	// 会话级临时待办（TodoWrite）+ 后台任务工具：norma 内核自动注入的两类会话工具，
+	// askernel 交给宿主装配（sessionTools）。
+	todos := actool.NewTodoStore()
+	opts := askernel.Options{
+		Model:          c.prov,
+		SystemPrompt:   system,
+		Tools:          sessionTools(tools, todos, true),
+		DeferredTools:  def.Deferred,
+		Unlock:         def.Unlock,
+		PermissionMode: actool.ModeBypass,
+		EnableWebFetch: true, // 走记录代理留痕；载入代理 CA 验证 MITM 重签的 HTTPS 证书
+		WebFetch:       actool.WebFetchConfig{Proxy: c.proxyAddr, CACert: c.proxyCACert},
 		// 联网搜索(可选)。ddgs 无需 key；brave-free 需 BraveKey；tavily 需 TavilyKey。
-		// WebSearchProxy 是独立出口代理(http/https/socks5)，与记录流量的 MITM 代理无关；空则直连。
-		EnableWebSearch:       ws.Enabled,
-		WebSearchBackend:      ws.Backend,
-		BraveSearchAPIKey:     ws.BraveKey,
-		TavilySearchAPIKey:    ws.TavilyKey,
-		DeepSeekSearchBaseURL: ws.DeepSeekBaseURL,
-		DeepSeekSearchAPIKey:  ws.DeepSeekAPIKey,
-		DeepSeekSearchModel:   ws.DeepSeekModel,
-		WebSearchProxy:        ws.Proxy,
-		BashEnv:               proxyEnv(c.proxyAddr, c.proxyCACert), // Bash 子命令默认走代理+信任 CA
-		WorkingDir:            sessionWorkDir,
-		MaxTurns:              maxTurns,
-		MaxDuration:           maxDuration,
-		Compaction:            compactionConfig(c.window),
-		Todos:                 actool.NewTodoStore(),
+		// Proxy 是独立出口代理(http/https/socks5)，与记录流量的 MITM 代理无关；空则直连。
+		EnableWebSearch: ws.Enabled,
+		WebSearch: actool.WebSearchConfig{
+			Backend:         ws.Backend,
+			BraveAPIKey:     ws.BraveKey,
+			TavilyAPIKey:    ws.TavilyKey,
+			DeepSeekBaseURL: ws.DeepSeekBaseURL,
+			DeepSeekAPIKey:  ws.DeepSeekAPIKey,
+			DeepSeekModel:   ws.DeepSeekModel,
+			Proxy:           ws.Proxy,
+		},
+		BashEnv:     proxyEnv(c.proxyAddr, c.proxyCACert), // Bash 子命令默认走代理+信任 CA
+		WorkingDir:  sessionWorkDir,
+		MaxTurns:    maxTurns,
+		MaxDuration: maxDuration,
+		Compaction:  compactionConfig(c.window),
+		Todos:       todos,
 		// large tool output spills to cmd-output/ under the session dir.
-		// 截断上限用 SDK 默认(tool.Capture 的 30000 字符)。
+		// 截断上限用默认(30000 字符)。
 		ToolOutputDir: filepath.Join(sessionWorkDir, "cmd-output"),
-		// 命中预算(步数)→ SDK 跑收尾:输出一句总结。Prompt 与收尾轮数按本 agent key 后台可编辑
+		// 命中预算(步数)→ 内核跑收尾:输出一句总结。Prompt 与收尾轮数按本 agent key 后台可编辑
 		// (自定义 agent 各自一份;留空/0 用通用默认:10 轮)。
 		Settlement:   wrapupSettlement(agentKey, nil),
-		NonStreaming: c.nonStreaming(), // 该 profile 选非流式时走 Provider.Complete
+		NonStreaming: c.nonStreaming(), // 该 profile 选非流式时按整发收发
 		MaxTokens:    c.maxTokens(),    // 0 = 不发上限,由服务端默认值决定
 	}
 	if c.guard != nil {
-		opts.Hooks = c.guard.Hooks()
+		opts.Hooks = guardHooks(c.guard)
 	}
-	if c.tx != nil { // persist raw human↔AI conversation; one accumulating file per thread
+	runRef := &sessionRef{}
+	withRunTrace(&opts, runRef) // correlate tool calls into the intercept trace pre-review
+	if c.tx != nil {            // persist raw human↔AI conversation; one accumulating file per thread
 		opts.Transcript = c.tx
 		opts.SessionID = sessionID
 	}
 	// 实验功能:开启后由 noa 接管上下文压缩(归档集中在 <workDir>/noa/<SessionID> 下,持久)。
 	enableNoa(&opts, c.noaEnabledFn, c.workDir, "chat-"+sessionID, noaWarn("chat-"+sessionID))
 	ctx = attachSideCapture(ctx, &opts)
-	s := agentcore.NewSession(opts)
+	s := askernel.NewSession(opts)
 	defer s.Close()
 	// reload prior conversation so the agent has context across turns (each Chat is
 	// a fresh session). First turn: no file yet → Resume loads nothing and proceeds.
@@ -185,6 +189,6 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 			r.Worker = agentKey
 			emit(r)
 		}
-	})
+	}, runRef)
 	return text, err
 }

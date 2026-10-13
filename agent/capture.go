@@ -6,38 +6,43 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Autumn-27/artex/acllm"
+	"github.com/Autumn-27/artex/askernel"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/artex/sidequestion"
-	"github.com/Autumn-27/norma/agentcore"
-	"github.com/Autumn-27/norma/harness"
-	"github.com/Autumn-27/norma/llm"
 )
 
 // captureRun drives one agent turn-to-completion over Session.Prompt and emits a
 // coalesced ActivityRecord per execution step (tool_use / tool_result / text /
 // thinking / result). It is shared by every LLM agent in the system (worker,
-// planner, …) so their execution is visible instead of a black box — the old
-// agentcore.Run discarded every event. The emitted records carry only
-// Kind/Tool/ToolUseID/IsError/Summary/Detail; the caller's emit fills in
-// IntentID/Worker. Returns the final assistant text + terminal error.
+// planner, …) so their execution is visible instead of a black box. The emitted
+// records carry only Kind/Tool/ToolUseID/IsError/Summary/Detail; the caller's
+// emit fills in IntentID/Worker. Returns the final assistant text + terminal error.
 //
 // KindText/KindThinking arrive as streaming deltas (one event per fragment); a
 // contiguous run is coalesced into a single record so the trace shows whole
 // messages, not dozens of fragments.
-func captureRun(ctx context.Context, opts agentcore.Options, input string, emit func(db.Activity)) (string, harness.TerminalReason, error) {
-	s := agentcore.NewSession(opts)
+func captureRun(ctx context.Context, opts askernel.Options, input string, emit func(db.Activity)) (string, askernel.TerminalReason, error) {
+	ref := &sessionRef{}
+	withRunTrace(&opts, ref) // correlate tool calls into the intercept trace pre-review
+	s := askernel.NewSession(opts)
 	defer s.Close() // release the session's background-task manager (temp dir + processes)
-	return captureRunSession(ctx, s, input, emit)
+	return captureRunSession(ctx, s, input, emit, ref)
 }
 
 // captureRunSession is captureRun over an existing session, so a caller can run
-// multiple prompts on the SAME conversation (e.g. a settlement round that reuses
-// the worker's accumulated context after the main run hit max_turns).
-func captureRunSession(ctx context.Context, s *agentcore.Session, input string, emit func(db.Activity)) (string, harness.TerminalReason, error) {
+// multiple prompts on the SAME conversation (e.g. a worker that resumes its
+// intent conversation across pause/resume).
+//
+// The kernel delivers errors INSIDE the KindResult terminal (Terminal.Err) — the
+// iterator itself never yields a non-nil error — so the terminal branch is the
+// single funnel for model failures, budget stops and cancellations alike.
+func captureRunSession(ctx context.Context, s *askernel.Session, input string, emit func(db.Activity), ref *sessionRef) (string, askernel.TerminalReason, error) {
+	ref.mark(s) // the wrapped hooks now reach the DTO for pre-review correlation
 	ctx, auditTrace := intercept.WithTrace(ctx, input, approvalHistory(s.Messages()))
 	defer auditTrace.Finish()
-	var reason harness.TerminalReason
+	var reason askernel.TerminalReason
 	rec := func(r db.Activity) {
 		if r.Kind == "text" || r.Kind == "tool_result" {
 			auditTrace.Append(db.InterceptContextEntry{Kind: r.Kind, Tool: r.Tool, ToolUseID: r.ToolUseID, Text: r.Detail, IsError: r.IsError})
@@ -73,15 +78,15 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 		tbuf.WriteString(text)
 	}
 	lastTool := &runTrace{startedAt: time.Now()}
-	var lastUsage *llm.Usage
+	var lastUsage *acllm.Usage
 
 	var finalText string
 	var rerr error
 	for ev, err := range s.Prompt(ctx, input) {
-		if err != nil {
+		if err != nil { // defensive: the kernel folds errors into the terminal
 			flush()
 			if ctx.Err() != nil { // engine/user cancellation, not a provider failure
-				sum, detail := terminalText(ctx, &harness.Terminal{Reason: reason, Err: ctx.Err()}, lastTool)
+				sum, detail := terminalText(ctx, &askernel.Terminal{Reason: reason, Err: ctx.Err()}, lastTool)
 				rec(activityWithUsage(db.Activity{Kind: "result", Summary: firstLine(sum, 400), Detail: detail}, lastUsage))
 				return finalText, reason, ctx.Err()
 			}
@@ -89,7 +94,7 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 			return finalText, reason, err
 		}
 		switch ev.Kind {
-		case harness.KindToolUse:
+		case askernel.KindToolUse:
 			if ev.ToolUse == nil {
 				continue
 			}
@@ -97,10 +102,13 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 			toolNames[ev.ToolUse.ID] = ev.ToolUse.Name
 			in := string(ev.ToolUse.Input)
 			lastTool.start(ev.ToolUse.ID, ev.ToolUse.Name, in)
-			auditTrace.Start(ev.ToolUse.ID, ev.ToolUse.Name, ev.ToolUse.Input)
+			// NOTE: the intercept trace's Start does NOT happen here — the pump
+			// races the kernel's tool execution, and the guard's review claims the
+			// call before this event may have landed. traceHooks (see runtrace.go)
+			// starts the call from the PreToolUse seam instead.
 			rec(db.Activity{Kind: "tool_use", Tool: ev.ToolUse.Name, ToolUseID: ev.ToolUse.ID,
 				Summary: ev.ToolUse.Name + " " + firstLine(in, 200), Detail: in})
-		case harness.KindToolResult:
+		case askernel.KindToolResult:
 			if ev.ToolResult == nil {
 				continue
 			}
@@ -110,11 +118,11 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 			auditTrace.Complete(ev.ToolResult.ToolUseID, out, ev.ToolResult.IsError)
 			rec(db.Activity{Kind: "tool_result", Tool: toolNames[ev.ToolResult.ToolUseID], ToolUseID: ev.ToolResult.ToolUseID,
 				IsError: ev.ToolResult.IsError, Summary: firstLine(out, 200), Detail: out})
-		case harness.KindText:
+		case askernel.KindText:
 			addDelta("text", ev.Text)
-		case harness.KindThinking:
+		case askernel.KindThinking:
 			addDelta("thinking", ev.Text)
-		case harness.KindUsage:
+		case askernel.KindUsage:
 			// live cumulative token usage (per model turn). Emitted as a non-rendered
 			// "usage" activity carrying only the token fields; the UI uses the latest
 			// one for a running session's live token count. Don't flush() here — the
@@ -126,9 +134,9 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 					InputTokens: &u.InputTokens, OutputTokens: &u.OutputTokens,
 					CacheReadTokens: &u.CacheReadTokens, CacheWriteTokens: &u.CacheWriteTokens})
 			}
-		case harness.KindResult:
+		case askernel.KindResult:
 			if ev.Terminal != nil {
-				if ev.Terminal.Reason != harness.ReasonAbortedStreaming {
+				if ev.Terminal.Reason != askernel.ReasonAbortedStreaming {
 					sidequestion.Finish(ctx, ev.Terminal.Messages)
 				}
 				finalText = ev.Terminal.Text
@@ -141,10 +149,10 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 				}
 				flush() // flush any trailing thinking / non-final text
 				sum, detail := ev.Terminal.Text, ev.Terminal.Text
-				if sum == "" || ev.Terminal.Reason == harness.ReasonAbortedTools || ev.Terminal.Reason == harness.ReasonAbortedStreaming {
+				if sum == "" || ev.Terminal.Reason == askernel.ReasonAbortedTools || ev.Terminal.Reason == askernel.ReasonAbortedStreaming {
 					sum, detail = terminalText(ctx, ev.Terminal, lastTool)
 				}
-				u := ev.Terminal.Usage // cumulative token usage for this session
+				u := ev.Terminal.Usage // cumulative token usage for this run
 				rec(db.Activity{Kind: "result", IsError: ev.Terminal.Err != nil,
 					Summary: firstLine(sum, 400), Detail: detail,
 					InputTokens: &u.InputTokens, OutputTokens: &u.OutputTokens,
@@ -159,7 +167,7 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 	return finalText, reason, rerr
 }
 
-func activityWithUsage(activity db.Activity, usage *llm.Usage) db.Activity {
+func activityWithUsage(activity db.Activity, usage *acllm.Usage) db.Activity {
 	if usage == nil {
 		return activity
 	}
@@ -172,10 +180,10 @@ func activityWithUsage(activity db.Activity, usage *llm.Usage) db.Activity {
 }
 
 // blocksText concatenates the text of a tool-result's content blocks.
-func blocksText(blocks []llm.ContentBlock) string {
+func blocksText(blocks []acllm.ContentBlock) string {
 	var b strings.Builder
 	for _, bl := range blocks {
-		if bl.Type == llm.BlockText && bl.Text != "" {
+		if bl.Type == acllm.BlockText && bl.Text != "" {
 			if b.Len() > 0 {
 				b.WriteByte('\n')
 			}
@@ -200,17 +208,17 @@ func firstLine(s string, max int) string {
 // Preserve the recorded session's visible messages, excluding thinking blocks.
 // This is audit context; the judge receives only bounded, paired execution
 // evidence selected from it, never assistant prose or thinking blocks.
-func approvalHistory(messages []llm.Message) []db.InterceptContextEntry {
+func approvalHistory(messages []acllm.Message) []db.InterceptContextEntry {
 	var entries []db.InterceptContextEntry
 	for _, message := range messages {
 		for _, block := range message.Content {
 			entry := db.InterceptContextEntry{Kind: string(message.Role)}
 			switch block.Type {
-			case llm.BlockText:
+			case acllm.BlockText:
 				entry.Text = block.Text
-			case llm.BlockToolUse:
+			case acllm.BlockToolUse:
 				entry.Kind, entry.Tool, entry.ToolUseID, entry.Text = "tool_use", block.Name, block.ID, string(block.Input)
-			case llm.BlockToolResult:
+			case acllm.BlockToolResult:
 				entry.Kind, entry.ToolUseID, entry.Text, entry.IsError = "tool_result", block.ToolUseID, blocksText(block.Content), block.IsError
 			default:
 				continue

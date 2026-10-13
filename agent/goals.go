@@ -6,12 +6,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Autumn-27/artex/askernel"
 	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/norma/agentcore"
-	"github.com/Autumn-27/norma/llm"
-	acperm "github.com/Autumn-27/norma/permission"
-	actool "github.com/Autumn-27/norma/tool"
-	"github.com/Autumn-27/norma/transcript"
+	actool "github.com/Autumn-27/artex/tools"
+	"github.com/Autumn-27/artex/transcript"
+	"github.com/cloudwego/eino/components/model"
 )
 
 // goalsDefaultTmpl is the built-in EDITABLE body (段 [A]) of the goals-decomposer
@@ -96,7 +95,7 @@ type GoalSpec struct {
 // straight into it (the same managed tool the main agent uses to add goals at
 // runtime). The returned specs are read back from the store so callers can emit
 // per-goal activity and detect the "LLM produced nothing" case for their fallback.
-func DecomposeGoals(ctx context.Context, prov llm.Provider, dataDir, goalText, desc string, as *db.AssetStore, ts *db.ExplorationStore, taskID int64, emit func(db.Activity)) []GoalSpec {
+func DecomposeGoals(ctx context.Context, prov model.ToolCallingChatModel, dataDir, goalText, desc string, as *db.AssetStore, ts *db.ExplorationStore, taskID int64, emit func(db.Activity)) []GoalSpec {
 	if prov == nil {
 		return nil
 	}
@@ -107,12 +106,12 @@ func DecomposeGoals(ctx context.Context, prov llm.Provider, dataDir, goalText, d
 // ordered provider chain. It preserves the same tools and write behavior while
 // letting the caller own provider selection/failover. maxTokens is the profile's
 // per-reply output cap (0 = send none).
-func DecomposeGoalsWithProvider(ctx context.Context, prov llm.Provider, dataDir, goalText, desc string, as *db.AssetStore, ts *db.ExplorationStore, taskID int64, nonStreaming bool, maxTokens int, emit func(db.Activity)) []GoalSpec {
+func DecomposeGoalsWithProvider(ctx context.Context, prov model.ToolCallingChatModel, dataDir, goalText, desc string, as *db.AssetStore, ts *db.ExplorationStore, taskID int64, nonStreaming bool, maxTokens int, emit func(db.Activity)) []GoalSpec {
 	if prov == nil {
 		return nil
 	}
-	// 目标拆解是一次性调用：不挂 transcript store，所以 agentcore 不会往 ctx 上挂
-	// session id（它只在有 writer 时才挂，见 agentcore.Prompt）。而按 session-id 头
+	// 目标拆解是一次性调用：不挂 transcript store，所以内核不会往 ctx 上挂
+	// session id（它只在有 writer 时才挂，见 askernel.Session.Prompt）。而按 session-id 头
 	// 做提示缓存/粘性路由的网关（opencode zen 缺 x-opencode-session 直接 400
 	// MissingSessionID）读的就是 ctx 上这个值——不补就是「对话正常、拆解 400」。
 	// 显式挂一个稳定 id：同一探索的拆解请求共享它（利于命中缓存），且命名与
@@ -150,15 +149,14 @@ func DecomposeGoalsWithProvider(ctx context.Context, prov llm.Provider, dataDir,
 			emit(r)
 		}
 	}
-	captureRun(ctx, agentcore.Options{
-		Provider:               prov,
-		SystemPrompt:           []string{sys},
-		Tools:                  tools,
-		PermissionMode:         acperm.ModeBypass,
-		DisableBackgroundTasks: true,
+	captureRun(ctx, askernel.Options{
+		Model:          prov,
+		SystemPrompt:   []string{sys},
+		Tools:          tools, // 专注型单发 agent：只有显式给出的工具,无后台任务工具、无待办
+		PermissionMode: actool.ModeBypass,
 		// 3 步(抽约束 → 登记范围 → 拆目标)各需一次工具调用,给足回合避免收尾前漏调 set_goals。
 		MaxTurns:     8,
-		NonStreaming: nonStreaming, // 该 profile 选非流式时走 Provider.Complete
+		NonStreaming: nonStreaming, // 该 profile 选非流式时按整发收发
 		MaxTokens:    maxTokens,    // 0 = 不发上限,由服务端默认值决定
 	}, userMsg, captureEmit)
 	// set_goals persisted the goals directly; read them back so the caller sees what

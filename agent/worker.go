@@ -10,14 +10,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Autumn-27/artex/acllm"
+	"github.com/Autumn-27/artex/askernel"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
-	"github.com/Autumn-27/norma/agentcore"
-	"github.com/Autumn-27/norma/harness"
-	"github.com/Autumn-27/norma/llm"
-	"github.com/Autumn-27/norma/permission"
-	actool "github.com/Autumn-27/norma/tool"
-	"github.com/Autumn-27/norma/transcript"
+	actool "github.com/Autumn-27/artex/tools"
+	"github.com/Autumn-27/artex/transcript"
+	"github.com/cloudwego/eino/components/model"
 )
 
 // Worker is an LLM work agent (docs §4.4): it claims ONE intent, completes it
@@ -29,7 +28,7 @@ import (
 // agent (planner/worker/main). Enabled=false leaves the web_search tool off.
 // Backend is "ddgs" (no key), "brave-free" (BraveKey required), "tavily"
 // (TavilyKey required), or "deepseek" (DeepSeek* required, filled from the
-// active LLM profile). It maps directly onto agentcore.Options.
+// active LLM profile). It maps directly onto askernel.Options (WebSearch).
 // Proxy is a dedicated egress proxy for the search request (http/https/socks5),
 // independent of the traffic-recording MITM proxy — set it when the search endpoint
 // is only reachable via a VPN/SOCKS proxy. Empty = direct.
@@ -53,16 +52,18 @@ type WebSearchOpts struct {
 
 type Worker struct {
 	findingRecorder FindingRecorder
-	prov            llm.Provider
-	model           string
-	workDir         string
-	proxyAddr       string
-	proxyCACert     string            // recording proxy's CA cert path (for WebFetch HTTPS verify)
-	webSearch       WebSearchOpts     // web_search tool backend selection (off by default)
-	tx              *transcript.Store // raw LLM conversation persistence (nil = off)
-	window          int               // context window in tokens (for compaction)
-	windowFn        func() int        // optional dynamic task-chain minimum
-	maxTurns        int               // max agent turns per run (0 = unlimited)
+	// prov is the run's chat model (model.ToolCallingChatModel); agents share one
+	// instance so the rate limiter and the llmrec recorder stay shared.
+	prov        model.ToolCallingChatModel
+	model       string
+	workDir     string
+	proxyAddr   string
+	proxyCACert string            // recording proxy's CA cert path (for WebFetch HTTPS verify)
+	webSearch   WebSearchOpts     // web_search tool backend selection (off by default)
+	tx          *transcript.Store // raw LLM conversation persistence (nil = off)
+	window      int               // context window in tokens (for compaction)
+	windowFn    func() int        // optional dynamic task-chain minimum
+	maxTurns    int               // max agent turns per run (0 = unlimited)
 	// runTimeout is the wall-clock budget for the main exploration of one intent
 	// (0 = unlimited). When it fires, the run is cut and a settlement round is
 	// forced so already-identified facts get written back instead of being lost.
@@ -101,10 +102,10 @@ func workerChatMarker(requestID string) string {
 	return workerChatMarkerPrefix + requestID + " -->"
 }
 
-func hasWorkerChatMessage(messages []llm.Message, requestID string) bool {
+func hasWorkerChatMessage(messages []acllm.Message, requestID string) bool {
 	marker := workerChatMarker(requestID)
 	for _, message := range messages {
-		if message.Role == llm.RoleUser && strings.Contains(message.Text(), marker) {
+		if message.Role == acllm.RoleUser && strings.Contains(message.Text(), marker) {
 			return true
 		}
 	}
@@ -153,7 +154,7 @@ func (w *Worker) SetRunTimeout(run time.Duration) {
 // plain-text one-liner (which becomes this run's displayed result).
 const settleWrapUpPrompt = "你即将因预算耗尽被终止。不要再运行任何命令/探测。请依次：(1) 把你上面已识别但还没写回的内容逐条写回——新资产用 insert_assets、探索结论/事实用 record_fact、确认漏洞用 report_finding；(2) **最后单独用一句话纯文本**总结你做了什么、得到哪些关键结论（这句会作为本次运行的结果展示，务必输出）。"
 
-func NewWorker(prov llm.Provider, model, workDir string, tx *transcript.Store, window, maxTurns int, extra ...actool.CoreTool) *Worker {
+func NewWorker(prov model.ToolCallingChatModel, model, workDir string, tx *transcript.Store, window, maxTurns int, extra ...actool.CoreTool) *Worker {
 	return &Worker{prov: prov, model: model, workDir: workDir, tx: tx, window: window, maxTurns: maxTurns, extraTools: extra}
 }
 
@@ -346,19 +347,19 @@ func renderWorkerGraphOverview(data map[string]any) string {
 // max_turns) and a per-kind breakdown of what was written back (so an intent that
 // explored but persisted nothing isn't mistaken for done, and the engine can log
 // facts/assets/findings separately instead of lumping them under "facts").
-func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.AssetStore, ts *db.ExplorationStore, intent *db.Node, hooks harness.HookRunner, emit func(db.Activity), enr EnrichTrigger, notifyFinding func(int64, string)) (harness.TerminalReason, WriteCounts, error) {
+func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.AssetStore, ts *db.ExplorationStore, intent *db.Node, hooks askernel.HookRunner, emit func(db.Activity), enr EnrichTrigger, notifyFinding func(int64, string)) (askernel.TerminalReason, WriteCounts, error) {
 	return w.execute(ctx, name, taskID, as, ts, intent, hooks, emit, enr, notifyFinding, "", "")
 }
 
 // ExecuteWithMessage runs the next turn in the same intent conversation with a
 // human-authored message. The HTTP handler does not edit the transcript;
-// agentcore records the message as a normal user turn when this Worker starts.
+// the kernel records the message as a normal user turn when this Worker starts.
 // This keeps Worker continuation identical to the regular agent chat flow.
-func (w *Worker) ExecuteWithMessage(ctx context.Context, name string, taskID int64, as *db.AssetStore, ts *db.ExplorationStore, intent *db.Node, hooks harness.HookRunner, emit func(db.Activity), enr EnrichTrigger, notifyFinding func(int64, string), requestID, message string) (harness.TerminalReason, WriteCounts, error) {
+func (w *Worker) ExecuteWithMessage(ctx context.Context, name string, taskID int64, as *db.AssetStore, ts *db.ExplorationStore, intent *db.Node, hooks askernel.HookRunner, emit func(db.Activity), enr EnrichTrigger, notifyFinding func(int64, string), requestID, message string) (askernel.TerminalReason, WriteCounts, error) {
 	return w.execute(ctx, name, taskID, as, ts, intent, hooks, emit, enr, notifyFinding, strings.TrimSpace(requestID), strings.TrimSpace(message))
 }
 
-func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.AssetStore, ts *db.ExplorationStore, intent *db.Node, hooks harness.HookRunner, emit func(db.Activity), enr EnrichTrigger, notifyFinding func(int64, string), requestID, message string) (harness.TerminalReason, WriteCounts, error) {
+func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.AssetStore, ts *db.ExplorationStore, intent *db.Node, hooks askernel.HookRunner, emit func(db.Activity), enr EnrichTrigger, notifyFinding func(int64, string), requestID, message string) (askernel.TerminalReason, WriteCounts, error) {
 	tsx := NewToolSet(ts, name)
 	tsx.SetFindingRecorder(w.findingRecorder)
 	tsx.SetTaskID(taskID)
@@ -375,7 +376,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// phase, Bash is hidden via Settlement.DisabledTools (no local gating needed).
 	base := append(tsx.WorkerTools(), w.extraTools...)
 	// worker 刻意不给 MultiEdit/Glob/Grep：文件精改用 Edit、检索走 Bash(grep/find)，
-	// 收敛工具面、减少低价值调用。其余 SDK 默认工具(Read/Write/Edit/LS/Bash/Sleep)照常。
+	// 收敛工具面、减少低价值调用。其余内核默认工具(Read/Write/Edit/LS/Bash/Sleep)照常。
 	base = append(base, defaultToolsExcept("MultiEdit", "Glob", "Grep")...)
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts), IntentID: intent.ID})
 	tools, def, cleanup := AugmentTools(ctx, "worker", base)
@@ -418,7 +419,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		}
 	}
 	sysBody += "\n\n开始执行上面这条意图：只做它、只产生事实、assets、finding、做完即停。"
-	system, boundary := deferredSystem(sysBody, def)
+	system := deferredSystem(sysBody, def)
 	// 任务级 deadline(经 ctx 注入)夹逼本 run 的墙钟预算 + 决定收尾词(见 taskclock.go)。
 	tc := taskClockFrom(ctx)
 	maxDur, clamped := clampMaxDuration(tc.DeadlineUnix, w.runTimeout)
@@ -426,52 +427,60 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	if tc.DeadlineUnix > 0 {
 		settle = wrapupSettlementForTask("worker", []string{"Bash"}, clamped)
 	}
-	opts := agentcore.Options{
-		Provider:        w.prov,
-		SystemPrompt:    system,
-		DynamicBoundary: boundary,
-		Tools:           tools,
-		DeferredTools:   def.Deferred,
-		UnlockSet:       def.Unlock,
-		PermissionMode:  permission.ModeBypass,
+	// 会话级临时待办（TodoWrite）：纯规划用，退出即丢。norma 内核会自动注入 TodoWrite
+	// 与后台任务工具；askernel 把它们交给宿主装配（sessionTools）。
+	todos := actool.NewTodoStore()
+	opts := askernel.Options{
+		Model:          w.prov,
+		SystemPrompt:   system,
+		Tools:          sessionTools(tools, todos, true),
+		DeferredTools:  def.Deferred,
+		Unlock:         def.Unlock,
+		PermissionMode: actool.ModeBypass,
 		// WebFetch 走记录代理，其 HTTP 与 curl 一样被留痕；载入代理 CA 让经 MITM
 		// 重签的 HTTPS 证书能【正常校验通过】（而非关掉校验）。proxy 空则直连。
 		EnableWebFetch: true,
-		WebFetchProxy:  w.proxyAddr,
-		WebFetchCACert: w.proxyCACert,
+		WebFetch:       actool.WebFetchConfig{Proxy: w.proxyAddr, CACert: w.proxyCACert},
 		// 联网搜索(可选)。ddgs 无需 key；brave-free 需 BraveKey；tavily 需 TavilyKey。
-		// WebSearchProxy 是独立的出口代理(http/https/socks5)，与记录流量的 MITM 代理无关；空则直连。
-		EnableWebSearch:       w.webSearch.Enabled,
-		WebSearchBackend:      w.webSearch.Backend,
-		BraveSearchAPIKey:     w.webSearch.BraveKey,
-		TavilySearchAPIKey:    w.webSearch.TavilyKey,
-		DeepSeekSearchBaseURL: w.webSearch.DeepSeekBaseURL,
-		DeepSeekSearchAPIKey:  w.webSearch.DeepSeekAPIKey,
-		DeepSeekSearchModel:   w.webSearch.DeepSeekModel,
-		WebSearchProxy:        w.webSearch.Proxy,
+		// Proxy 是独立的出口代理(http/https/socks5)，与记录流量的 MITM 代理无关；空则直连。
+		EnableWebSearch: w.webSearch.Enabled,
+		WebSearch: actool.WebSearchConfig{
+			Backend:         w.webSearch.Backend,
+			BraveAPIKey:     w.webSearch.BraveKey,
+			TavilyAPIKey:    w.webSearch.TavilyKey,
+			DeepSeekBaseURL: w.webSearch.DeepSeekBaseURL,
+			DeepSeekAPIKey:  w.webSearch.DeepSeekAPIKey,
+			DeepSeekModel:   w.webSearch.DeepSeekModel,
+			Proxy:           w.webSearch.Proxy,
+		},
 		// Bash 子命令的 HTTP 默认走记录代理 + 信任其 CA（工具无需 -x/-k）。
 		BashEnv:    proxyEnv(w.proxyAddr, w.proxyCACert),
 		WorkingDir: runDir,
 		MaxTurns:   w.maxTurns, // 0 = unlimited (configurable in agent management)
-		// 墙钟预算,轮边界判,不打断半路;0 = 不限。有任务级 deadline 时夹逼到 min(自身预算,
-		// 距 deadline 剩余),让本 run 在任务到点时自然进收尾(见 taskclock.go)。
+		// 墙钟预算,到点打断在跑工具并就地进收尾;0 = 不限。有任务级 deadline 时夹逼到
+		// min(自身预算,距 deadline 剩余),让本 run 在任务到点时自然进收尾(见 taskclock.go)。
 		MaxDuration: maxDur,
-		// 命中预算(轮次 OR 时长)→ SDK 跑一轮收尾(隐藏 Bash),把已识别的写回,避免烂尾。
+		// 命中预算(轮次 OR 时长)→ 内核跑一轮收尾(隐藏 Bash),把已识别的写回,避免烂尾。
 		// clamped(被任务 deadline 夹逼)时用 PromptByReason:因超时=任务到点→任务超时词,
 		// 因步数=夹逼窗口内步数先耗尽→回落 per-run 词。非 clamped 维持纯 per-run。
 		Settlement: settle,
-		// large tool output spills to cmd-output/ with a head + pointer (SDK tool.Capture);
-		// full output preserved on disk. 截断上限用 SDK 默认(30000 字符)。
+		// large tool output spills to cmd-output/ with a head + pointer;
+		// full output preserved on disk. 截断上限用默认(30000 字符)。
 		ToolOutputDir: cmdOutDir(runDir),
 		Compaction:    compactionConfig(w.compactionWindow()), // long tool-heavy runs stay within the window
-		Todos:         actool.NewTodoStore(),                  // 会话级临时待办（TodoWrite），纯规划用，退出即丢
-		NonStreaming:  w.nonStreaming(),                       // 该 profile 选非流式时走 Provider.Complete
-		MaxTokens:     w.maxTokens(),                          // 0 = 不发上限,由服务端默认值决定
+		Todos:         todos,                                  // 会话级临时待办（TodoWrite），纯规划用，退出即丢
+		// 空转续跑上限:worker 沿用引擎时代的 2(其余 agent 用内核默认 5)。
+		NudgeLimit:   2,
+		NonStreaming: w.nonStreaming(), // 该 profile 选非流式时按整发收发
+		MaxTokens:    w.maxTokens(),    // 0 = 不发上限,由服务端默认值决定
 	}
-	if hooks != nil { // typed-nil guard: only set when concrete (avoids harness panic)
+
+	if hooks != nil { // typed-nil guard: only set when concrete (avoids kernel panic)
 		opts.Hooks = hooks
 	}
-	if w.tx != nil { // persist raw LLM conversation; one file per worked intent
+	runRef := &sessionRef{}
+	withRunTrace(&opts, runRef) // correlate tool calls into the intercept trace pre-review
+	if w.tx != nil {            // persist raw LLM conversation; one file per worked intent
 		opts.Transcript = w.tx
 		opts.SessionID = WorkerSessionID(ts.ID(), intent.ID)
 	}
@@ -494,7 +503,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	noaSession := WorkerSessionID(ts.ID(), intent.ID)
 	enableNoa(&opts, w.noaEnabledFn, w.workDir, noaSession, noaWarn(noaSession))
 	ctx = attachSideCapture(ctx, &opts)
-	s := agentcore.NewSession(opts)
+	s := askernel.NewSession(opts)
 	defer s.Close() // release the session's background-task manager (temp dir + processes)
 
 	// Resume prior conversation if this intent was paused/blocked/exhausted and is
@@ -524,12 +533,12 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		}
 	}
 
-	// Budgets + settlement are owned by the SDK (MaxTurns/MaxDuration + Settlement):
+	// Budgets + settlement are owned by the kernel (MaxTurns/MaxDuration + Settlement):
 	// on hit it runs a wrap-up turn and finishes with ReasonMaxTurns/ReasonTimeout.
 	// MaxDuration now interrupts an in-flight tool at the wall-clock deadline and
 	// enters the wrap-up phase on the live ctx, so a run whose tool overran the budget
 	// still settles (no external hard-timeout backstop needed). ctx itself carries only
 	// pause / planner kill / shutdown, which the engine distinguishes and re-queues/stops.
-	_, reason, err := captureRunSession(ctx, s, input, emitWrap)
+	_, reason, err := captureRunSession(ctx, s, input, emitWrap, runRef)
 	return reason, tsx.Writes(), err
 }

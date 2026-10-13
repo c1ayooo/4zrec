@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/cloudwego/eino/components/model"
@@ -104,7 +106,12 @@ func isEmptyAssistant(msg *schema.Message) bool {
 // retryableCallErr classifies a model-call failure the way norma's doStream
 // did: cancellation (explicit, deadline, or the context already done) is never
 // retried; a [StatusError] is retried only for the transient status set; any
-// other error is a transport-level failure and retried.
+// other error is a transport-level failure and retried — UNLESS it embeds an
+// HTTP status (adapter errors do: eino-ext openai surfaces *openai.APIError,
+// eino-ext claude surfaces the anthropic SDK's error), in which case the status
+// decides. That last rule is load-bearing for ARTEX's quota routing: the
+// transport rewrites a quota-exhausted 429 to 402 precisely so the call fails
+// over immediately, and a 402 must therefore never be retried.
 func retryableCallErr(ctx context.Context, err error) bool {
 	if ctx.Err() != nil {
 		return false
@@ -116,7 +123,34 @@ func retryableCallErr(ctx context.Context, err error) bool {
 	if errors.As(err, &se) {
 		return isRetryableStatus(se.StatusCode)
 	}
+	if code, ok := adapterErrStatus(err); ok {
+		return isRetryableStatus(code)
+	}
 	return true
+}
+
+// adapterErrStatus extracts an HTTP status from an adapter error's text when it
+// carries no structured status. Known shapes (unit-tested in agent's quota
+// contract tests):
+//
+//   - go-openai (eino-ext openai): "error, status code: 402, status: 402 …"
+//   - anthropic-sdk-go (eino-ext claude): `POST "https://…":402 Payment Required …`
+//
+// Only the retry decision consumes the result: a missed match costs a
+// pointless retry, a false match can only suppress one — never an incorrect
+// user-visible classification.
+var adapterErrStatusRe = regexp.MustCompile(`(?:status(?:\s+code)?|"|HTTP)\s*:\s*([1-5]\d{2})\b`)
+
+func adapterErrStatus(err error) (int, bool) {
+	m := adapterErrStatusRe.FindStringSubmatch(err.Error())
+	if len(m) < 2 {
+		return 0, false
+	}
+	code, err2 := strconv.Atoi(m[1])
+	if err2 != nil {
+		return 0, false
+	}
+	return code, true
 }
 
 func isRetryableStatus(code int) bool {

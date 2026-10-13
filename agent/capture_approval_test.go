@@ -5,16 +5,16 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/Autumn-27/artex/askernel"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/artex/intercept"
-	"github.com/Autumn-27/norma/agentcore"
-	"github.com/Autumn-27/norma/llm"
-	"github.com/Autumn-27/norma/permission"
-	"github.com/Autumn-27/norma/tool"
+	actool "github.com/Autumn-27/artex/tools"
+	"github.com/cloudwego/eino/schema"
 )
 
-// Exercise the actual SDK event -> hook -> execution -> result path. No real
+// The approval-flow gold standard, run through the FULL kernel: model tool call
+// → guard hook (intercept review) → execution (or denial) → result. No real
 // model or command is used; the probe tool only returns a fixed string.
 func TestCaptureApprovalLifecycle(t *testing.T) {
 	dsn, _, err := db.DSN()
@@ -73,33 +73,28 @@ func TestCaptureApprovalLifecycle(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			turn, executions := 0, 0
-			provider := captureUsageProvider{stream: func(_ context.Context, yield func(llm.StreamEvent, error) bool) {
-				turn++
-				events := []llm.StreamEvent{{Type: llm.SETextDelta, Text: "done"}, {Type: llm.SEMessageDelta, StopReason: "end_turn"}}
-				if turn == 1 {
-					events = []llm.StreamEvent{
-						{Type: llm.SEToolUseStart, ToolID: "probe-call", ToolName: "ApprovalAuditProbe"},
-						{Type: llm.SEToolInputJSON, Text: `{}`}, {Type: llm.SEMessageDelta, StopReason: "tool_use"},
-					}
-				}
-				for _, event := range events {
-					if !yield(event, nil) {
-						return
-					}
-				}
-			}}
-			probe := tool.Build(tool.Spec{Name: "ApprovalAuditProbe", Schema: map[string]any{"type": "object"},
-				Run: func(context.Context, json.RawMessage, *tool.ToolContext) (tool.Result, error) {
+			// Turn 1 asks for the probe tool; turn 2 answers with text. The
+			// intercept "ask" verdict blocks inside the PreToolUse hook until the
+			// manual decision above lands (or the ask timeout fires).
+			m := &fakeChatModel{}
+			m.script(
+				schema.AssistantMessage("", []schema.ToolCall{
+					{ID: "probe-call", Function: schema.FunctionCall{Name: "ApprovalAuditProbe", Arguments: `{}`}},
+				}),
+				schema.AssistantMessage("done", nil),
+			)
+			executions := 0
+			probe := actool.Build(actool.Spec{Name: "ApprovalAuditProbe", Schema: map[string]any{"type": "object"},
+				Run: func(context.Context, json.RawMessage, *actool.ToolContext) (actool.Result, error) {
 					executions++
 					if tc.toolError {
-						return tool.Errorf("probe failed"), nil
+						return actool.Errorf("probe failed"), nil
 					}
-					return tool.Text("probe succeeded"), nil
+					return actool.Text("probe succeeded"), nil
 				},
 			})
-			_, _, err := captureRun(ctx, agentcore.Options{Provider: provider, Tools: []tool.CoreTool{probe}, Hooks: g.Hooks(),
-				PermissionMode: permission.ModeBypass, WorkingDir: t.TempDir(), MaxTurns: 2}, "record this review", nil)
+			_, _, err := captureRun(ctx, askernel.Options{Model: m, Tools: []actool.CoreTool{probe}, Hooks: guardHooks(g),
+				PermissionMode: actool.ModeBypass, WorkingDir: t.TempDir(), MaxTurns: 2}, "record this review", nil)
 			if err != nil {
 				t.Fatal(err)
 			}

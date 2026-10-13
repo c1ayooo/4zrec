@@ -55,6 +55,18 @@ func WithTrace(ctx context.Context, user string, prior []db.InterceptContextEntr
 	return context.WithValue(ctx, traceKey{}, t), t
 }
 
+// TraceFrom returns the Trace carried on ctx by WithTrace, or nil. Read by
+// hosts that must correlate a tool call into the trace BEFORE the guard's
+// review claims it (the askernel event pump races tool execution, so the
+// tool_use event can land after the review).
+func TraceFrom(ctx context.Context) *Trace {
+	if ctx == nil {
+		return nil
+	}
+	t, _ := ctx.Value(traceKey{}).(*Trace)
+	return t
+}
+
 func (t *Trace) append(e db.InterceptContextEntry) {
 	var cut bool
 	e.Text, cut = bounded(e.Text, entryLimit)

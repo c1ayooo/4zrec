@@ -8,16 +8,16 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/Autumn-27/norma/harness"
-	"github.com/Autumn-27/norma/llm"
+	"github.com/Autumn-27/artex/acllm"
+	"github.com/Autumn-27/artex/askernel"
 )
 
 func TestReasonHintCoversEveryTerminalReason(t *testing.T) {
-	all := []harness.TerminalReason{
-		harness.ReasonCompleted, harness.ReasonBlockingLimit, harness.ReasonImageError,
-		harness.ReasonModelError, harness.ReasonAbortedStreaming, harness.ReasonAbortedTools,
-		harness.ReasonPromptTooLong, harness.ReasonStopHookPrevented, harness.ReasonHookStopped,
-		harness.ReasonMaxTurns, harness.ReasonTimeout,
+	all := []askernel.TerminalReason{
+		askernel.ReasonCompleted, askernel.ReasonBlockingLimit, askernel.ReasonImageError,
+		askernel.ReasonModelError, askernel.ReasonAbortedStreaming, askernel.ReasonAbortedTools,
+		askernel.ReasonPromptTooLong, askernel.ReasonStopHookPrevented, askernel.ReasonHookStopped,
+		askernel.ReasonMaxTurns, askernel.ReasonTimeout,
 	}
 	for _, reason := range all {
 		if strings.TrimSpace(reasonHint[reason]) == "" {
@@ -67,11 +67,11 @@ func TestTerminalTextAbortedNamesCauseAndHangingTool(t *testing.T) {
 	cancel(AbortKilledByPlanner)
 	trace := &runTrace{startedAt: time.Now().Add(-90 * time.Second)}
 	trace.start("tu_1", "Bash", `{"command":"nmap -p- 10.0.0.1"}`)
-	term := &harness.Terminal{
-		Reason: harness.ReasonAbortedTools,
+	term := &askernel.Terminal{
+		Reason: askernel.ReasonAbortedTools,
 		Err:    context.Canceled,
 		Turns:  7,
-		Usage:  llm.Usage{InputTokens: 1200, OutputTokens: 340},
+		Usage:  acllm.Usage{InputTokens: 1200, OutputTokens: 340},
 	}
 	summary, detail := terminalText(ctx, term, trace)
 	if !strings.Contains(summary, "规划者") || strings.Contains(summary, "\n") {
@@ -87,7 +87,7 @@ func TestTerminalTextAbortedNamesCauseAndHangingTool(t *testing.T) {
 func TestTerminalTextDirectContextCancellationKeepsCause(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	cancel(AbortChatStoppedByUser)
-	summary, detail := terminalText(ctx, &harness.Terminal{Err: context.Canceled}, &runTrace{startedAt: time.Now()})
+	summary, detail := terminalText(ctx, &askernel.Terminal{Err: context.Canceled}, &runTrace{startedAt: time.Now()})
 	if !strings.Contains(summary, "用户停止") || !strings.Contains(detail, "chat_stopped_by_user") {
 		t.Fatalf("direct context cancellation lost cause: %q\n%s", summary, detail)
 	}
@@ -99,8 +99,8 @@ func TestTerminalTextDirectContextCancellationKeepsCause(t *testing.T) {
 func TestTerminalTextAbortedPreservesPartialOutput(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	cancel(AbortPausedByUser)
-	summary, detail := terminalText(ctx, &harness.Terminal{
-		Reason: harness.ReasonAbortedStreaming,
+	summary, detail := terminalText(ctx, &askernel.Terminal{
+		Reason: askernel.ReasonAbortedStreaming,
 		Text:   "已经生成的半段回答",
 	}, &runTrace{startedAt: time.Now()})
 	if !strings.Contains(summary, "用户暂停") {
@@ -117,7 +117,7 @@ func TestTerminalTextCompletedToolNotBlamed(t *testing.T) {
 	trace := &runTrace{startedAt: time.Now()}
 	trace.start("tu_1", "Read", `{"path":"/etc/hosts"}`)
 	trace.done("tu_1")
-	_, detail := terminalText(ctx, &harness.Terminal{Reason: harness.ReasonAbortedStreaming}, trace)
+	_, detail := terminalText(ctx, &askernel.Terminal{Reason: askernel.ReasonAbortedStreaming}, trace)
 	if strings.Contains(detail, "未返回结果") || !strings.Contains(detail, "已正常返回") {
 		t.Fatalf("completed tool was blamed:\n%s", detail)
 	}
@@ -125,12 +125,12 @@ func TestTerminalTextCompletedToolNotBlamed(t *testing.T) {
 
 func TestTerminalTextNonAbortReasons(t *testing.T) {
 	trace := &runTrace{startedAt: time.Now()}
-	summary, _ := terminalText(context.Background(), &harness.Terminal{Reason: harness.ReasonMaxTurns}, trace)
+	summary, _ := terminalText(context.Background(), &askernel.Terminal{Reason: askernel.ReasonMaxTurns}, trace)
 	if !strings.Contains(summary, "运行预算上限") || strings.Contains(summary, "中断") {
 		t.Fatalf("unexpected max_turns summary: %q", summary)
 	}
-	summary, detail := terminalText(context.Background(), &harness.Terminal{
-		Reason: harness.ReasonModelError, Err: errors.New("429 rate limited"),
+	summary, detail := terminalText(context.Background(), &askernel.Terminal{
+		Reason: askernel.ReasonModelError, Err: errors.New("429 rate limited"),
 	}, trace)
 	if !strings.Contains(summary, "model_error") || !strings.Contains(detail, "429 rate limited") {
 		t.Fatalf("model_error detail incomplete: %q\n%s", summary, detail)

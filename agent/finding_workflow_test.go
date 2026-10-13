@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	actool "github.com/Autumn-27/norma/tool"
+	actool "github.com/Autumn-27/artex/tools"
 )
 
 func TestFindingWorkflowSharedAssemblyAndSwitch(t *testing.T) {
@@ -28,7 +28,7 @@ func TestFindingWorkflowSharedAssemblyAndSwitch(t *testing.T) {
 			on = enabled
 			out, def, cleanup := AugmentTools(t.Context(), role, []actool.CoreTool{ts.addFinding(), ts.addHint()})
 			cleanup()
-			system, _ := deferredSystem("USER CUSTOM PROMPT", def)
+			system := deferredSystem("USER CUSTOM PROMPT", def)
 			if !strings.HasPrefix(system[0], "USER CUSTOM PROMPT") {
 				t.Fatal("custom prompt replaced")
 			}

@@ -5,59 +5,62 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Autumn-27/norma/llm"
-	actool "github.com/Autumn-27/norma/tool"
+	"github.com/Autumn-27/artex/acllm"
+	actool "github.com/Autumn-27/artex/tools"
 )
 
 func TestDeferredSystem_NoGlobal(t *testing.T) {
-	// No global MCP names → plain single-segment system, no cache boundary.
-	sys, boundary := deferredSystem("SYS", DeferredInfo{})
-	if len(sys) != 1 || sys[0] != "SYS" || boundary != 0 {
-		t.Fatalf("expected [SYS],0 — got %v,%d", sys, boundary)
+	// No global MCP names → plain single-segment system (the kernel renders the
+	// deferred block itself).
+	sys := deferredSystem("SYS", DeferredInfo{})
+	if len(sys) != 1 || sys[0] != "SYS" {
+		t.Fatalf("expected [SYS] — got %v", sys)
 	}
 }
 
 func TestDeferredSystem_WithGlobal(t *testing.T) {
+	// Finding guidance rides the host segment. The <available-deferred-tools>
+	// block itself is kernel-owned now (appended over Options.DeferredTools), so
+	// the host segment must NOT duplicate it.
 	def := DeferredInfo{
-		Deferred:    []string{"mcp__browser__navigate", "mcp__browser__click"},
-		GlobalNames: []string{"mcp__browser__navigate", "mcp__browser__click"},
+		Deferred:        []string{"mcp__browser__navigate", "mcp__browser__click"},
+		GlobalNames:     []string{"mcp__browser__navigate", "mcp__browser__click"},
+		FindingGuidance: "\n\n**guidance**",
 	}
-	sys, boundary := deferredSystem("SYS", def)
-	if len(sys) != 2 || sys[0] != "SYS" {
-		t.Fatalf("expected [SYS, block], got %v", sys)
+	sys := deferredSystem("SYS", def)
+	if len(sys) != 1 || !strings.HasPrefix(sys[0], "SYS") || !strings.Contains(sys[0], "**guidance**") {
+		t.Fatalf("expected [SYS+guidance], got %v", sys)
 	}
-	if !strings.Contains(sys[1], "<available-deferred-tools>") ||
-		!strings.Contains(sys[1], "mcp__browser__navigate") {
-		t.Fatalf("block missing names:\n%s", sys[1])
-	}
-	if boundary != len(sys) {
-		t.Fatalf("boundary=%d want %d (whole prompt cached)", boundary, len(sys))
+	if strings.Contains(sys[0], "<available-deferred-tools>") {
+		t.Fatalf("host segment must not duplicate the kernel's deferred block:\n%s", sys[0])
 	}
 }
 
-func TestDeferredSystem_GatedNotInBlock(t *testing.T) {
-	// A skill-gated server's tools are deferred but NOT in the global block.
-	def := DeferredInfo{
-		Deferred:    []string{"mcp__browser__navigate", "mcp__secret__do"},
-		GlobalNames: []string{"mcp__browser__navigate"}, // secret gated → excluded
+func TestSkillCallBlocksDetectableInDTO(t *testing.T) {
+	// The kernel block surfaces ALL deferred names (skill-gated included, gated
+	// by the unlock set instead); seedUnlockFromHistory is what re-arms those
+	// gates on resume, driven by Skill tool_use blocks in the DTO history.
+	skillCall := func(name string) acllm.ContentBlock {
+		return acllm.ContentBlock{Type: acllm.BlockToolUse, Name: "Skill", Input: json.RawMessage(`{"name":"` + name + `"}`)}
 	}
-	sys, _ := deferredSystem("SYS", def)
-	if strings.Contains(sys[1], "mcp__secret__do") {
-		t.Fatalf("gated tool must not appear in global block:\n%s", sys[1])
+	msgs := []acllm.Message{
+		{Role: acllm.RoleAssistant, Content: []acllm.ContentBlock{skillCall("browsing")}},
 	}
-	if !strings.Contains(sys[1], "mcp__browser__navigate") {
-		t.Fatal("global tool should appear in block")
+	var got []string
+	seedUnlockFromHistory(msgs, func(name string) { got = append(got, name) })
+	if len(got) != 1 || got[0] != "browsing" {
+		t.Fatalf("skill calls not detectable in the DTO history: %v", got)
 	}
 }
 
 func TestSeedUnlockFromHistory(t *testing.T) {
-	skillCall := func(name string) llm.ContentBlock {
-		return llm.ContentBlock{Type: llm.BlockToolUse, Name: "Skill", Input: json.RawMessage(`{"name":"` + name + `"}`)}
+	skillCall := func(name string) acllm.ContentBlock {
+		return acllm.ContentBlock{Type: acllm.BlockToolUse, Name: "Skill", Input: json.RawMessage(`{"name":"` + name + `"}`)}
 	}
-	msgs := []llm.Message{
-		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{skillCall("browsing")}},
-		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
-			{Type: llm.BlockToolUse, Name: "Bash", Input: json.RawMessage(`{}`)}, // ignored
+	msgs := []acllm.Message{
+		{Role: acllm.RoleAssistant, Content: []acllm.ContentBlock{skillCall("browsing")}},
+		{Role: acllm.RoleAssistant, Content: []acllm.ContentBlock{
+			{Type: acllm.BlockToolUse, Name: "Bash", Input: json.RawMessage(`{}`)}, // ignored
 			skillCall("recon"),
 		}},
 	}

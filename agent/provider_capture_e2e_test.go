@@ -3,28 +3,37 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/Autumn-27/artex/acllm"
 	"github.com/Autumn-27/artex/llmrec"
-	"github.com/Autumn-27/norma/llm"
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 )
 
-// End-to-end through a real norma provider: the Capture rides the context into
-// norma, survives its internal request building, and comes back holding the
-// exact bytes buildBody() put on the wire. This is the load-bearing assumption
-// of the whole feature — norma must propagate the caller's context down to
-// http.NewRequestWithContext.
-func TestCapturePropagatesThroughNormaProvider(t *testing.T) {
+// End-to-end through a real acllm provider (eino-ext claude adapter): the
+// Capture rides the context into the provider, survives its internal request
+// building, and comes back holding the exact bytes that went on the wire. This
+// is the load-bearing assumption of the whole feature — the provider must
+// propagate the caller's context down to http.NewRequestWithContext.
+func TestCapturePropagatesThroughProvider(t *testing.T) {
 	sse := strings.Join([]string{
 		`event: message_start`,
 		`data: {"type":"message_start","message":{"id":"msg_1","usage":{"input_tokens":11,"output_tokens":1}}}`,
 		``,
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+		``,
 		`event: content_block_delta`,
 		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}`,
+		``,
+		`event: content_block_stop`,
+		`data: {"type":"content_block_stop","index":0}`,
 		``,
 		`event: message_delta`,
 		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}}`,
@@ -49,36 +58,50 @@ func TestCapturePropagatesThroughNormaProvider(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cfg := Config{
-		Format:  llm.FormatAnthropic,
-		BaseURL: srv.URL,
-		APIKey:  "test-key",
-		Model:   "claude-test",
-	}
-	prov, err := cfg.NewProvider()
+	client, err := quotaAwareHTTPClient("", "")
 	if err != nil {
-		t.Fatalf("NewProvider: %v", err)
+		t.Fatalf("client: %v", err)
+	}
+	m, err := acllm.NewChatModel(context.Background(), acllm.Config{
+		Format:     acllm.FormatAnthropic,
+		BaseURL:    srv.URL,
+		APIKey:     "test-key",
+		Model:      "claude-test",
+		HTTPClient: client,
+	})
+	if err != nil {
+		t.Fatalf("NewChatModel: %v", err)
 	}
 
 	ctx, capt := llmrec.NewCapture(context.Background())
-	req := llm.CompletionRequest{
-		System:   []string{"you are a scanner"},
-		Messages: []llm.Message{{Role: "user", Content: []llm.ContentBlock{{Type: "text", Text: "go"}}}},
-		Tools: []llm.ToolSchema{{
-			Name:        "bash",
-			Description: "run a shell command",
-			InputSchema: map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "string"}}},
-		}},
-		MaxTokens: 1024,
+	input := []*schema.Message{
+		schema.SystemMessage("you are a scanner"),
+		schema.UserMessage("go"),
 	}
+	tools := []*schema.ToolInfo{{
+		Name: "bash",
+		Desc: "run a shell command",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"command": {Type: schema.String, Desc: "the command"},
+		}),
+	}}
 
 	var text strings.Builder
-	for ev, err := range prov.Stream(ctx, req) {
-		if err != nil {
-			t.Fatalf("stream: %v", err)
+	sr, serr := m.Stream(ctx, input, model.WithTools(tools), model.WithMaxTokens(1024))
+	if serr != nil {
+		t.Fatalf("stream: %v", serr)
+	}
+	defer sr.Close()
+	for {
+		msg, rerr := sr.Recv()
+		if rerr != nil {
+			if !errors.Is(rerr, io.EOF) {
+				t.Fatalf("recv: %v", rerr)
+			}
+			break
 		}
-		if ev.Type == llm.SETextDelta {
-			text.WriteString(ev.Text)
+		if msg != nil {
+			text.WriteString(msg.Content)
 		}
 	}
 	if text.String() != "hello" {
@@ -88,9 +111,9 @@ func TestCapturePropagatesThroughNormaProvider(t *testing.T) {
 		t.Fatalf("path=%q", gotPath)
 	}
 
-	// The raw request must be what norma actually sent, not the recorder's
-	// re-serialization — which is exactly why it carries fields the normalized
-	// view drops.
+	// The raw request must be what the provider actually sent, not the
+	// recorder's re-serialization — which is exactly why it carries fields the
+	// normalized view drops.
 	raw := capt.RawRequest()
 	if raw == "" {
 		t.Fatal("no raw request captured — context did not reach the transport")
@@ -105,17 +128,17 @@ func TestCapturePropagatesThroughNormaProvider(t *testing.T) {
 		t.Fatalf("raw request is not valid JSON: %v\n%s", err, raw)
 	}
 	if body["model"] != "claude-test" {
-		t.Errorf("model=%v want claude-test (absent from CompletionRequest)", body["model"])
+		t.Errorf("model=%v want claude-test (absent from the DTO call)", body["model"])
 	}
 	if body["stream"] != true {
 		t.Errorf("stream=%v want true", body["stream"])
 	}
 	// The full tool schema is the headline gain: the normalized view keeps names only.
-	tools, _ := body["tools"].([]any)
-	if len(tools) != 1 {
+	sentTools, _ := body["tools"].([]any)
+	if len(sentTools) != 1 {
 		t.Fatalf("tools=%v", body["tools"])
 	}
-	tool, _ := tools[0].(map[string]any)
+	tool, _ := sentTools[0].(map[string]any)
 	if tool["description"] != "run a shell command" {
 		t.Errorf("tool description missing: %v", tool)
 	}

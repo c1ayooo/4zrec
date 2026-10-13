@@ -3,7 +3,7 @@ package agent
 import (
 	"testing"
 
-	"github.com/Autumn-27/norma/llm"
+	"github.com/Autumn-27/artex/acllm"
 )
 
 func TestWorkerSessionIDIsStablePerIntent(t *testing.T) {
@@ -14,10 +14,10 @@ func TestWorkerSessionIDIsStablePerIntent(t *testing.T) {
 
 func TestWorkerChatMarkerOnlyMatchesItsNormalUserTurn(t *testing.T) {
 	requestID := "worker-message-123"
-	messages := []llm.Message{
-		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock(workerChatMarker(requestID))}},
-		llm.UserText(workerChatMarker("worker-message-other") + "\nother"),
-		llm.UserText(workerChatMarker(requestID) + "\nnew intent"),
+	messages := []acllm.Message{
+		{Role: acllm.RoleAssistant, Content: []acllm.ContentBlock{acllm.TextBlock(workerChatMarker(requestID))}},
+		acllm.UserText(workerChatMarker("worker-message-other") + "\nother"),
+		acllm.UserText(workerChatMarker(requestID) + "\nnew intent"),
 	}
 	if !hasWorkerChatMessage(messages, requestID) {
 		t.Fatal("expected the matching user turn to be detected")

@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/Autumn-27/norma/llm"
+	"github.com/cloudwego/eino/schema"
 )
 
 type roundTripperFunc func(*http.Request) (*http.Response, error)
@@ -110,17 +110,25 @@ func TestProviderDoesNotRetryExplicitQuota429(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	provider, err := ConfigFrom("openai", "test-model", upstream.URL, "test-key", "").NewProvider()
+	m, err := ConfigFrom("openai", "test-model", upstream.URL, "test-key", "").NewProvider()
 	if err != nil {
 		t.Fatal(err)
 	}
+	sr, serr := m.Stream(context.Background(), []*schema.Message{schema.UserMessage("ping")})
 	var streamErr error
-	for _, err := range provider.Stream(context.Background(), llm.CompletionRequest{
-		Messages: []llm.Message{llm.UserText("ping")},
-	}) {
-		if err != nil {
-			streamErr = err
+	if serr != nil {
+		streamErr = serr
+	} else {
+		for {
+			_, rerr := sr.Recv()
+			if rerr != nil {
+				if rerr.Error() != "EOF" && !strings.Contains(rerr.Error(), "EOF") {
+					streamErr = rerr
+				}
+				break
+			}
 		}
+		sr.Close()
 	}
 	if streamErr == nil || !IsQuotaExhaustedMessage(streamErr.Error()) {
 		t.Fatalf("expected explicit quota error, got %v", streamErr)

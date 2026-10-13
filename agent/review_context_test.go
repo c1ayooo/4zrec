@@ -10,8 +10,8 @@ import (
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/artex/intercept"
-	"github.com/Autumn-27/norma/llm"
-	"github.com/Autumn-27/norma/tool"
+	actool "github.com/Autumn-27/artex/tools"
+	"github.com/cloudwego/eino/schema"
 )
 
 // Real PostgreSQL + SDK hooks: Worker reviews receive the current call only.
@@ -59,28 +59,24 @@ func TestWorkerReviewContextAcrossToolCalls(t *testing.T) {
 		}
 		return intercept.Decision{Action: action, Message: "probe policy"}, nil
 	})
-	turn, executions := 0, 0
-	provider := captureUsageProvider{stream: func(_ context.Context, yield func(llm.StreamEvent, error) bool) {
-		turn++
-		events := []llm.StreamEvent{{Type: llm.SETextDelta, Text: "done"}, {Type: llm.SEMessageDelta, StopReason: "end_turn"}}
-		if turn <= 2 {
-			events = []llm.StreamEvent{
-				{Type: llm.SEToolUseStart, ToolID: fmt.Sprintf("call-%d", turn), ToolName: probeName},
-				{Type: llm.SEToolInputJSON, Text: fmt.Sprintf(`{"step":%d}`, turn)},
-				{Type: llm.SEMessageDelta, StopReason: "tool_use"},
-			}
-		}
-		for _, event := range events {
-			if !yield(event, nil) {
-				return
-			}
-		}
-	}}
-	probe := tool.Build(tool.Spec{Name: probeName, Schema: map[string]any{"type": "object"},
-		Run: func(context.Context, json.RawMessage, *tool.ToolContext) (tool.Result, error) {
+	// Turn 1/2 call the probe (step 1 allowed, step 2 denied by the reviewer),
+	// turn 3 answers with text — a full kernel run, not a hand-driven loop.
+	m := &fakeChatModel{}
+	m.script(
+		schema.AssistantMessage("", []schema.ToolCall{
+			{ID: "call-1", Function: schema.FunctionCall{Name: probeName, Arguments: `{"step":1}`}},
+		}),
+		schema.AssistantMessage("", []schema.ToolCall{
+			{ID: "call-2", Function: schema.FunctionCall{Name: probeName, Arguments: `{"step":2}`}},
+		}),
+		schema.AssistantMessage("done", nil),
+	)
+	executions := 0
+	probe := actool.Build(actool.Spec{Name: probeName, Schema: map[string]any{"type": "object"},
+		Run: func(context.Context, json.RawMessage, *actool.ToolContext) (actool.Result, error) {
 			executions++
 			_, err := ts.AddConstraint("deny", "禁止后续清理", "human")
-			return tool.Text("Created a new fixture; no existing file overwritten."), err
+			return actool.Text("Created a new fixture; no existing file overwritten."), err
 		},
 	})
 	workDir := t.TempDir()
@@ -92,8 +88,8 @@ func TestWorkerReviewContextAcrossToolCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	rawIntent, _ := json.Marshal(intentPayload)
-	worker := NewWorker(provider, "test-model", workDir, nil, 0, 3, probe)
-	_, _, err = worker.Execute(ctx, "test-agent", expID, nil, ts, &db.Node{ID: intentID, Payload: rawIntent}, guard.NewWithInterceptor(ic).Hooks(), nil, nil, nil)
+	worker := NewWorker(m, "test-model", workDir, nil, 0, 3, probe)
+	_, _, err = worker.Execute(ctx, "test-agent", expID, nil, ts, &db.Node{ID: intentID, Payload: rawIntent}, guardHooks(guard.NewWithInterceptor(ic)), nil, nil, nil)
 	runDir := ensureRunDir(workDir, expID, intentID)
 	if err != nil {
 		t.Fatal(err)

@@ -3,7 +3,7 @@ package agent
 import (
 	"testing"
 
-	"github.com/Autumn-27/norma/llm"
+	"github.com/Autumn-27/artex/acllm"
 )
 
 // TestConfigFromOpenAIResponses locks the openai-responses format wiring:
@@ -12,7 +12,7 @@ import (
 // must build a working provider for it.
 func TestConfigFromOpenAIResponses(t *testing.T) {
 	c := ConfigFrom("openai-responses", "gpt-5", "https://gw.example/v1/responses", "sk-x", "")
-	if c.Format != llm.FormatOpenAIResponses {
+	if c.Format != acllm.FormatOpenAIResponses {
 		t.Fatalf("format=%v, want FormatOpenAIResponses", c.Format)
 	}
 	if c.BaseURL != "https://gw.example/v1" {
