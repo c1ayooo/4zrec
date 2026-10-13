@@ -43,6 +43,17 @@ type Server struct {
 	engine *Engine
 	ctx    context.Context
 
+	// enrichMu guards enrichJobs: in-flight AI finding-enrichment jobs keyed by
+	// exploration node id (re-attach instead of double-running).
+	enrichMu   sync.Mutex
+	enrichJobs map[int64]*enrichJob
+
+	// reportMu guards reportJobs + the report generation workdir. dataDir is
+	// where generated .docx artifacts land before download.
+	reportMu   sync.Mutex
+	reportJobs map[string]*reportJob
+	dataDir    string
+
 	skillDir string // root directory for skill subdirectories
 	jwtKey   []byte // HS256 signing key loaded from / generated into dataDir/jwt.key
 
@@ -145,7 +156,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	if err != nil {
 		log.Fatalf("[auth] JWT key: %v", err)
 	}
-	s := &Server{m: m, engine: NewEngine(m), ctx: ctx, skillDir: skillDir, jwtKey: key, chatBusy: map[string]bool{},
+	s := &Server{m: m, engine: NewEngine(m), ctx: ctx, skillDir: skillDir, jwtKey: key, dataDir: dataDir, enrichJobs: map[int64]*enrichJob{}, reportJobs: map[string]*reportJob{}, chatBusy: map[string]bool{},
 		chatCancel: map[string]context.CancelCauseFunc{}, triggerQ: map[string][]triggeredRun{},
 		triggerActive: map[string]int{}, triggerCfg: map[string]triggerBehavior{},
 		profChatAgents: map[int64]*agent.ChatAgent{},
@@ -256,6 +267,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	go s.reconcileConcurrency()
 	s.startTaskArchiveWorker()
 	s.wireInterceptReviewer() // LLM 兜底审批:未命中拦截规则的命令交给模型判定
+	s.wireReport(skillDir)   // 报告子系统:LLM 补全注入 + skill 骨架落盘
 	return s
 }
 
@@ -798,6 +810,25 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/vulnintel", s.pgListVulnIntel)    // 漏洞情报流(自动抓取)
 	mux.HandleFunc("POST /api/vulnintel/refresh", s.pgVulnIntelRefresh)
 	mux.HandleFunc("GET /api/vulnintel/status", s.pgVulnIntelStatus)
+
+	// ---- 报告生成(AI 叙述 + 确定性渲染;GET /api/report 是基线 markdown 报告,已在上方注册)----
+	mux.HandleFunc("POST /api/report/generate", s.generateReport)
+	mux.HandleFunc("GET /api/report/status", s.reportStatus)
+	mux.HandleFunc("GET /api/report/download", s.downloadReport)
+	mux.HandleFunc("GET /api/report-settings", s.getReportSettings)
+	mux.HandleFunc("PUT /api/report-settings", s.putReportSettings)
+	mux.HandleFunc("POST /api/report-assets/logo", s.uploadReportLogo)
+	mux.HandleFunc("GET /api/report-assets/{file}", s.serveReportAsset)
+	mux.HandleFunc("GET /api/reports", s.listReports)
+	mux.HandleFunc("GET /api/reports/{id}/download", s.downloadReportByID)
+	mux.HandleFunc("DELETE /api/reports/{id}", s.deleteReportByID)
+	mux.HandleFunc("GET /api/report-templates", s.listReportTemplates)
+	mux.HandleFunc("POST /api/report-templates", s.createReportTemplate)
+	mux.HandleFunc("PUT /api/report-templates/{id}", s.updateReportTemplate)
+	mux.HandleFunc("DELETE /api/report-templates/{id}", s.deleteReportTemplate)
+	mux.HandleFunc("POST /api/tasks/{id}/extract-findings", s.extractFindings)
+	mux.HandleFunc("POST /api/findings/{id}/enrich", s.findingEnrich)
+	mux.HandleFunc("GET /api/findings/{id}/enrich/status", s.findingEnrichStatus)
 	mux.HandleFunc("GET /api/llm/records", s.pgListLLMRecords)
 	mux.HandleFunc("DELETE /api/llm/records", s.pgDeleteLLMRecords)
 	mux.HandleFunc("GET /api/llm/records/tasks", s.pgLLMTasks)

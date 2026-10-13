@@ -103,6 +103,10 @@ import type {
   UpdateCheck,
   UsageStats,
   VulnIntelEntry,
+  ReportJob,
+  ReportRecord,
+  ReportSettings,
+  ReportTemplate,
   VulnIntelStatus,
   VulnKBEntry,
   VulnKBStats,
@@ -1341,4 +1345,58 @@ export const api = {
   },
   vulnIntelRefresh: () => post<{ ok: boolean }>("/vulnintel/refresh"),
   vulnIntelStatus: () => get<VulnIntelStatus>("/vulnintel/status"),
-};
+
+  // ---- AI 报告生成(docx:确定性骨架 + LLM 叙述)----
+  reportGenerate: (
+    task?: string,
+    opts?: {
+      company?: string;
+      client?: string;
+      title?: string;
+      locale?: string;
+      findingIds?: string[];
+      templateId?: number;
+    },
+  ) => {
+    const qs = new URLSearchParams();
+    if (task) qs.set("task", task);
+    if (opts?.company) qs.set("company", opts.company);
+    if (opts?.client) qs.set("client", opts.client);
+    if (opts?.title) qs.set("title", opts.title);
+    if (opts?.locale) qs.set("locale", opts.locale);
+    if (opts?.findingIds && opts.findingIds.length) qs.set("finding_ids", opts.findingIds.join(","));
+    if (opts?.templateId) qs.set("template_id", String(opts.templateId));
+    return post<ReportJob>(`/report/generate?${qs.toString()}`, {});
+  },
+  reportStatus: (task?: string) => get<ReportJob>(`/report/status${task ? `?task=${task}` : ""}`),
+  reportDownloadUrl: (task?: string) => `/api/report/download${task ? `?task=${task}` : ""}`,
+  // 从任务会话转录补录漏洞(AI 提取被描述但未落库的确认漏洞)
+  extractFindings: (taskId: string) =>
+    post<{ extracted: number; created: number }>(`/tasks/${taskId}/extract-findings`, {}),
+  // ---- 报告管理(组织级设置 + 报告清单 + 命名模板)----
+  reportSettings: () => get<ReportSettings>(`/report-settings`),
+  saveReportSettings: (patch: Partial<ReportSettings>) => put<ReportSettings>(`/report-settings`, patch),
+  reports: () => get<ReportRecord[]>(`/reports`).then(arr),
+  reportRecordDownloadUrl: (id: number) => `/api/reports/${id}/download`,
+  deleteReport: (id: number) => del<{ ok: boolean }>(`/reports/${id}`),
+  reportTemplates: () => get<ReportTemplate[]>(`/report-templates`).then(arr),
+  createReportTemplate: (body: Partial<ReportTemplate>) => post<ReportTemplate>(`/report-templates`, body),
+  updateReportTemplate: (id: number, body: Partial<ReportTemplate>) =>
+    put<ReportTemplate>(`/report-templates/${id}`, body),
+  deleteReportTemplate: (id: number) => del<{ ok: boolean }>(`/report-templates/${id}`),
+  uploadReportLogo: async (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const token = getToken();
+    const r = await fetch(`/api/report-assets/logo`, {
+      method: "POST",
+      body: fd,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    const body = (await r.json().catch(() => ({}))) as { logo_path?: string; url?: string; error?: string };
+    if (!r.ok) throw new Error(body?.error || `上传失败(${r.status})`);
+    return body as { logo_path: string; url: string };
+  },
+
+}
+

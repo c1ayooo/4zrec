@@ -29,6 +29,7 @@ type DBFinding struct {
 	Summary         string
 	Evidence        string
 	Worker          string
+	Reproduction    json.RawMessage // agent 就地记录的结构化复现过程(可空);null=无(走事后富化兜底)
 	AssetIDs        []int64
 	Status          string
 	Report          string // 详细报告(Markdown);仅 GetFinding 填充,列表查询不带
@@ -791,4 +792,43 @@ func (d *DB) FindingMetaByNodeID(taskID int64) (map[int64]FindingMeta, error) {
 		out[nid] = m
 	}
 	return out, rows.Err()
+}
+
+// GetFindingByNodeID 按 exploration node id 取漏洞(报告富化/详情用;
+// findings.node_id 与节点一一对应)。
+func (d *DB) GetFindingByNodeID(nodeID int64) (*DBFinding, error) {
+	var f DBFinding
+	var taskID, nid sql.NullInt64
+	var repro []byte
+	err := d.QueryRow(`SELECT id, task_id, node_id, vulnclass, name, severity, summary,
+	       evidence, report, worker, status, created_at, reproduction
+	FROM findings WHERE node_id = $1 LIMIT 1`, nodeID,
+	).Scan(&f.ID, &taskID, &nid, &f.VulnClass, &f.Name, &f.Severity, &f.Summary,
+		&f.Evidence, &f.Report, &f.Worker, &f.Status, &f.CreatedAt, &repro)
+	if repro != nil {
+		f.Reproduction = json.RawMessage(repro)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if taskID.Valid {
+		t := taskID.Int64
+		f.TaskID = &t
+	}
+	if nid.Valid {
+		n := nid.Int64
+		f.NodeID = &n
+	}
+	return &f, nil
+}
+
+
+// SetFindingReproduction stores the agent-captured structured reproduction recipe
+// for the finding at nodeID (report_finding writes it inline). No-op on empty.
+func (d *DB) SetFindingReproduction(nodeID int64, repro json.RawMessage) error {
+	if len(repro) == 0 {
+		return nil
+	}
+	_, err := d.Exec(`UPDATE findings SET reproduction=$1 WHERE node_id=$2`, string(repro), nodeID)
+	return err
 }

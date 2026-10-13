@@ -489,6 +489,10 @@ export interface FindingAsset {
 }
 
 export interface Finding {
+  // enrichment summary(列表合并展示;AI 分析产出)
+  enr_name?: string;
+  enr_target?: string;
+  enriched?: boolean;
   traffic_count?: number;
   evidence_version?: number;
   report_evidence_version?: number;
@@ -1681,4 +1685,50 @@ export interface VulnIntelStatus {
   last: string;
   result: { New: number; Updated: number; Sources: number; Failed: number };
   sources: number;
+}
+
+// ---- AI 报告生成(docx 管线)----
+export interface ReportJob {
+  status: "idle" | "generating" | "done" | "failed";
+  filename?: string;
+  error?: string;
+  started_at?: string;
+}
+
+export interface ReportPersonnel {
+  name: string;
+  role: string;
+  contact: string;
+}
+
+export interface ReportSettings {
+  company_name: string;
+  company_name_en: string;
+  logo_path: string;
+  personnel: ReportPersonnel[];
+  cvss_version: string;
+  updated_at?: string;
+}
+
+export interface ReportRecord {
+  id: number;
+  task_id?: number;
+  task_desc: string;
+  filename: string;
+  size: number;
+  company: string;
+  created_at: string;
+}
+
+export interface ReportTemplate {
+  id: number;
+  name: string;
+  company_name: string;
+  company_name_en: string;
+  logo_path: string;
+  personnel: ReportPersonnel[];
+  cvss_version: string;
+  locale: string;
+  created_at?: string;
+  updated_at?: string;
 }

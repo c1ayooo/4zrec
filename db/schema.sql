@@ -1441,3 +1441,63 @@ ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS cwes TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS affected TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS lab_only BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS enriched_at TIMESTAMPTZ;
+
+-- 漏洞就地复现记录(agent report_finding 时写入的结构化配方,报告确定性渲染用)。
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS reproduction JSONB;
+
+-- §P 漏洞富化:AI 生成/人工编辑的结构化漏洞数据,覆盖在原始 finding 之上
+-- (不改节点 payload)。以 exploration 节点 id 为规范键;报告与发现页共用。
+CREATE TABLE IF NOT EXISTS finding_enrichment (
+    node_id      BIGINT PRIMARY KEY,
+    name         TEXT NOT NULL DEFAULT '',
+    target       TEXT NOT NULL DEFAULT '',
+    module       TEXT NOT NULL DEFAULT '',
+    severity     TEXT NOT NULL DEFAULT '',
+    status       TEXT NOT NULL DEFAULT 'open',
+    cvss_score   REAL NOT NULL DEFAULT 0,
+    cvss_vector  TEXT NOT NULL DEFAULT '',
+    cvss_metrics JSONB NOT NULL DEFAULT '{}'::jsonb,
+    description  JSONB NOT NULL DEFAULT '[]'::jsonb,
+    test_process JSONB NOT NULL DEFAULT '[]'::jsonb,
+    risk_analysis JSONB NOT NULL DEFAULT '[]'::jsonb,
+    remediation  JSONB NOT NULL DEFAULT '[]'::jsonb,
+    source       TEXT NOT NULL DEFAULT 'ai',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_finding_enrichment_status ON finding_enrichment(status);
+
+-- §Q 报告管理:组织级报告设置(单例) + 已生成报告清单 + 命名模板。
+CREATE TABLE IF NOT EXISTS report_settings (
+    id              INT PRIMARY KEY DEFAULT 1,
+    company_name    TEXT NOT NULL DEFAULT '',
+    company_name_en TEXT NOT NULL DEFAULT '',
+    logo_path       TEXT NOT NULL DEFAULT '',
+    personnel_json  JSONB NOT NULL DEFAULT '[]'::jsonb,
+    cvss_version    TEXT NOT NULL DEFAULT '3.1',
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT report_settings_singleton CHECK (id = 1)
+);
+CREATE TABLE IF NOT EXISTS reports (
+    id         BIGSERIAL PRIMARY KEY,
+    task_id    BIGINT,
+    task_desc  TEXT NOT NULL DEFAULT '',
+    filename   TEXT NOT NULL DEFAULT '',
+    path       TEXT NOT NULL DEFAULT '',
+    size       BIGINT NOT NULL DEFAULT 0,
+    company    TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_reports_created ON reports(created_at DESC);
+CREATE TABLE IF NOT EXISTS report_templates (
+    id              BIGSERIAL PRIMARY KEY,
+    name            TEXT NOT NULL DEFAULT '',
+    company_name    TEXT NOT NULL DEFAULT '',
+    company_name_en TEXT NOT NULL DEFAULT '',
+    logo_path       TEXT NOT NULL DEFAULT '',
+    personnel_json  JSONB NOT NULL DEFAULT '[]'::jsonb,
+    cvss_version    TEXT NOT NULL DEFAULT '3.1',
+    locale          TEXT NOT NULL DEFAULT 'zh-CN',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);

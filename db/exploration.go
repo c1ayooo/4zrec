@@ -2019,3 +2019,9 @@ func (s *ExplorationStore) ActivityByIDsForTerminalIntents(ids []int64) ([]Activ
 func (s *ExplorationStore) AddStandaloneFinding(taskID, nodeID int64, vulnclass, name, severity, summary, evidence, worker string, assetIDs []int64) (int64, error) {
 	return s.db.AddFinding(taskID, nodeID, vulnclass, name, severity, summary, evidence, worker, assetIDs)
 }
+
+// SetFindingReproduction stores the agent-captured structured reproduction recipe
+// for the finding at nodeID (report_finding writes it inline).
+func (s *ExplorationStore) SetFindingReproduction(nodeID int64, repro json.RawMessage) error {
+	return s.db.SetFindingReproduction(nodeID, repro)
+}
