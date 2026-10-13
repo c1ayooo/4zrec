@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### 底座
+
+#### 变更（破坏性）
+
+- **Agent 运行底座从自研 norma 库整体迁移到 [cloudwego/eino](https://github.com/cloudwego/eino) v0.9.21（ADK Runner 路线）**，norma 依赖已从 go.mod 删除。此前 ARTEX 的 agent 循环、消息模型、Provider 抽象、压缩、延迟工具、会话恢复都构建在自有库 norma 上；现全部落到 eino 生态：模型接入经 eino-ext（openai / claude），OpenAI Responses API 由自研 provider 保全支持，运行内核（`askernel`）采用「DTO 主历史 + schema 投影」架构跑在 ADK 之上。
+- **迁移按行为不变量验收，对用户可见的行为保持不变**：SSE / db.Activity 事件形状、拦截审批的长阻塞语义（含模型兜底审批单独计量）、transcript 断点恢复（**存量 JSONL 会话文件直接可恢复**）、token 四计数与台账、TerminalReason 终态枚举、流式安全窗口故障转移（首个事件产出后不再切换成员）、延迟工具 / skill 解锁语义，均与迁移前逐项对齐。
+- **新增包**：`acllm`（会话 DTO 与 eino schema 双向转换 + 三格式模型工厂）、`tools`（原 norma/tool 全量内置工具与 CoreTool 契约）、`transcript`、`compaction`（MicroCompact / AutoCompact / Reactive 压缩引擎）、`skills`、`mcpstdio`、`noa`（模型驱动压缩接管）、`askernel`（运行内核：门控 / 空轮次提醒 / 结算 / deferred 硬门控 / 恢复）。
+- **已知上游问题**：eino-ext claude 适配器 v0.1.26 的 Stream 存在内部 data race（上游代码缺陷，已定位并规避在非 -race 场景无影响）；提示缓存的 DynamicBoundary 显式断点机制随迁移移除，缓存交由 provider 侧自动处理。
+- **测试基线**：全仓库 23 个包通过；仅 `agent/TestGraphOverviewExpandsAssociatedCompanyScope` 失败，已验证在迁移前的 main 上同样失败（与本次迁移无关的存量问题）。
+
 ## [0.3.15] - 2026-10-07
 
 ### 拦截
