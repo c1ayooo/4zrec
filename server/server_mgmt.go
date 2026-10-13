@@ -23,10 +23,10 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Autumn-27/artex/acllm"
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/norma/llm"
-	"github.com/Autumn-27/norma/skill"
+	skill "github.com/Autumn-27/artex/skills"
 )
 
 // validSkillName checks the agentskills.io name constraints, widened so a skill can
@@ -1815,7 +1815,7 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 	if p.MaxTokens < 0 {
 		p.MaxTokens = 0
 	}
-	if p.Format != "openai" || p.MaxTokensField != llm.MaxTokensFieldCompletion {
+	if p.Format != "openai" || p.MaxTokensField != acllm.MaxTokensFieldCompletion {
 		p.MaxTokensField = ""
 	}
 	id, err := pg.SaveProfile(&p)

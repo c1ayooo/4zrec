@@ -165,7 +165,7 @@ func TestDetectPython(t *testing.T) {
 	}
 }
 
-// The http tool must truncate an oversized response through norma's Capture, the
+// The http tool must truncate an oversized response through tools.Capture, the
 // same valve every other tool uses — a session with no OutputDir falls back to a
 // head+tail cut, so a body far past the default cap comes back shortened.
 func TestHTTPToolTruncatesLargeBody(t *testing.T) {

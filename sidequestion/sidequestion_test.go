@@ -132,7 +132,7 @@ func TestCheckpointDeepCopyAndBoundaries(t *testing.T) {
 	p := Bind(fakeModel{generate: func(context.Context, []*schema.Message, []model.Option) (*schema.Message, error) {
 		return assistantSchema("finished"), nil
 	}}, Model{Model: "actual"})
-	ctx, decorated := Attach(WithPublisher(t.Context(), sink.publish), Parent{ConversationID: 1}, p)
+	ctx, decorated, _ := Attach(WithPublisher(t.Context(), sink.publish), Parent{ConversationID: 1}, p)
 	req := fixture()
 	input := callInput(req)
 	if _, err := decorated.Generate(ctx, input); err != nil {
@@ -194,7 +194,7 @@ func TestSnapshotExcludesPartialStreamAndSelectsPoolMember(t *testing.T) {
 		return schema.StreamReaderFromArray([]*schema.Message{assistantSchema("complete")}), nil
 	}}, Model{Model: "selected"})
 	pool := failoverModel{members: []model.ToolCallingChatModel{failed, good}}
-	ctx, decorated := Attach(WithPublisher(t.Context(), sink.publish), Parent{ConversationID: 2}, pool)
+	ctx, decorated, _ := Attach(WithPublisher(t.Context(), sink.publish), Parent{ConversationID: 2}, pool)
 	sr, err := decorated.Stream(ctx, callInput(fixture()))
 	if err != nil {
 		t.Fatal(err)
@@ -349,7 +349,7 @@ func TestMainSideConcurrencyAndIndependentCancellation(t *testing.T) {
 			defer stopSide()
 			var sink snapshotSink
 			bound := Bind(p, Model{Model: "blocking"})
-			mainCtx, decorated := Attach(WithPublisher(mainCtx, sink.publish), Parent{ConversationID: 3}, bound)
+			mainCtx, decorated, _ := Attach(WithPublisher(mainCtx, sink.publish), Parent{ConversationID: 3}, bound)
 			mainDone, sideDone := make(chan struct{}), make(chan Answer, 1)
 			go func() {
 				defer close(mainDone)

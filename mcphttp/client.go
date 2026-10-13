@@ -23,9 +23,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Autumn-27/norma/llm"
-	"github.com/Autumn-27/norma/permission"
-	actool "github.com/Autumn-27/norma/tool"
+	"github.com/Autumn-27/artex/acllm"
+	"github.com/Autumn-27/artex/tools"
 )
 
 const protocolVersion = "2025-06-18"
@@ -255,7 +254,7 @@ func (c *Client) initialize(ctx context.Context) error {
 }
 
 // Tools lists the server's tools and adapts them to CoreTools.
-func (c *Client) Tools(ctx context.Context) ([]actool.CoreTool, error) {
+func (c *Client) Tools(ctx context.Context) ([]tools.CoreTool, error) {
 	raw, err := c.call(ctx, "tools/list", map[string]any{})
 	if err != nil {
 		return nil, err
@@ -266,7 +265,7 @@ func (c *Client) Tools(ctx context.Context) ([]actool.CoreTool, error) {
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return nil, err
 	}
-	out := make([]actool.CoreTool, 0, len(res.Tools))
+	out := make([]tools.CoreTool, 0, len(res.Tools))
 	for _, rt := range res.Tools {
 		out = append(out, c.wrap(rt))
 	}
@@ -279,27 +278,27 @@ type remoteTool struct {
 	InputSchema map[string]any `json:"inputSchema"`
 }
 
-func (c *Client) wrap(rt remoteTool) actool.CoreTool {
+func (c *Client) wrap(rt remoteTool) tools.CoreTool {
 	schema := rt.InputSchema
 	if schema == nil {
 		schema = map[string]any{"type": "object"}
 	}
 	full := ToolName(c.server, rt.Name)
-	return actool.Build(actool.Spec{
+	return tools.Build(tools.Spec{
 		Name:        full,
 		Description: rt.Description,
 		Schema:      schema,
-		Permissions: func(context.Context, json.RawMessage, permission.Context) permission.Decision {
-			return permission.AskUser("call MCP tool " + full + "?")
+		Permissions: func(context.Context, json.RawMessage, tools.Context) tools.Decision {
+			return tools.AskUser("call MCP tool " + full + "?")
 		},
-		Run: func(ctx context.Context, in json.RawMessage, tc *actool.ToolContext) (actool.Result, error) {
+		Run: func(ctx context.Context, in json.RawMessage, tc *tools.ToolContext) (tools.Result, error) {
 			var args any
 			if len(in) > 0 {
 				_ = json.Unmarshal(in, &args)
 			}
 			raw, err := c.call(ctx, "tools/call", map[string]any{"name": rt.Name, "arguments": args})
 			if err != nil {
-				return actool.Errorf("Error: " + err.Error()), nil
+				return tools.Errorf("Error: " + err.Error()), nil
 			}
 			var res struct {
 				Content []struct {
@@ -309,7 +308,7 @@ func (c *Client) wrap(rt remoteTool) actool.CoreTool {
 				IsError bool `json:"isError"`
 			}
 			if err := json.Unmarshal(raw, &res); err != nil {
-				return actool.Errorf("Error: bad MCP response: " + err.Error()), nil
+				return tools.Errorf("Error: bad MCP response: " + err.Error()), nil
 			}
 			var text string
 			for _, blk := range res.Content {
@@ -318,7 +317,7 @@ func (c *Client) wrap(rt remoteTool) actool.CoreTool {
 			// 与内置/自定义工具一致：超长输出走 Capture——按会话 MaxOutputChars（默认
 			// 30000）截断，配了 ToolOutputDir 时全量溢写到磁盘只留 head + 指针，避免大
 			// MCP 结果整段灌爆上下文。
-			return actool.Result{Content: []llm.ContentBlock{llm.TextBlock(actool.Capture(tc, text))}, IsError: res.IsError}, nil
+			return tools.Result{Content: []acllm.ContentBlock{acllm.TextBlock(tools.Capture(tc, text))}, IsError: res.IsError}, nil
 		},
 	})
 }

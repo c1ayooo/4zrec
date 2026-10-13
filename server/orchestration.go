@@ -11,8 +11,8 @@ import (
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/norma/permission"
-	actool "github.com/Autumn-27/norma/tool"
+
+	actool "github.com/Autumn-27/artex/tools"
 )
 
 // jsonResult marshals v to a JSON tool result.
@@ -122,8 +122,8 @@ func roTool(name, desc string, schema map[string]any, run func(context.Context, 
 		Name: name, Description: desc, Schema: schema,
 		ReadOnly:   func(json.RawMessage) bool { return true },
 		Concurrent: func(json.RawMessage) bool { return true },
-		Permissions: func(context.Context, json.RawMessage, permission.Context) permission.Decision {
-			return permission.Allowed()
+		Permissions: func(context.Context, json.RawMessage, actool.Context) actool.Decision {
+			return actool.Allowed()
 		},
 		Run: func(ctx context.Context, in json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
 			return run(ctx, in)
@@ -134,8 +134,8 @@ func roTool(name, desc string, schema map[string]any, run func(context.Context, 
 func wrTool(name, desc string, schema map[string]any, run func(context.Context, json.RawMessage) (actool.Result, error)) actool.CoreTool {
 	return actool.Build(actool.Spec{
 		Name: name, Description: desc, Schema: schema,
-		Permissions: func(context.Context, json.RawMessage, permission.Context) permission.Decision {
-			return permission.Allowed()
+		Permissions: func(context.Context, json.RawMessage, actool.Context) actool.Decision {
+			return actool.Allowed()
 		},
 		Run: func(ctx context.Context, in json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
 			return run(ctx, in)

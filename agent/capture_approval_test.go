@@ -93,7 +93,7 @@ func TestCaptureApprovalLifecycle(t *testing.T) {
 					return actool.Text("probe succeeded"), nil
 				},
 			})
-			_, _, err := captureRun(ctx, askernel.Options{Model: m, Tools: []actool.CoreTool{probe}, Hooks: guardHooks(g),
+			_, _, err := captureRun(ctx, askernel.Options{Model: m, Tools: []actool.CoreTool{probe}, Hooks: g.Hooks(),
 				PermissionMode: actool.ModeBypass, WorkingDir: t.TempDir(), MaxTurns: 2}, "record this review", nil)
 			if err != nil {
 				t.Fatal(err)

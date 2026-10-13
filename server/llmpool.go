@@ -7,7 +7,7 @@ import (
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/llmpool"
-	"github.com/Autumn-27/norma/llm"
+	"github.com/cloudwego/eino/components/model"
 )
 
 // LLM 轮询(故障转移)的服务端接线。设计见 docs/LLM轮询设计.md：
@@ -77,7 +77,7 @@ func (s *Server) poolMember(p *db.LLMProfile, rank int) *llmpool.Member {
 //
 // Returns nil when failover is off or the chain has fewer than two usable members
 // — callers then use the bare provider, which is byte-for-byte the old behavior.
-func (s *Server) poolChain(headID int64, headProv llm.Provider, headCfg agent.Config) *llmpool.Pool {
+func (s *Server) poolChain(headID int64, headProv model.ToolCallingChatModel, headCfg agent.Config) *llmpool.Pool {
 	if s.m == nil || s.m.pg == nil || !s.m.LLMPoolEnabled() {
 		return nil
 	}
@@ -127,7 +127,7 @@ func (s *Server) poolChain(headID int64, headProv llm.Provider, headCfg agent.Co
 
 // poolForActive wraps the globally-active provider in the failover chain. Returns
 // prov unchanged when failover is off or there's nothing to fall back to.
-func (s *Server) poolForActive(activeID int64, prov llm.Provider, cfg agent.Config) llm.Provider {
+func (s *Server) poolForActive(activeID int64, prov model.ToolCallingChatModel, cfg agent.Config) model.ToolCallingChatModel {
 	pool := s.poolChain(activeID, prov, cfg)
 	if pool == nil {
 		return prov
@@ -144,7 +144,7 @@ func (s *Server) poolForActive(activeID int64, prov llm.Provider, cfg agent.Conf
 // Only active when both the failover master switch and the bound-fallback switch
 // are on; otherwise a bound profile stays exclusive (fails hard), which is the
 // default and the documented precedence.
-func (s *Server) poolForBinding(id int64, prov llm.Provider, cfg agent.Config) llm.Provider {
+func (s *Server) poolForBinding(id int64, prov model.ToolCallingChatModel, cfg agent.Config) model.ToolCallingChatModel {
 	if s.m == nil || !s.m.LLMPoolEnabled() || !s.m.LLMPoolBindFallback() {
 		return prov
 	}

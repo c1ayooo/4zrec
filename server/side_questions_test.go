@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"iter"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -14,47 +13,64 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Autumn-27/artex/acllm"
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/sidequestion"
-	"github.com/Autumn-27/norma/harness"
-	"github.com/Autumn-27/norma/llm"
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 )
 
+// sideHTTPProvider is an eino fake for the side-question HTTP surface. Stream
+// serves the (cancel-aware) streamed side answer; Generate serves the history
+// summary — the service's summary path is a non-streaming call. The scripted
+// summary callback receives the model input and returns the summary message.
 type sideHTTPProvider struct {
-	started chan llm.CompletionRequest
+	started chan []*schema.Message
 	release chan struct{}
-	summary func(context.Context, llm.CompletionRequest) (llm.Message, llm.Usage, error)
+	summary func(context.Context, []*schema.Message) (*schema.Message, error)
 }
 
-func (p *sideHTTPProvider) Stream(ctx context.Context, req llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
-	return func(y func(llm.StreamEvent, error) bool) {
-		p.started <- req
-		if !y(llm.StreamEvent{Type: llm.SEMessageStart, Usage: llm.Usage{InputTokens: 19}}, nil) {
+func usageMeta(tokens int) *schema.ResponseMeta {
+	return &schema.ResponseMeta{Usage: &schema.TokenUsage{PromptTokens: tokens}}
+}
+
+func (p *sideHTTPProvider) Stream(ctx context.Context, input []*schema.Message, _ ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	p.started <- input
+	out, sw := schema.Pipe[*schema.Message](3)
+	go func() {
+		defer sw.Close()
+		first := schema.AssistantMessage("", nil)
+		first.ResponseMeta = usageMeta(19)
+		if sw.Send(first, nil) {
 			return
 		}
-		if !y(llm.StreamEvent{Type: llm.SETextDelta, Text: "partial answer"}, nil) {
+		if sw.Send(schema.AssistantMessage("partial answer", nil), nil) {
 			return
 		}
 		select {
 		case <-p.release:
-			y(llm.StreamEvent{Type: llm.SEMessageStop}, nil)
+			last := schema.AssistantMessage("", nil)
+			last.ResponseMeta = usageMeta(19)
+			sw.Send(last, nil)
 		case <-ctx.Done():
-			y(llm.StreamEvent{}, ctx.Err())
+			sw.Send(nil, ctx.Err())
 		}
-	}
+	}()
+	return out, nil
 }
-func (p *sideHTTPProvider) Complete(ctx context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
-	if req.Thinking == "disabled" && p.summary != nil {
-		msg, usage, err := p.summary(ctx, req)
-		return msg, "end_turn", usage, err
+
+func (p *sideHTTPProvider) Generate(ctx context.Context, input []*schema.Message, _ ...model.Option) (*schema.Message, error) {
+	if p.summary != nil {
+		return p.summary(ctx, input)
 	}
-	for _, err := range p.Stream(ctx, req) {
-		if err != nil {
-			return llm.Message{}, "", llm.Usage{}, err
-		}
-	}
-	return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock("atomic answer")}}, "end_turn", llm.Usage{InputTokens: 19}, nil
+	msg := schema.AssistantMessage("atomic answer", nil)
+	msg.ResponseMeta = usageMeta(19)
+	return msg, nil
+}
+
+func (p *sideHTTPProvider) WithTools([]*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	return p, nil
 }
 
 func TestSideHTTPPreparationCancellationAndClear(t *testing.T) {
@@ -76,13 +92,17 @@ func TestSideHTTPPreparationCancellationAndClear(t *testing.T) {
 				}
 			}
 			started := make(chan struct{})
-			f.provider.summary = func(ctx context.Context, req llm.CompletionRequest) (llm.Message, llm.Usage, error) {
-				if len(req.Tools) != 0 {
-					t.Error("summary has tools")
+			f.provider.summary = func(ctx context.Context, input []*schema.Message) (*schema.Message, error) {
+				for _, m := range input {
+					if len(m.ToolCalls) != 0 {
+						t.Error("summary has tools")
+					}
 				}
 				close(started)
 				<-ctx.Done()
-				return llm.UserText("late summary"), llm.Usage{InputTokens: 17}, nil
+				late := schema.AssistantMessage("late summary", nil)
+				late.ResponseMeta = usageMeta(17)
+				return late, nil
 			}
 			e := decodeSide(t, f.call(t, "POST", path, map[string]string{"question": "follow-up", "client_request_id": "new"}, 202))
 			select {
@@ -147,8 +167,8 @@ func newSideHTTPFixture(t *testing.T) *sideHTTPFixture {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{m: m, engine: NewEngine(m), ctx: ctx, jwtKey: []byte("btw-test-signing-key-only"), chatBusy: map[string]bool{}}
 	s.initSideQuestions()
-	p := &sideHTTPProvider{started: make(chan llm.CompletionRequest, 16), release: make(chan struct{})}
-	cfg := agent.Config{Format: llm.FormatOpenAI, BaseURL: "http://fixture.invalid", Model: "fixture", Stream: true}
+	p := &sideHTTPProvider{started: make(chan []*schema.Message, 16), release: make(chan struct{})}
+	cfg := agent.Config{Format: acllm.FormatOpenAI, BaseURL: "http://fixture.invalid", Model: "fixture", Stream: true}
 	s.cfgMu.Lock()
 	s.llmCfg = cfg
 	s.llmOn = true
@@ -193,7 +213,7 @@ func (f *sideHTTPFixture) conversation(t *testing.T) (sidequestion.Parent, strin
 }
 func (f *sideHTTPFixture) checkpoint(t *testing.T, p sidequestion.Parent) sidequestion.Snapshot {
 	t.Helper()
-	snap := sidequestion.Snapshot{Parent: p, RunID: time.Now().UnixNano(), Version: 1, CapturedAt: time.Now().UTC(), Model: sideModel(f.s.llmCfg, 0, "fixture"), Request: llm.CompletionRequest{MaxTokens: 128, Messages: []llm.Message{llm.UserText("main context marker")}}}
+	snap := sidequestion.Snapshot{Parent: p, RunID: time.Now().UnixNano(), Version: 1, CapturedAt: time.Now().UTC(), Model: sideModel(f.s.llmCfg, 0, "fixture"), Request: sidequestion.ModelCall{MaxTokens: 128, Messages: []acllm.Message{acllm.UserText("main context marker")}}}
 	if err := f.m.pg.SaveSideSnapshot(t.Context(), snap); err != nil {
 		t.Fatal(err)
 	}
@@ -235,8 +255,9 @@ func TestSideHTTPBusyIsolationClearAndReconnect(t *testing.T) {
 	f.s.chatMu.Unlock()
 	e := decodeSide(t, f.call(t, "POST", path, map[string]string{"question": "question", "client_request_id": "one"}, 202))
 	select {
-	case req := <-f.provider.started:
-		if !strings.Contains(req.Messages[0].Text(), "main context marker") {
+	case input := <-f.provider.started:
+		blob, _ := json.Marshal(input)
+		if !strings.Contains(string(blob), "main context marker") {
 			t.Fatal("missing checkpoint")
 		}
 	case <-time.After(time.Second):
@@ -356,12 +377,21 @@ func TestSideCheckpointPersistsBeforeAdmissionAndRestart(t *testing.T) {
 	f := newSideHTTPFixture(t)
 	p, path := f.conversation(t)
 	bound := bindSideProvider(f.provider, f.s.llmCfg, 0, "fixture")
-	ctx, deps := sidequestion.Attach(f.s.ctx, p, harness.QueryDeps{}, bound)
+	var wrapped bool
+	ctx, bound, wrapped := sidequestion.Attach(f.s.ctx, p, bound)
+	_ = wrapped
 	mainCtx, stopMain := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for range deps.CallModel(mainCtx, llm.CompletionRequest{Messages: []llm.Message{llm.UserText("live checkpoint")}, MaxTokens: 128}) {
+		sr, err := bound.Stream(mainCtx, []*schema.Message{schema.UserMessage("live checkpoint")}, model.WithMaxTokens(128))
+		if err != nil {
+			return
+		}
+		for {
+			if _, err := sr.Recv(); err != nil {
+				break
+			}
 		}
 	}()
 	select {
@@ -521,9 +551,10 @@ func TestSideRestoredWorkerRuntimePublishesNewCheckpoint(t *testing.T) {
 	p := sidequestion.Parent{TaskID: id, ExplorationID: task.ExpID, IntentID: iid}
 	close(f.provider.release)
 	bound := bindSideProvider(f.provider, f.s.llmCfg, 0, "fixture")
-	ctx, deps := sidequestion.Attach(runtime.ctx, p, harness.QueryDeps{}, bound)
-	_, _, _, err = deps.CallModelSync(ctx, llm.CompletionRequest{Messages: []llm.Message{llm.UserText("after restart context")}})
-	if err != nil {
+	var wrapped bool
+	ctx, bound, wrapped := sidequestion.Attach(runtime.ctx, p, bound)
+	_ = wrapped
+	if _, err = bound.Generate(ctx, []*schema.Message{schema.UserMessage("after restart context")}); err != nil {
 		t.Fatal(err)
 	}
 	f.s.flushSideSnapshots()

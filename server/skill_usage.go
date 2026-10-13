@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Autumn-27/norma/skill"
-	actool "github.com/Autumn-27/norma/tool"
+	skill "github.com/Autumn-27/artex/skills"
+	actool "github.com/Autumn-27/artex/tools"
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
@@ -20,7 +20,7 @@ const maxLedgerSkillName = 128
 
 // meteredSkill wraps the Skill meta-tool to append one skill_usage row per call.
 // The metering lives here rather than in Registry.OnInvoke because OnInvoke only
-// receives the resolved Skill: it never fires for an unknown skill name (norma
+// receives the resolved Skill: it never fires for an unknown skill name (the
 // returns a tool error before the hook) and it cannot see the caller's args. Both
 // matter — a miss tells you which procedure the agents wished existed.
 type meteredSkill struct {
@@ -52,7 +52,7 @@ func (m *meteredSkill) record(input json.RawMessage) {
 		Args string `json:"args"`
 	}
 	if err := json.Unmarshal(input, &in); err != nil {
-		return // malformed call; norma will reject it too
+		return // malformed call; the kernel rejects it too
 	}
 	name := strings.TrimSpace(in.Name)
 	if name == "" {

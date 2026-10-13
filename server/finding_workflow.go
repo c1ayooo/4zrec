@@ -10,8 +10,8 @@ import (
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
+	actool "github.com/Autumn-27/artex/tools"
 	"github.com/Autumn-27/artex/traffic"
-	actool "github.com/Autumn-27/norma/tool"
 )
 
 func (s *Server) seedFindingWorkflowTools() {

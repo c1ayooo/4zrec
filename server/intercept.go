@@ -9,13 +9,13 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
-	"strings"
 
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/artex/llmrec"
-	"github.com/Autumn-27/norma/llm"
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 )
 
 // judgeWorkerLane is the usage-ledger "worker" label for intercept fallback-judge
@@ -61,7 +61,7 @@ func (s *Server) wireInterceptReviewer() {
 	})
 }
 
-func reviewCompletion(ctx context.Context, prov llm.Provider, prompt string, input intercept.ReviewInput) (string, error) {
+func reviewCompletion(ctx context.Context, prov model.ToolCallingChatModel, prompt string, input intercept.ReviewInput) (string, error) {
 	user, err := json.Marshal(input)
 	if err != nil {
 		return "", err
@@ -69,28 +69,21 @@ func reviewCompletion(ctx context.Context, prov llm.Provider, prompt string, inp
 	return streamCollectText(ctx, prov, prompt, string(user))
 }
 
-// streamCollectText runs a single non-streaming-style completion (thinking off,
-// low temperature, bounded output) and returns the concatenated text. The
-// budget includes the explanation and complete closing JSON delimiters.
-func streamCollectText(ctx context.Context, prov llm.Provider, system, user string) (string, error) {
-	temp := 0.0
-	req := llm.CompletionRequest{
-		System:      []string{system},
-		Messages:    []llm.Message{llm.UserText(user)},
-		MaxTokens:   1024,
-		Temperature: &temp,
-		Thinking:    "disabled",
+// streamCollectText runs a single one-shot completion (low temperature, bounded
+// output) and returns the reply text. The budget includes the explanation and
+// complete closing JSON delimiters. (eino seam: the old norma Streaming Provider
+// + text-delta collection collapses to one Generate call; thinking is a profile
+// Config concern now and no longer per-request.)
+func streamCollectText(ctx context.Context, prov model.ToolCallingChatModel, system, user string) (string, error) {
+	msg, err := prov.Generate(ctx,
+		[]*schema.Message{schema.SystemMessage(system), schema.UserMessage(user)},
+		model.WithMaxTokens(1024),
+		model.WithTemperature(0),
+	)
+	if err != nil {
+		return "", err
 	}
-	var sb strings.Builder
-	for ev, err := range prov.Stream(ctx, req) {
-		if err != nil {
-			return "", err
-		}
-		if ev.Type == llm.SETextDelta {
-			sb.WriteString(ev.Text)
-		}
-	}
-	return sb.String(), nil
+	return msg.Content, nil
 }
 
 // --- intercept rule CRUD ---

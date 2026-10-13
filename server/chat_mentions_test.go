@@ -15,7 +15,7 @@ import (
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/norma/llm"
+	"github.com/cloudwego/eino/schema"
 )
 
 func TestChatMentionParsing(t *testing.T) {
@@ -144,10 +144,10 @@ func TestChatMentionWorkerReceivesServerDetails(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer m.pg.DeleteFinding(fid)
-	requests := make(chan llm.CompletionRequest, 10)
-	worker := agent.NewWorker(retestProvider{complete: func(_ context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
-		requests <- req
-		return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock("已读取引用")}}, "end_turn", llm.Usage{}, nil
+	requests := make(chan []*schema.Message, 10)
+	worker := agent.NewWorker(retestProvider{complete: func(_ context.Context, input []*schema.Message) (*schema.Message, error) {
+		requests <- input
+		return schema.AssistantMessage("已读取引用", nil), nil
 	}}, "test", m.dir, nil, 10000, 1)
 	worker.SetNonStreaming(func() bool { return true })
 	s.engine.SetAuthoritativeAgentResolver(func(*Task) (*agent.Planner, *agent.Worker) {
@@ -176,7 +176,7 @@ func TestChatMentionWorkerReceivesServerDetails(t *testing.T) {
 	}
 	select {
 	case req := <-requests:
-		blob, _ := json.Marshal(req.Messages)
+		blob, _ := json.Marshal(req)
 		if !strings.Contains(string(blob), "worker-hidden-proof") || !strings.Contains(string(blob), "用户引用的记录快照") {
 			t.Fatalf("worker missing reference details: %s", blob)
 		}
@@ -302,12 +302,12 @@ func TestChatMentionCatalogAndContext(t *testing.T) {
 
 func TestChatMentionConversationReceivesServerDetails(t *testing.T) {
 	s, fid := newRetestServer(t)
-	setRetestProvider(s, retestProvider{complete: func(_ context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
-		blob, _ := json.Marshal(req.Messages)
+	setRetestProvider(s, retestProvider{complete: func(_ context.Context, input []*schema.Message) (*schema.Message, error) {
+		blob, _ := json.Marshal(input)
 		if !strings.Contains(string(blob), "original proof") || !strings.Contains(string(blob), "用户引用的记录快照") {
 			t.Errorf("model did not receive resolved evidence: %s", blob)
 		}
-		return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock("已读取引用")}}, "end_turn", llm.Usage{}, nil
+		return schema.AssistantMessage("已读取引用", nil), nil
 	}})
 	c, err := s.m.pg.CreateConversation("auto", "引用测试", nil)
 	if err != nil {

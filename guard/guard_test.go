@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Autumn-27/norma/hook"
+	"github.com/Autumn-27/artex/askernel"
 )
 
 // A guard with no interceptor no longer hard-blocks anything: destructive/exfil
@@ -36,4 +36,4 @@ func TestPreToolUsePassthrough(t *testing.T) {
 	}
 }
 
-var _ = hook.PreToolUse
+var _ = askernel.PreToolUse

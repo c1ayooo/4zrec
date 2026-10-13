@@ -2,47 +2,48 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"sync/atomic"
 	"testing"
 
-	"github.com/Autumn-27/norma/llm"
+	"github.com/Autumn-27/artex/acllm"
 )
 
 // 空转回合(仅思考、无正文无工具)的识别与续跑，见 steerHooks.Stop。
 
-func assistantThinking(text string) llm.Message {
-	return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
-		{Type: llm.BlockThinking, Thinking: text, Signature: "sig"},
+func assistantThinking(text string) acllm.Message {
+	return acllm.Message{Role: acllm.RoleAssistant, Content: []acllm.ContentBlock{
+		{Type: acllm.BlockThinking, Thinking: text, Signature: "sig"},
 	}}
 }
 
 func TestIsThinkingOnlyTurn(t *testing.T) {
-	toolUse := llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
-		{Type: llm.BlockThinking, Thinking: "先扫端口"},
-		{Type: llm.BlockToolUse, ID: "t1", Name: "run_nuclei"},
+	toolUse := acllm.Message{Role: acllm.RoleAssistant, Content: []acllm.ContentBlock{
+		{Type: acllm.BlockThinking, Thinking: "先扫端口"},
+		{Type: acllm.BlockToolUse, ID: "t1", Name: "run_nuclei"},
 	}}
 	cases := []struct {
 		name string
-		msgs []llm.Message
+		msgs []acllm.Message
 		want bool
 	}{
-		{"仅思考", []llm.Message{llm.UserText("开始"), assistantThinking("想想")}, true},
-		{"思考+工具", []llm.Message{llm.UserText("开始"), toolUse}, false},
-		{"思考+正文", []llm.Message{assistantThinking("想想"), {
-			Role:    llm.RoleAssistant,
-			Content: []llm.ContentBlock{{Type: llm.BlockThinking, Thinking: "x"}, llm.TextBlock("结论")},
+		{"仅思考", []acllm.Message{acllm.UserText("开始"), assistantThinking("想想")}, true},
+		{"思考+工具", []acllm.Message{acllm.UserText("开始"), toolUse}, false},
+		{"思考+正文", []acllm.Message{assistantThinking("想想"), {
+			Role:    acllm.RoleAssistant,
+			Content: []acllm.ContentBlock{{Type: acllm.BlockThinking, Thinking: "x"}, acllm.TextBlock("结论")},
 		}}, false},
-		{"正文只有空白字符", []llm.Message{{
-			Role:    llm.RoleAssistant,
-			Content: []llm.ContentBlock{{Type: llm.BlockThinking, Thinking: "x"}, llm.TextBlock("  \n ")},
+		{"正文只有空白字符", []acllm.Message{{
+			Role:    acllm.RoleAssistant,
+			Content: []acllm.ContentBlock{{Type: acllm.BlockThinking, Thinking: "x"}, acllm.TextBlock("  \n ")},
 		}}, true},
-		{"完全空的 assistant 回合", []llm.Message{{Role: llm.RoleAssistant}}, true},
+		{"完全空的 assistant 回合", []acllm.Message{{Role: acllm.RoleAssistant}}, true},
 		// 工具结果是 user 角色，判定必须回溯到它前面那条 assistant，而不是就近误判。
-		{"最后一条是工具结果", []llm.Message{toolUse, {
-			Role:    llm.RoleUser,
-			Content: []llm.ContentBlock{{Type: llm.BlockToolResult, ToolUseID: "t1"}},
+		{"最后一条是工具结果", []acllm.Message{toolUse, {
+			Role:    acllm.RoleUser,
+			Content: []acllm.ContentBlock{{Type: acllm.BlockToolResult, ToolUseID: "t1"}},
 		}}, false},
-		{"没有 assistant 消息", []llm.Message{llm.UserText("开始")}, false},
+		{"没有 assistant 消息", []acllm.Message{acllm.UserText("开始")}, false},
 		{"空历史", nil, false},
 	}
 	for _, c := range cases {
@@ -61,16 +62,16 @@ type fakeHooks struct {
 	msg      string
 }
 
-func (f fakeHooks) PreToolUse(context.Context, string, []byte) (bool, string, []byte) {
+func (fakeHooks) PreToolUse(context.Context, string, json.RawMessage) (bool, string, json.RawMessage) {
 	return false, "", nil
 }
-func (f fakeHooks) PostToolUse(context.Context, string, []byte, []byte, bool) {}
-func (f fakeHooks) Stop(context.Context, []llm.Message) (bool, []string, string) {
+func (fakeHooks) PostToolUse(context.Context, string, json.RawMessage, string, bool) {}
+func (f fakeHooks) Stop(context.Context, []acllm.Message) (bool, []string, string) {
 	return f.prevent, f.blocking, f.msg
 }
 
 func TestSteerHooksStopNudgesEmptyTurn(t *testing.T) {
-	empty := []llm.Message{assistantThinking("我应该先枚举子域名")}
+	empty := []acllm.Message{assistantThinking("我应该先枚举子域名")}
 
 	t.Run("空转回合注入续跑指令", func(t *testing.T) {
 		h := steerHooks{nudges: &atomic.Int64{}, limit: defaultEmptyTurnNudges, label: "worker-1 · #1"}
@@ -85,9 +86,9 @@ func TestSteerHooksStopNudgesEmptyTurn(t *testing.T) {
 
 	t.Run("有正文或工具时不介入", func(t *testing.T) {
 		h := steerHooks{nudges: &atomic.Int64{}, limit: defaultEmptyTurnNudges}
-		normal := []llm.Message{{
-			Role:    llm.RoleAssistant,
-			Content: []llm.ContentBlock{llm.TextBlock("已完成扫描，未发现开放端口")},
+		normal := []acllm.Message{{
+			Role:    acllm.RoleAssistant,
+			Content: []acllm.ContentBlock{acllm.TextBlock("已完成扫描，未发现开放端口")},
 		}}
 		if _, blocking, _ := h.Stop(context.Background(), normal); blocking != nil {
 			t.Fatalf("正常收场被误判为空转: %v", blocking)

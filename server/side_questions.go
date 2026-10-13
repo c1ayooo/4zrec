@@ -19,8 +19,8 @@ import (
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/artex/sidequestion"
-	"github.com/Autumn-27/norma/llm"
-	"github.com/Autumn-27/norma/transcript"
+	"github.com/Autumn-27/artex/transcript"
+	"github.com/cloudwego/eino/components/model"
 )
 
 type sideRun struct {
@@ -46,7 +46,7 @@ func sideModel(cfg agent.Config, id int64, name string) sidequestion.Model {
 	return sidequestion.Model{ProfileID: id, Name: name, Format: string(cfg.Format), Model: cfg.Model, Identity: hex.EncodeToString(h[:]), Streaming: cfg.Stream, WindowTokens: cfg.CompactionWindow()}
 }
 
-func bindSideProvider(p llm.Provider, cfg agent.Config, id int64, name string) llm.Provider {
+func bindSideProvider(p model.ToolCallingChatModel, cfg agent.Config, id int64, name string) model.ToolCallingChatModel {
 	return sidequestion.Bind(p, sideModel(cfg, id, name))
 }
 
@@ -185,23 +185,23 @@ func (s *Server) cancelWorkerSide(taskID string, expID, iid int64) {
 	s.cancelSideWhere(func(parent sidequestion.Parent) bool { return parent == p })
 }
 
-func (s *Server) sideProvider(model sidequestion.Model) (llm.Provider, error) {
-	var p llm.Provider
+func (s *Server) sideProvider(m sidequestion.Model) (model.ToolCallingChatModel, error) {
+	var p model.ToolCallingChatModel
 	var cfg agent.Config
 	var ok bool
-	if model.ProfileID > 0 {
+	if m.ProfileID > 0 {
 		// Validate the persisted reference even if a previous provider is cached.
-		current, exists := s.loadProfileConfig(model.ProfileID)
-		if !exists || sideModel(current, model.ProfileID, model.Name).Identity != model.Identity {
+		current, exists := s.loadProfileConfig(m.ProfileID)
+		if !exists || sideModel(current, m.ProfileID, m.Name).Identity != m.Identity {
 			return nil, errors.New("模型配置已删除或变化，请先运行主 Agent 更新上下文")
 		}
-		p, cfg, ok = s.providerForProfile(model.ProfileID)
+		p, cfg, ok = s.providerForProfile(m.ProfileID)
 	} else {
 		s.cfgMu.Lock()
 		p, cfg, ok = s.llmDirect, s.llmCfg, s.llmOn
 		s.cfgMu.Unlock()
 	}
-	if !ok || p == nil || sideModel(cfg, model.ProfileID, model.Name).Identity != model.Identity {
+	if !ok || p == nil || sideModel(cfg, m.ProfileID, m.Name).Identity != m.Identity {
 		return nil, errors.New("模型配置已删除或变化，请先运行主 Agent 更新上下文")
 	}
 	return p, nil
@@ -418,7 +418,7 @@ func (s *Server) handleSideQuestions(w http.ResponseWriter, r *http.Request, p s
 	writeJSON(w, 202, e)
 }
 
-func (s *Server) runSide(ctx context.Context, cancel context.CancelFunc, e sidequestion.Exchange, parent sidequestion.Parent, provider llm.Provider, snapshot sidequestion.Snapshot, agentQuestion string) {
+func (s *Server) runSide(ctx context.Context, cancel context.CancelFunc, e sidequestion.Exchange, parent sidequestion.Parent, provider model.ToolCallingChatModel, snapshot sidequestion.Snapshot, agentQuestion string) {
 	defer cancel()
 	defer func() {
 		s.side.mu.Lock()

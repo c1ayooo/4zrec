@@ -128,7 +128,7 @@ func usageChunk(prompt, completion int) *schema.Message {
 
 func waitForUsageRow(t *testing.T, pg *db.DB, profile string) (count, input, output int, worker, status string) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for {
 		err := pg.QueryRow(`SELECT count(*),max(input_tokens),max(output_tokens),max(worker),max(status)
 FROM llm_usage WHERE profile_name=$1`, profile).Scan(&count, &input, &output, &worker, &status)

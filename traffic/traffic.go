@@ -31,8 +31,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/norma/permission"
-	actool "github.com/Autumn-27/norma/tool"
+	"github.com/Autumn-27/artex/tools"
 	mproxy "github.com/lqqyt2423/go-mitmproxy/proxy"
 	_ "modernc.org/sqlite"
 )
@@ -1997,13 +1996,13 @@ func normalizeSearchHost(raw string) (host, port string, err error) {
 
 // Tools exposes traffic lookup to work agents so they query already-captured
 // traffic instead of re-curling the same resource (token + dedup win).
-func (t *Traffic) Tools() []actool.CoreTool {
-	allow := func(context.Context, json.RawMessage, permission.Context) permission.Decision {
-		return permission.Allowed()
+func (t *Traffic) Tools() []tools.CoreTool {
+	allow := func(context.Context, json.RawMessage, tools.Context) tools.Decision {
+		return tools.Allowed()
 	}
 	ro := func(json.RawMessage) bool { return true }
 
-	search := actool.Build(actool.Spec{
+	search := tools.Build(tools.Spec{
 		Name:        "traffic_search",
 		Description: TrafficSearchDescription,
 		Schema: map[string]any{
@@ -2019,7 +2018,7 @@ func (t *Traffic) Tools() []actool.CoreTool {
 		},
 		ReadOnly:    ro,
 		Permissions: allow,
-		Run: func(_ context.Context, in json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
+		Run: func(_ context.Context, in json.RawMessage, _ *tools.ToolContext) (tools.Result, error) {
 			var a struct {
 				Host, Contains string
 				BodyContains   string `json:"body_contains"`
@@ -2028,14 +2027,14 @@ func (t *Traffic) Tools() []actool.CoreTool {
 			}
 			_ = json.Unmarshal(in, &a)
 			if strings.TrimSpace(a.Host) == "" {
-				return actool.Errorf("host 为必填参数：请指定裸主机、主机:端口或完整 URL，避免全库扫描。"), nil
+				return tools.Errorf("host 为必填参数：请指定裸主机、主机:端口或完整 URL，避免全库扫描。"), nil
 			}
 			rows, err := t.query(a.Host, a.Contains, a.BodyContains, a.Page, a.Limit)
 			if err != nil {
-				return actool.Errorf(err.Error()), nil
+				return tools.Errorf(err.Error()), nil
 			}
 			if len(rows) == 0 {
-				return actool.Text("无匹配流量。"), nil
+				return tools.Text("无匹配流量。"), nil
 			}
 			// 精简为最小索引：仅保留定位所需字段 + 响应码/长度，不带任何响应内容。
 			type liteRow struct {
@@ -2050,11 +2049,11 @@ func (t *Traffic) Tools() []actool.CoreTool {
 				lite = append(lite, liteRow{ID: r.ID, Method: r.Method, URL: r.URL, Status: r.Status, RespLen: r.RespLen})
 			}
 			b, _ := json.Marshal(lite)
-			return actool.Text(string(b)), nil
+			return tools.Text(string(b)), nil
 		},
 	})
 
-	get := actool.Build(actool.Spec{
+	get := tools.Build(tools.Spec{
 		Name:        "traffic_get",
 		Description: "按 id 取一条已抓流量的请求/响应原文（过大会截断）。配合 traffic_search 用，避免重复 curl。",
 		Schema: map[string]any{
@@ -2064,18 +2063,18 @@ func (t *Traffic) Tools() []actool.CoreTool {
 		},
 		ReadOnly:    ro,
 		Permissions: allow,
-		Run: func(_ context.Context, in json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
+		Run: func(_ context.Context, in json.RawMessage, _ *tools.ToolContext) (tools.Result, error) {
 			var a struct{ ID string }
 			_ = json.Unmarshal(in, &a)
 			req, resp, err := t.Get(a.ID)
 			if err != nil {
-				return actool.Errorf(err.Error()), nil
+				return tools.Errorf(err.Error()), nil
 			}
-			return actool.Text("=== REQUEST ===\n" + clip(req, 2500) + "\n\n=== RESPONSE ===\n" + clip(resp, 4000)), nil
+			return tools.Text("=== REQUEST ===\n" + clip(req, 2500) + "\n\n=== RESPONSE ===\n" + clip(resp, 4000)), nil
 		},
 	})
 
-	blob := actool.Build(actool.Spec{
+	blob := tools.Build(tools.Spec{
 		Name:        "traffic_blob",
 		Description: "分段读取超大请求/响应体的原文。traffic_get 里显示为 '…[truncated] @blob sha256:<hash>' 的部分即存放于此，把该 hash 传进来即可取完整内容。单次最多返回 8KB，用 offset 继续往后读（返回结果会给出总长度）。适合翻阅备份文件、源码泄露、大 JSON 导出等超过内联阈值的响应。",
 		Schema: map[string]any{
@@ -2089,7 +2088,7 @@ func (t *Traffic) Tools() []actool.CoreTool {
 		},
 		ReadOnly:    ro,
 		Permissions: allow,
-		Run: func(_ context.Context, in json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
+		Run: func(_ context.Context, in json.RawMessage, _ *tools.ToolContext) (tools.Result, error) {
 			var a struct {
 				Hash   string
 				Offset int64
@@ -2101,26 +2100,26 @@ func (t *Traffic) Tools() []actool.CoreTool {
 			}
 			data, total, err := t.BlobRange(a.Hash, a.Offset, a.Length)
 			if err != nil {
-				return actool.Errorf(err.Error()), nil
+				return tools.Errorf(err.Error()), nil
 			}
 			if len(data) == 0 {
-				return actool.Text(fmt.Sprintf("偏移 %d 已超出内容长度（总长 %d 字节）。", a.Offset, total)), nil
+				return tools.Text(fmt.Sprintf("偏移 %d 已超出内容长度（总长 %d 字节）。", a.Offset, total)), nil
 			}
 			head := fmt.Sprintf("[offset=%d 本次=%d 总长=%d]\n", a.Offset, len(data), total)
 			if isBinaryBody("", data) {
-				return actool.Text(head + "二进制内容，以十六进制展示前 512 字节：\n" + hex.EncodeToString(clipBytes(data, 512))), nil
+				return tools.Text(head + "二进制内容，以十六进制展示前 512 字节：\n" + hex.EncodeToString(clipBytes(data, 512))), nil
 			}
-			return actool.Text(head + truncateUTF8(data, len(data))), nil
+			return tools.Text(head + truncateUTF8(data, len(data))), nil
 		},
 	})
 
-	return []actool.CoreTool{search, get, blob}
+	return []tools.CoreTool{search, get, blob}
 }
 
 // SeedToolMetas returns the traffic tools built on a ZERO receiver, for seeding the
 // tools catalog (metadata only — Name/Description/InputSchema). The handlers close
 // over the nil receiver but are never invoked on this instance, so it is safe.
-func SeedToolMetas() []actool.CoreTool { return (&Traffic{}).Tools() }
+func SeedToolMetas() []tools.CoreTool { return (&Traffic{}).Tools() }
 
 func clip(s string, max int) string {
 	if len(s) <= max {

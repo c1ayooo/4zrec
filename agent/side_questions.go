@@ -30,8 +30,9 @@ func attachSideCapture(ctx context.Context, opts *askernel.Options) context.Cont
 		return ctx
 	}
 	inner := opts.Model
-	ctx, opts.Model = sidequestion.Attach(ctx, p, inner)
-	if opts.Model != inner && opts.Compaction != nil && opts.CompactionSummarizer == nil {
+	var wrapped bool
+	ctx, opts.Model, wrapped = sidequestion.Attach(ctx, p, inner)
+	if wrapped && opts.Compaction != nil && opts.CompactionSummarizer == nil {
 		// 内置压缩的摘要调用绕过 checkpoint 捕获(辅助补全不抢主循环快照)。
 		opts.CompactionSummarizer = compaction.NewModelSummarizer(inner, opts.MaxTokens, opts.NonStreaming)
 	}

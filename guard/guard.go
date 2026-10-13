@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Autumn-27/artex/askernel"
 	"github.com/Autumn-27/artex/intercept"
-	"github.com/Autumn-27/norma/hook"
 )
 
 // AuditEntry records one gated tool call.
@@ -32,7 +32,7 @@ type Guard struct {
 	mu          sync.Mutex
 	audit       []AuditEntry
 	attrib      map[string]int // failure attribution counts (Observer / G5)
-	reg         *hook.Registry
+	reg         *askernel.Registry
 	interceptor *intercept.Interceptor // optional; nil disables user-configured rules
 }
 
@@ -45,16 +45,16 @@ func NewWithInterceptor(ic *intercept.Interceptor) *Guard { return newGuard(ic) 
 
 func newGuard(ic *intercept.Interceptor) *Guard {
 	g := &Guard{attrib: map[string]int{}, interceptor: ic}
-	g.reg = hook.NewRegistry().
-		On(hook.PreToolUse, g.preToolUse).
-		On(hook.PostToolUse, g.postToolUse)
+	g.reg = askernel.NewRegistry().
+		On(askernel.PreToolUse, g.preToolUse).
+		On(askernel.PostToolUse, g.postToolUse)
 	return g
 }
 
 // Hooks returns the hook registry to attach to an agent session.
-func (g *Guard) Hooks() *hook.Registry { return g.reg }
+func (g *Guard) Hooks() *askernel.Registry { return g.reg }
 
-func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
+func (g *Guard) preToolUse(ctx context.Context, ev askernel.Event) askernel.Result {
 	// Extract the shell-command surface for the audit log: Bash + the interactive-shell
 	// tools (shell_open's command, shell_send's text). Destructive/exfil gating is no
 	// longer hard-coded here — it now lives in the DB intercept rules, evaluated by
@@ -80,12 +80,12 @@ func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
 
 // applyIntercept evaluates user-configured intercept rules against the tool call.
 // Both rules and the fallback judge receive the complete tool input.
-func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
+func (g *Guard) applyIntercept(ctx context.Context, ev askernel.Event) askernel.Result {
 	if g.interceptor == nil {
-		return hook.Result{}
+		return askernel.Result{}
 	}
 	if !g.interceptor.IsToolEnabled(ev.ToolName) {
-		return hook.Result{}
+		return askernel.Result{}
 	}
 	ctx = intercept.WithCall(ctx, ev.ToolName, ev.Input)
 	dec, matched := g.interceptor.Match(ev.ToolName, ev.Input)
@@ -94,7 +94,7 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
 		// or unwired, keep current behavior and allow.
 		d, judged := g.interceptor.Judge(ctx, ev.ToolName, ev.Input)
 		if !judged {
-			return hook.Result{}
+			return askernel.Result{}
 		}
 		dec = d
 	}
@@ -106,7 +106,7 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
 	case "allow":
 		// Record explicit rule and model approvals so review details remain auditable.
 		g.interceptor.Log(ctx, intercept.ConvIDFromContext(ctx), dec, ev.ToolName, ev.Input, "allowed")
-		return hook.Result{}
+		return askernel.Result{}
 	case "ask":
 		// If the worker context is already cancelled (task stopped / killed), block
 		// immediately without creating a pending record — avoids orphaned DB entries
@@ -118,9 +118,9 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
 		if !g.interceptor.HandleAsk(ctx, convID, dec, ev.ToolName, ev.Input) {
 			return g.block(ev.ToolName, systemBlockMessage("人工审批未通过（用户拒绝或审批超时）"), "")
 		}
-		return hook.Result{}
+		return askernel.Result{}
 	}
-	return hook.Result{}
+	return askernel.Result{}
 }
 
 // systemBlockMessage frames an intercept block as an ARTEX platform-governance
@@ -145,9 +145,9 @@ var reBlocked = regexp.MustCompile(`(?i)\b(403|forbidden|waf|blocked|rate.?limit
 // postToolUse is the Observer failure-attribution hook (G5): it classifies tool
 // results into blocked / error / ok so the planner can change strategy instead
 // of giving up at a WAF.
-func (g *Guard) postToolUse(_ context.Context, ev hook.Event) hook.Result {
+func (g *Guard) postToolUse(_ context.Context, ev askernel.Event) askernel.Result {
 	if ev.ToolName != "Bash" {
-		return hook.Result{}
+		return askernel.Result{}
 	}
 	class := "ok"
 	switch {
@@ -159,7 +159,7 @@ func (g *Guard) postToolUse(_ context.Context, ev hook.Event) hook.Result {
 	g.mu.Lock()
 	g.attrib[class]++
 	g.mu.Unlock()
-	return hook.Result{}
+	return askernel.Result{}
 }
 
 // Attributions returns failure-attribution counts (Observer / G5).
@@ -173,9 +173,9 @@ func (g *Guard) Attributions() map[string]int {
 	return out
 }
 
-func (g *Guard) block(tool, reason, cmd string) hook.Result {
+func (g *Guard) block(tool, reason, cmd string) askernel.Result {
 	g.record(tool, "block", reason, cmd)
-	return hook.Result{Decision: "block", Message: reason}
+	return askernel.Result{Decision: "block", Message: reason}
 }
 
 func (g *Guard) record(tool, action, reason, cmd string) {

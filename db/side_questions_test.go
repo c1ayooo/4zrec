@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Autumn-27/artex/acllm"
 	"github.com/Autumn-27/artex/sidequestion"
-	"github.com/Autumn-27/norma/llm"
 )
 
 func sideFixture(t *testing.T) (*DB, sidequestion.Snapshot) {
@@ -25,7 +25,7 @@ func sideFixture(t *testing.T) (*DB, sidequestion.Snapshot) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = d.DeleteConversation(c.ID) })
-	s := sidequestion.Snapshot{Parent: sidequestion.Parent{ConversationID: c.ID}, RunID: 1, Version: 1, CapturedAt: time.Now().UTC(), Model: sidequestion.Model{Model: "fixture"}, Request: llm.CompletionRequest{Messages: []llm.Message{llm.UserText("main-only")}}}
+	s := sidequestion.Snapshot{Parent: sidequestion.Parent{ConversationID: c.ID}, RunID: 1, Version: 1, CapturedAt: time.Now().UTC(), Model: sidequestion.Model{Model: "fixture"}, Request: sidequestion.ModelCall{Messages: []acllm.Message{acllm.UserText("main-only")}}}
 	if err = d.SaveSideSnapshot(t.Context(), s); err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestSideTaskArchiveVersions(t *testing.T) {
 			memories := make(map[string]sidequestion.Memory)
 			contextInfo := sidequestion.ContextInfo{Phase: "answering", RecentExchanges: 20, HistorySummarized: true, SnapshotSummarized: true, EstimatedInputTokens: 12000, InputBudget: 16000, OutputTokens: 2048}
 			for _, intent := range []int64{0, iid} {
-				s := sidequestion.Snapshot{Parent: sidequestion.Parent{TaskID: task.ID, ExplorationID: task.ExplorationID, IntentID: intent}, RunID: 1, Version: 2, CapturedAt: time.Now().UTC(), Request: llm.CompletionRequest{Messages: []llm.Message{llm.UserText("archived main context")}}}
+				s := sidequestion.Snapshot{Parent: sidequestion.Parent{TaskID: task.ID, ExplorationID: task.ExplorationID, IntentID: intent}, RunID: 1, Version: 2, CapturedAt: time.Now().UTC(), Request: sidequestion.ModelCall{Messages: []acllm.Message{acllm.UserText("archived main context")}}}
 				if err = d.SaveSideSnapshot(t.Context(), s); err != nil {
 					t.Fatal(err)
 				}

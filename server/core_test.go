@@ -72,9 +72,12 @@ func TestCoreTaskLifecyclePG(t *testing.T) {
 		t.Fatalf("bad task payload: %v", out)
 	}
 
-	// the exploration owns goal node(s) — goal seeding is async, poll briefly
+	// the exploration owns goal node(s) — goal seeding is async, poll briefly.
+	// The eino-era retry ladder (same-provider pre-commit retries with backoff)
+	// delays the LLM-less raw-goal fallback when any profile is configured, so
+	// the poll must outlast it (500ms + 1s backoff × attempts, plus load jitter).
 	var goals []*db.Node
-	for i := 0; i < 30; i++ {
+	for i := 0; i < 200; i++ {
 		goals, err = m.pg.Exploration(expID).ListByKind("goal", 10)
 		if err != nil || len(goals) > 0 {
 			break

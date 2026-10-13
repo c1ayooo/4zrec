@@ -10,9 +10,9 @@ import (
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
+	skill "github.com/Autumn-27/artex/skills"
+	actool "github.com/Autumn-27/artex/tools"
 	"github.com/Autumn-27/artex/traffic"
-	"github.com/Autumn-27/norma/skill"
-	actool "github.com/Autumn-27/norma/tool"
 )
 
 // wireAgentAugment connects the PG agent_visibility table into the agent runtime:

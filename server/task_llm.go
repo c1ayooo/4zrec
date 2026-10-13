@@ -18,7 +18,7 @@ import (
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/llmpool"
 	"github.com/Autumn-27/artex/llmrec"
-	"github.com/Autumn-27/norma/transcript"
+	"github.com/Autumn-27/artex/transcript"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 )

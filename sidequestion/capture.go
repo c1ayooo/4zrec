@@ -108,15 +108,18 @@ type Capture struct {
 }
 
 // Attach returns ctx plus a model decorator that marks every call made through
-// it as a main-loop model attempt. Snapshots are only written when a publisher
-// is installed on ctx; without one the inner model is returned unchanged.
-func Attach(ctx context.Context, parent Parent, inner model.ToolCallingChatModel) (context.Context, model.ToolCallingChatModel) {
+// it as a main-loop model attempt, and whether the decorator actually wrapped
+// (callers must not compare the model interface values for identity — provider
+// implementations need not be comparable). Snapshots are only written when a
+// publisher is installed on ctx; without one the inner model is returned
+// unchanged and wrapped is false.
+func Attach(ctx context.Context, parent Parent, inner model.ToolCallingChatModel) (context.Context, model.ToolCallingChatModel, bool) {
 	publish, _ := ctx.Value(publisherKey{}).(Publisher)
 	if publish == nil || inner == nil {
-		return ctx, inner
+		return ctx, inner, false
 	}
 	c := &Capture{parent: parent, runID: time.Now().UnixNano(), publish: publish}
-	return context.WithValue(ctx, captureKey{}, c), &captureModel{capture: c, next: inner}
+	return context.WithValue(ctx, captureKey{}, c), &captureModel{capture: c, next: inner}, true
 }
 
 // captureModel is the marking decorator: it injects the attempt marker into

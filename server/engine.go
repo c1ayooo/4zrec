@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -11,11 +12,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Autumn-27/artex/acllm"
 	"github.com/Autumn-27/artex/agent"
+	"github.com/Autumn-27/artex/askernel"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
-	"github.com/Autumn-27/norma/harness"
-	"github.com/Autumn-27/norma/llm"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -79,8 +80,8 @@ var errWorkControlConflict = errors.New("work control conflict")
 // retryableWorkerModelError excludes errors already handled by the task router.
 // In particular, a quota error after partial streaming advances the task cursor
 // for the next LLM call but must not replay this whole intent on the backup.
-func retryableWorkerModelError(reason harness.TerminalReason, err error) bool {
-	return reason == harness.ReasonModelError && !isTaskLLMRuntimeError(err)
+func retryableWorkerModelError(reason askernel.TerminalReason, err error) bool {
+	return reason == askernel.ReasonModelError && !isTaskLLMRuntimeError(err)
 }
 
 // Engine drives the event-driven exploration loop with real LLM agents
@@ -529,7 +530,7 @@ func (e *Engine) drainSteer(intentID int64) (string, bool) {
 // of running the tool. No queued message → the guard behaves exactly as before.
 // 它同时负责「空转回合」的续跑，见 Stop。
 type steerHooks struct {
-	inner harness.HookRunner
+	inner askernel.HookRunner
 	drain func() (string, bool)
 	// nudges 是本条意图已注入的空转续跑次数，上限 limit。指针:harness 持有的是
 	// steerHooks 的值拷贝，计数必须共享同一份。
@@ -564,10 +565,10 @@ const emptyTurnNudge = "【空转提醒】你上一轮只输出了思考过程�
 
 // isThinkingOnlyTurn reports whether the latest assistant turn produced neither
 // text nor a tool call — i.e. the model spent the whole round thinking.
-func isThinkingOnlyTurn(messages []llm.Message) bool {
+func isThinkingOnlyTurn(messages []acllm.Message) bool {
 	for i := len(messages) - 1; i >= 0; i-- {
 		m := messages[i]
-		if m.Role != llm.RoleAssistant {
+		if m.Role != acllm.RoleAssistant {
 			continue
 		}
 		return strings.TrimSpace(m.Text()) == "" && len(m.ToolUses()) == 0
@@ -575,7 +576,7 @@ func isThinkingOnlyTurn(messages []llm.Message) bool {
 	return false
 }
 
-func (h steerHooks) PreToolUse(ctx context.Context, name string, input []byte) (bool, string, []byte) {
+func (h steerHooks) PreToolUse(ctx context.Context, name string, input json.RawMessage) (bool, string, json.RawMessage) {
 	if msg, ok := h.drain(); ok {
 		return true, "【规划者实时纠偏】" + msg +
 			"\n（这是规划者对本意图的即时指令；本次工具调用未执行，请据此调整下一步。若与你当前打算冲突，以此为准。）", nil
@@ -586,7 +587,7 @@ func (h steerHooks) PreToolUse(ctx context.Context, name string, input []byte) (
 	return false, "", nil
 }
 
-func (h steerHooks) PostToolUse(ctx context.Context, name string, input, result []byte, isErr bool) {
+func (h steerHooks) PostToolUse(ctx context.Context, name string, input json.RawMessage, result string, isErr bool) {
 	if h.inner != nil {
 		h.inner.PostToolUse(ctx, name, input, result, isErr)
 	}
@@ -596,7 +597,7 @@ func (h steerHooks) PostToolUse(ctx context.Context, name string, input, result 
 // 也没调工具时，harness 会把它当成自然结束并以空 summary 收场(query.go 的
 // ReasonCompleted + asst.Text())，一条本来还没做完的意图就这样断在半路。此时注入
 // 一条续跑指令，让模型带着已有思考接着走。
-func (h steerHooks) Stop(ctx context.Context, messages []llm.Message) (bool, []string, string) {
+func (h steerHooks) Stop(ctx context.Context, messages []acllm.Message) (bool, []string, string) {
 	var (
 		prevent  bool
 		blocking []string
@@ -1015,7 +1016,7 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	}
 	wTaskID, _ := strconv.ParseInt(t.ID, 10, 64)
 	e.BeginLLMCall(t.ID)
-	var reason harness.TerminalReason
+	var reason askernel.TerminalReason
 	var wrote agent.WriteCounts
 	var err error
 	if hasChatMessage {
@@ -1136,10 +1137,10 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	switch {
 	case err != nil:
 		state = "blocked"
-	case reason == harness.ReasonMaxTurns:
+	case reason == askernel.ReasonMaxTurns:
 		state = "exhausted"
 		log.Printf("[worker %s] intent %d 撞步数上限(exhausted)，本次写回 %s", name, intent.ID, wrote)
-	case reason == harness.ReasonTimeout:
+	case reason == askernel.ReasonTimeout:
 		state = "exhausted"
 		log.Printf("[worker %s] intent %d 运行超时(exhausted)，收尾后写回 %s", name, intent.ID, wrote)
 	}

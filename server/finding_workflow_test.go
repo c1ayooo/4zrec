@@ -10,7 +10,7 @@ import (
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
-	actool "github.com/Autumn-27/norma/tool"
+	actool "github.com/Autumn-27/artex/tools"
 )
 
 func workflowCall(t *testing.T, ctx context.Context, tool actool.CoreTool, input any, wantError bool) string {

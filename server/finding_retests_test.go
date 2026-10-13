@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"iter"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -17,21 +16,38 @@ import (
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
-	"github.com/Autumn-27/norma/llm"
-	actool "github.com/Autumn-27/norma/tool"
+	actool "github.com/Autumn-27/artex/tools"
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 )
 
+// retestProvider is a non-streaming eino fake: the scripted callback receives
+// the Generate input and returns the assistant turn (a tool call or plain text).
+// Stream and WithTools satisfy model.ToolCallingChatModel — these tests always
+// run the conversation non-streaming.
 type retestProvider struct {
-	complete func(context.Context, llm.CompletionRequest) (llm.Message, string, llm.Usage, error)
+	complete func(context.Context, []*schema.Message) (*schema.Message, error)
 }
 
-func (p retestProvider) Complete(ctx context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
-	return p.complete(ctx, req)
+func (p retestProvider) Generate(ctx context.Context, input []*schema.Message, _ ...model.Option) (*schema.Message, error) {
+	return p.complete(ctx, input)
 }
-func (p retestProvider) Stream(context.Context, llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
-	return func(yield func(llm.StreamEvent, error) bool) {
-		yield(llm.StreamEvent{}, errors.New("test expects non-streaming"))
+func (p retestProvider) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	msg, err := p.Generate(ctx, input, opts...)
+	if err != nil {
+		return nil, err
 	}
+	return schema.StreamReaderFromArray([]*schema.Message{msg}), nil
+}
+func (p retestProvider) WithTools([]*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	return p, nil
+}
+
+// retestToolCall scripts an assistant turn that invokes one tool.
+func retestToolCall(id, name, input string) *schema.Message {
+	return schema.AssistantMessage("", []schema.ToolCall{
+		{ID: id, Function: schema.FunctionCall{Name: name, Arguments: input}},
+	})
 }
 
 func newRetestServer(t *testing.T) (*Server, int64) {
@@ -161,28 +177,28 @@ func TestRetestHTTPThroughConversationAndTools(t *testing.T) {
 	s, fid := newRetestServer(t)
 	entered, release := make(chan struct{}), make(chan struct{})
 	var calls atomic.Int32
-	setRetestProvider(s, retestProvider{complete: func(ctx context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
+	setRetestProvider(s, retestProvider{complete: func(ctx context.Context, input []*schema.Message) (*schema.Message, error) {
 		n := calls.Add(1)
 		if n == 1 {
 			close(entered)
 			select {
 			case <-release:
 			case <-ctx.Done():
-				return llm.Message{}, "", llm.Usage{}, ctx.Err()
+				return nil, ctx.Err()
 			}
 		}
-		name, input := "get_finding_retest_context", `{}`
+		name, args := "get_finding_retest_context", `{}`
 		if n == 2 {
-			serialized, _ := json.Marshal(req.Messages)
+			serialized, _ := json.Marshal(input)
 			if !bytes.Contains(serialized, []byte("original proof")) {
 				t.Error("agent did not receive source evidence")
 			}
-			name, input = "record_finding_retest_result", `{"verdict":"inconclusive","summary":"缺少测试登录态","evidence":"已检查原证据；当前缺少有效登录态，无法确认修复状态。"}`
+			name, args = "record_finding_retest_result", `{"verdict":"inconclusive","summary":"缺少测试登录态","evidence":"已检查原证据；当前缺少有效登录态，无法确认修复状态。"}`
 		}
 		if n > 2 {
-			return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock("复测结论已保存")}}, "end_turn", llm.Usage{}, nil
+			return schema.AssistantMessage("复测结论已保存", nil), nil
 		}
-		return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: llm.BlockToolUse, ID: strconv.Itoa(int(n)), Name: name, Input: json.RawMessage(input)}}}, "tool_use", llm.Usage{}, nil
+		return retestToolCall(strconv.Itoa(int(n)), name, args), nil
 	}})
 	w := retestRequest(s.startFindingRetest, "POST", fid, `{"notes":"仅验证原接口"}`)
 	if w.Code != 202 {
@@ -224,15 +240,15 @@ func TestRetestStopsFailuresAndNoVerdict(t *testing.T) {
 	for _, mode := range []string{"stop", "failure", "no_verdict"} {
 		t.Run(mode, func(t *testing.T) {
 			s, fid := newRetestServer(t)
-			setRetestProvider(s, retestProvider{complete: func(ctx context.Context, _ llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
+			setRetestProvider(s, retestProvider{complete: func(ctx context.Context, _ []*schema.Message) (*schema.Message, error) {
 				if mode == "stop" {
 					<-ctx.Done()
-					return llm.Message{}, "", llm.Usage{}, ctx.Err()
+					return nil, ctx.Err()
 				}
 				if mode == "failure" {
-					return llm.Message{}, "", llm.Usage{}, errors.New("test model failed")
+					return nil, errors.New("test model failed")
 				}
-				return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock("未保存结论")}}, "end_turn", llm.Usage{}, nil
+				return schema.AssistantMessage("未保存结论", nil), nil
 			}})
 			w := retestRequest(s.startFindingRetest, "POST", fid, `{}`)
 			if w.Code != 202 {
@@ -264,11 +280,11 @@ func TestRetestStopsFailuresAndNoVerdict(t *testing.T) {
 func TestRetestFixedUpdatesFindingThroughConversation(t *testing.T) {
 	s, fid := newRetestServer(t)
 	var calls atomic.Int32
-	setRetestProvider(s, retestProvider{complete: func(context.Context, llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
+	setRetestProvider(s, retestProvider{complete: func(context.Context, []*schema.Message) (*schema.Message, error) {
 		if calls.Add(1) == 1 {
-			return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: llm.BlockToolUse, ID: "fixed-result", Name: "record_finding_retest_result", Input: json.RawMessage(`{"verdict":"fixed","summary":"修复生效","evidence":"原触发条件失效，正常对照仍可用。"}`)}}}, "tool_use", llm.Usage{}, nil
+			return retestToolCall("fixed-result", "record_finding_retest_result", `{"verdict":"fixed","summary":"修复生效","evidence":"原触发条件失效，正常对照仍可用。"}`), nil
 		}
-		return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock("结论已保存")}}, "end_turn", llm.Usage{}, nil
+		return schema.AssistantMessage("结论已保存", nil), nil
 	}})
 	w := retestRequest(s.startFindingRetest, "POST", fid, `{}`)
 	if w.Code != http.StatusAccepted {

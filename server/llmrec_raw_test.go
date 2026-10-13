@@ -8,14 +8,17 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Autumn-27/artex/acllm"
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/llmrec"
-	"github.com/Autumn-27/norma/llm"
-	"github.com/Autumn-27/norma/transcript"
+	"github.com/Autumn-27/artex/transcript"
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 )
 
-// Full chain against a real PG: Recorder → norma provider → capturing transport
+// Full chain against a real PG: Recorder → acllm provider → capturing transport
 // → llm_records. The unit tests cover each hop; this proves the raw bodies
 // actually survive all the way into the row an operator opens when debugging.
 func TestRecorderPersistsRawWireBodies(t *testing.T) {
@@ -58,7 +61,7 @@ func TestRecorderPersistsRawWireBodies(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cfg := agent.Config{Format: llm.FormatAnthropic, BaseURL: srv.URL, APIKey: "k", Model: "claude-raw-test"}
+	cfg := agent.Config{Format: acllm.FormatAnthropic, BaseURL: srv.URL, APIKey: "k", Model: "claude-raw-test"}
 	inner, err := cfg.NewProvider()
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
@@ -76,24 +79,44 @@ func TestRecorderPersistsRawWireBodies(t *testing.T) {
 	}()
 
 	ctx := transcript.WithSessionID(context.Background(), session)
-	for _, err := range rec.Stream(ctx, llm.CompletionRequest{
-		System:   []string{"system prompt"},
-		Messages: []llm.Message{{Role: "user", Content: []llm.ContentBlock{{Type: "text", Text: "go"}}}},
-		Tools: []llm.ToolSchema{{
-			Name:        "bash",
-			Description: "run a shell command",
-			InputSchema: map[string]any{"type": "object"},
-		}},
-		MaxTokens: 512,
-	}) {
-		if err != nil {
-			t.Fatalf("stream: %v", err)
+	// The eino seam binds tools on the model rather than the request.
+	bound, err := rec.WithTools(mustToolInfo(t, acllm.ToolSchema{
+		Name:        "bash",
+		Description: "run a shell command",
+		InputSchema: map[string]any{"type": "object"},
+	}))
+	if err != nil {
+		t.Fatalf("WithTools: %v", err)
+	}
+	sr, err := bound.Stream(ctx, []*schema.Message{
+		schema.SystemMessage("system prompt"),
+		schema.UserMessage("go"),
+	}, model.WithMaxTokens(512))
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	for {
+		if _, err = sr.Recv(); err != nil {
+			break
 		}
+	}
+	if err != nil && err != io.EOF {
+		t.Fatalf("stream: %v", err)
 	}
 
 	var id int64
-	if err := pg.QueryRow(`SELECT id FROM llm_records WHERE session_id=$1 ORDER BY id DESC LIMIT 1`, session).Scan(&id); err != nil {
-		t.Fatalf("no record written: %v", err)
+	// The eino Recorder writes through an async stream-observer goroutine, so the
+	// row may land a moment after the consumer's branch reaches EOF — poll briefly.
+	var qerr error
+	for i := 0; i < 100; i++ {
+		qerr = pg.QueryRow(`SELECT id FROM llm_records WHERE session_id=$1 ORDER BY id DESC LIMIT 1`, session).Scan(&id)
+		if qerr == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if qerr != nil {
+		t.Fatalf("no record written: %v", qerr)
 	}
 	got, err := pg.GetLLMRecord(id)
 	if err != nil {
@@ -130,4 +153,15 @@ func TestRecorderPersistsRawWireBodies(t *testing.T) {
 	if strings.Contains(got.RequestBody, "input_schema") {
 		t.Error("normalized request unexpectedly carries schemas; test no longer proves the gap")
 	}
+}
+
+// mustToolInfo converts an acllm.ToolSchema into eino ToolInfo via the same
+// helper the runtime uses, so the wire encoding matches production calls.
+func mustToolInfo(t *testing.T, ts acllm.ToolSchema) []*schema.ToolInfo {
+	t.Helper()
+	info, err := acllm.ToolSchemaToInfo(ts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return []*schema.ToolInfo{info}
 }

@@ -25,10 +25,10 @@ import (
 	"github.com/Autumn-27/artex/llmpool"
 	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/artex/report"
+	actool "github.com/Autumn-27/artex/tools"
 	"github.com/Autumn-27/artex/traffic"
-	"github.com/Autumn-27/norma/llm"
-	actool "github.com/Autumn-27/norma/tool"
-	"github.com/Autumn-27/norma/transcript"
+	"github.com/Autumn-27/artex/transcript"
+	"github.com/cloudwego/eino/components/model"
 )
 
 // BuildVersion is the backend application version, injected from cmd/artex at
@@ -55,9 +55,9 @@ type Server struct {
 	chatAgent *agent.ChatAgent // conversational runner for the chat page; nil w/o LLM
 	// llmProv is the fully-decorated global provider (recorder + failover chain)
 	// installed by applyLLM. Task routers use it after an explicit chain is cleared.
-	llmProv   llm.Provider
-	llmDirect llm.Provider // concrete global provider, before any failover pool
-	llmCfg    agent.Config // current LLM config (key not exposed)
+	llmProv   model.ToolCallingChatModel
+	llmDirect model.ToolCallingChatModel // concrete global provider, before any failover pool
+	llmCfg    agent.Config               // current LLM config (key not exposed)
 	llmOn     bool
 	llmProf   string // active LLM profile name (for llmrec tagging)
 
@@ -123,7 +123,7 @@ type Server struct {
 
 // provEntry is a cached provider + its config for one LLM profile id.
 type provEntry struct {
-	prov llm.Provider
+	prov model.ToolCallingChatModel
 	cfg  agent.Config
 }
 
@@ -426,7 +426,7 @@ func maxTokensResolver(cfg agent.Config) func() int {
 // applyLLM (re)builds the planner/worker/main-agent from cfg and installs them on
 // the running engine as the GLOBAL active pair. Safe to call at runtime (UI configures LLM).
 func (s *Server) applyLLM(cfg agent.Config) error {
-	var prov llm.Provider
+	var prov model.ToolCallingChatModel
 	// A persisted active profile must use the same cached provider as task chains
 	// and Agent bindings, otherwise each path owns a separate rate limiter.
 	if active, _ := s.m.pg.ActiveProfile(); active != nil {
@@ -559,7 +559,7 @@ func (s *Server) chatUnavailableReason() string {
 // providerForProfile returns a cached provider+cfg for a profile id, so every agent
 // bound/pinned to the same profile shares one provider instance (one rate limiter).
 // ok=false when the profile is missing/invalid → caller falls back to the global pair.
-func (s *Server) providerForProfile(id int64) (llm.Provider, agent.Config, bool) {
+func (s *Server) providerForProfile(id int64) (model.ToolCallingChatModel, agent.Config, bool) {
 	s.provCacheMu.Lock()
 	if e := s.provByProfile[id]; e != nil {
 		s.provCacheMu.Unlock()

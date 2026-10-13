@@ -163,7 +163,8 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 		MaxTokens:    c.maxTokens(),    // 0 = 不发上限,由服务端默认值决定
 	}
 	if c.guard != nil {
-		opts.Hooks = guardHooks(c.guard)
+		// guard's registry is askernel-native: it implements HookRunner directly.
+		opts.Hooks = c.guard.Hooks()
 	}
 	runRef := &sessionRef{}
 	withRunTrace(&opts, runRef) // correlate tool calls into the intercept trace pre-review

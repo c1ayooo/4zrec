@@ -5,53 +5,81 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"iter"
+	"io"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/Autumn-27/artex/agent"
+	"github.com/Autumn-27/artex/askernel"
 	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/norma/harness"
-	"github.com/Autumn-27/norma/llm"
+	"github.com/Autumn-27/artex/llmpool"
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 )
 
+// scriptedLLMProvider replays a fixed sequence of eino stream chunks (the
+// norma-era StreamEvent list maps onto *schema.Message chunks: SEMessageStart →
+// an empty assistant chunk, SETextDelta → a content chunk, SEToolUseStart → a
+// tool-call chunk) and then fails with err, if set.
 type scriptedLLMProvider struct {
-	events []llm.StreamEvent
+	chunks []*schema.Message
 	err    error
 	calls  int
 }
 
-func (p *scriptedLLMProvider) Stream(context.Context, llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
-	return func(yield func(llm.StreamEvent, error) bool) {
-		p.calls++
-		for _, event := range p.events {
-			if !yield(event, nil) {
-				return
+func textChunk(s string) *schema.Message { return schema.AssistantMessage(s, nil) }
+
+// emptyChunk mirrors a message_start bookkeeping frame: it carries no output.
+func emptyChunk() *schema.Message { return schema.AssistantMessage("", nil) }
+
+// toolCallChunk mirrors a tool_use_start event: it commits output.
+func toolCallChunk() *schema.Message {
+	return schema.AssistantMessage("", []schema.ToolCall{
+		{ID: "t1", Function: schema.FunctionCall{Name: "probe", Arguments: `{}`}},
+	})
+}
+
+func (p *scriptedLLMProvider) Stream(context.Context, []*schema.Message, ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	p.calls++
+	out, sw := schema.Pipe[*schema.Message](len(p.chunks) + 1)
+	go func() {
+		defer sw.Close()
+		for _, c := range p.chunks {
+			if sw.Send(c, nil) {
+				return // caller stopped consuming
 			}
 		}
 		if p.err != nil {
-			yield(llm.StreamEvent{}, p.err)
+			sw.Send(nil, p.err)
 		}
-	}
+	}()
+	return out, nil
 }
 
-func (p *scriptedLLMProvider) Complete(ctx context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
-	return accumulateStreamForTest(ctx, p.Stream, req)
+func (p *scriptedLLMProvider) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
+	sr, err := p.Stream(ctx, input, opts...)
+	if err != nil {
+		return nil, err
+	}
+	defer sr.Close()
+	var acc strings.Builder
+	for {
+		chunk, rerr := sr.Recv()
+		if rerr != nil {
+			if errors.Is(rerr, io.EOF) {
+				break
+			}
+			return nil, rerr
+		}
+		acc.WriteString(chunk.Content)
+	}
+	return schema.AssistantMessage(acc.String(), nil), nil
 }
 
-// accumulateStreamForTest drains a mock's Stream to satisfy the non-streaming
-// Complete method.
-func accumulateStreamForTest(ctx context.Context, stream func(context.Context, llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error], req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
-	acc := llm.NewAccumulator()
-	for ev, err := range stream(ctx, req) {
-		if err != nil {
-			return llm.Message{}, "", llm.Usage{}, err
-		}
-		acc.Add(ev)
-	}
-	return acc.Message(), acc.StopReason, acc.Usage, nil
+func (p *scriptedLLMProvider) WithTools([]*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	return p, nil
 }
 
 // withZeroRetryBackoff sets the same-provider retry backoff to zero for the
@@ -63,48 +91,75 @@ func withZeroRetryBackoff() func() {
 }
 
 // flakyThenOKProvider fails its first failCount stream attempts pre-commit
-// (emitting only a non-committing SEMessageStart before the error, mirroring a
-// gateway that returns 200 then drops), then serves okEvents.
+// (emitting only a non-committing empty chunk before the error, mirroring a
+// gateway that returns 200 then drops), then serves okChunks.
 type flakyThenOKProvider struct {
 	failCount int
 	failErr   error
-	okEvents  []llm.StreamEvent
+	okChunks  []*schema.Message
 	calls     int
 }
 
-func (p *flakyThenOKProvider) Stream(context.Context, llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
-	return func(yield func(llm.StreamEvent, error) bool) {
-		p.calls++
+func (p *flakyThenOKProvider) Stream(context.Context, []*schema.Message, ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	p.calls++
+	out, sw := schema.Pipe[*schema.Message](len(p.okChunks) + 2)
+	go func() {
+		defer sw.Close()
 		if p.calls <= p.failCount {
-			if !yield(llm.StreamEvent{Type: llm.SEMessageStart}, nil) {
+			if sw.Send(emptyChunk(), nil) {
 				return
 			}
-			yield(llm.StreamEvent{}, p.failErr)
+			sw.Send(nil, p.failErr)
 			return
 		}
-		for _, ev := range p.okEvents {
-			if !yield(ev, nil) {
+		for _, c := range p.okChunks {
+			if sw.Send(c, nil) {
 				return
 			}
 		}
+	}()
+	return out, nil
+}
+
+func (p *flakyThenOKProvider) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
+	sr, err := p.Stream(ctx, input, opts...)
+	if err != nil {
+		return nil, err
 	}
-}
-
-func (p *flakyThenOKProvider) Complete(ctx context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
-	return accumulateStreamForTest(ctx, p.Stream, req)
-}
-
-func collectTaskLLMStream(seq iter.Seq2[llm.StreamEvent, error]) ([]llm.StreamEvent, error) {
-	var events []llm.StreamEvent
-	var streamErr error
-	for event, err := range seq {
-		if err != nil {
-			streamErr = err
+	defer sr.Close()
+	for {
+		if _, err = sr.Recv(); err != nil {
 			break
 		}
-		events = append(events, event)
 	}
-	return events, streamErr
+	if errors.Is(err, io.EOF) {
+		return schema.AssistantMessage("ok", nil), nil
+	}
+	return nil, err
+}
+
+func (p *flakyThenOKProvider) WithTools([]*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	return p, nil
+}
+
+// collectTaskLLMStream drains an eino task-router stream into chunks, passing
+// through streamTaskLLM's (reader, error) pair.
+func collectTaskLLMStream(sr *schema.StreamReader[*schema.Message], streamErr error) ([]*schema.Message, error) {
+	if streamErr != nil || sr == nil {
+		return nil, streamErr
+	}
+	defer sr.Close()
+	var chunks []*schema.Message
+	for {
+		chunk, err := sr.Recv()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return chunks, nil
+			}
+			return chunks, err
+		}
+		chunks = append(chunks, chunk)
+	}
 }
 
 func TestIsQuotaExhaustedError(t *testing.T) {
@@ -242,7 +297,7 @@ func TestTaskLLMStreamRetriesPreStreamQuotaOnNextProfile(t *testing.T) {
 	t.Parallel()
 	quota := errors.New("openai: status 402: insufficient_quota")
 	first := &scriptedLLMProvider{err: quota}
-	second := &scriptedLLMProvider{events: []llm.StreamEvent{{Type: llm.SETextDelta, Text: "fallback"}}}
+	second := &scriptedLLMProvider{chunks: []*schema.Message{textChunk("fallback")}}
 	active := int64(11)
 	transitions := 0
 	hooks := taskLLMStreamHooks{
@@ -263,11 +318,11 @@ func TestTaskLLMStreamRetriesPreStreamQuotaOnNextProfile(t *testing.T) {
 		transition: func(taskLLMSelection, db.TaskLLMTransition, error) { transitions++ },
 	}
 
-	events, err := collectTaskLLMStream(streamTaskLLM(context.Background(), "7", llm.CompletionRequest{}, hooks))
+	events, err := collectTaskLLMStream(streamTaskLLM(context.Background(), "7", nil, nil, hooks))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 1 || events[0].Text != "fallback" {
+	if len(events) != 1 || events[0].Content != "fallback" {
 		t.Fatalf("unexpected fallback events: %+v", events)
 	}
 	if first.calls != 1 || second.calls != 1 || transitions != 1 {
@@ -279,12 +334,12 @@ func TestTaskLLMStreamRetriesAfterNonContentStartEvent(t *testing.T) {
 	t.Parallel()
 	quota := errors.New("anthropic: status 402: insufficient credit balance")
 	first := &scriptedLLMProvider{
-		events: []llm.StreamEvent{{Type: llm.SEMessageStart}},
+		chunks: []*schema.Message{emptyChunk()},
 		err:    quota,
 	}
-	second := &scriptedLLMProvider{events: []llm.StreamEvent{
-		{Type: llm.SEMessageStart},
-		{Type: llm.SETextDelta, Text: "fallback"},
+	second := &scriptedLLMProvider{chunks: []*schema.Message{
+		emptyChunk(),
+		textChunk("fallback"),
 	}}
 	active := int64(11)
 	hooks := taskLLMStreamHooks{
@@ -301,11 +356,11 @@ func TestTaskLLMStreamRetriesAfterNonContentStartEvent(t *testing.T) {
 		},
 	}
 
-	events, err := collectTaskLLMStream(streamTaskLLM(context.Background(), "7", llm.CompletionRequest{}, hooks))
+	events, err := collectTaskLLMStream(streamTaskLLM(context.Background(), "7", nil, nil, hooks))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 2 || events[0].Type != llm.SEMessageStart || events[1].Text != "fallback" {
+	if len(events) != 2 || llmpool.MessageCommitsOutput(events[0]) || events[1].Content != "fallback" {
 		t.Fatalf("non-content event from failed attempt leaked or fallback missing: %+v", events)
 	}
 	if first.calls != 1 || second.calls != 1 {
@@ -316,7 +371,7 @@ func TestTaskLLMStreamRetriesAfterNonContentStartEvent(t *testing.T) {
 func TestTaskLLMStreamRetriesStalePreStreamFailureAgainstReplacementChain(t *testing.T) {
 	t.Parallel()
 	first := &scriptedLLMProvider{err: errors.New("status 402: insufficient_quota")}
-	second := &scriptedLLMProvider{events: []llm.StreamEvent{{Type: llm.SETextDelta, Text: "replacement"}}}
+	second := &scriptedLLMProvider{chunks: []*schema.Message{textChunk("replacement")}}
 	current := first
 	hooks := taskLLMStreamHooks{
 		current: func() (taskLLMSelection, error) {
@@ -332,8 +387,8 @@ func TestTaskLLMStreamRetriesStalePreStreamFailureAgainstReplacementChain(t *tes
 		},
 	}
 
-	events, err := collectTaskLLMStream(streamTaskLLM(context.Background(), "7", llm.CompletionRequest{}, hooks))
-	if err != nil || len(events) != 1 || events[0].Text != "replacement" {
+	events, err := collectTaskLLMStream(streamTaskLLM(context.Background(), "7", nil, nil, hooks))
+	if err != nil || len(events) != 1 || events[0].Content != "replacement" {
 		t.Fatalf("stale call did not continue on replacement chain: events=%+v err=%v", events, err)
 	}
 }
@@ -361,7 +416,7 @@ func TestTaskLLMStreamDoesNotSwitchForOrdinaryErrors(t *testing.T) {
 					return db.TaskLLMTransition{}, nil
 				},
 			}
-			_, err := collectTaskLLMStream(streamTaskLLM(context.Background(), "7", llm.CompletionRequest{}, hooks))
+			_, err := collectTaskLLMStream(streamTaskLLM(context.Background(), "7", nil, nil, hooks))
 			if err == nil || err.Error() != message {
 				t.Fatalf("error=%v, want %q", err, message)
 			}
@@ -376,10 +431,10 @@ func TestTaskLLMStreamAdvancesAfterMidStreamQuotaWithoutReplay(t *testing.T) {
 	t.Parallel()
 	quota := errors.New("anthropic: status 402: credit balance is too low")
 	first := &scriptedLLMProvider{
-		events: []llm.StreamEvent{{Type: llm.SETextDelta, Text: "partial"}},
+		chunks: []*schema.Message{textChunk("partial")},
 		err:    quota,
 	}
-	second := &scriptedLLMProvider{events: []llm.StreamEvent{{Type: llm.SETextDelta, Text: "next-call"}}}
+	second := &scriptedLLMProvider{chunks: []*schema.Message{textChunk("next-call")}}
 	active := int64(11)
 	hooks := taskLLMStreamHooks{
 		current: func() (taskLLMSelection, error) {
@@ -395,16 +450,16 @@ func TestTaskLLMStreamAdvancesAfterMidStreamQuotaWithoutReplay(t *testing.T) {
 		},
 	}
 
-	events, err := collectTaskLLMStream(streamTaskLLM(context.Background(), "7", llm.CompletionRequest{}, hooks))
-	if len(events) != 1 || events[0].Text != "partial" || err == nil {
+	events, err := collectTaskLLMStream(streamTaskLLM(context.Background(), "7", nil, nil, hooks))
+	if len(events) != 1 || events[0].Content != "partial" || err == nil {
 		t.Fatalf("mid-stream result events=%+v err=%v", events, err)
 	}
 	if first.calls != 1 || second.calls != 0 {
 		t.Fatalf("mid-stream call was replayed: first=%d second=%d", first.calls, second.calls)
 	}
 
-	nextEvents, nextErr := collectTaskLLMStream(streamTaskLLM(context.Background(), "7", llm.CompletionRequest{}, hooks))
-	if nextErr != nil || len(nextEvents) != 1 || nextEvents[0].Text != "next-call" || second.calls != 1 {
+	nextEvents, nextErr := collectTaskLLMStream(streamTaskLLM(context.Background(), "7", nil, nil, hooks))
+	if nextErr != nil || len(nextEvents) != 1 || nextEvents[0].Content != "next-call" || second.calls != 1 {
 		t.Fatalf("next call did not use fallback: events=%+v err=%v calls=%d", nextEvents, nextErr, second.calls)
 	}
 }
@@ -414,7 +469,7 @@ func TestTaskLLMStreamMarkFailureAfterToolStartSkipsWorkerReplay(t *testing.T) {
 	quota := errors.New("openai: status 402: insufficient_quota")
 	markFailure := errors.New("database temporarily unavailable")
 	provider := &scriptedLLMProvider{
-		events: []llm.StreamEvent{{Type: llm.SEToolUseStart}},
+		chunks: []*schema.Message{toolCallChunk()},
 		err:    quota,
 	}
 	hooks := taskLLMStreamHooks{
@@ -426,14 +481,14 @@ func TestTaskLLMStreamMarkFailureAfterToolStartSkipsWorkerReplay(t *testing.T) {
 		},
 	}
 
-	events, err := collectTaskLLMStream(streamTaskLLM(context.Background(), "7", llm.CompletionRequest{}, hooks))
-	if len(events) != 1 || events[0].Type != llm.SEToolUseStart || err == nil {
+	events, err := collectTaskLLMStream(streamTaskLLM(context.Background(), "7", nil, nil, hooks))
+	if len(events) != 1 || len(events[0].ToolCalls) == 0 || err == nil {
 		t.Fatalf("committed tool stream events=%+v err=%v", events, err)
 	}
 	if !isTaskLLMRuntimeError(err) {
 		t.Fatalf("committed mark failure must be router-classified: %T %v", err, err)
 	}
-	if retryableWorkerModelError(harness.ReasonModelError, err) {
+	if retryableWorkerModelError(askernel.ReasonModelError, err) {
 		t.Fatal("worker must not replay after a committed tool stream when quota persistence fails")
 	}
 	if provider.calls != 1 {
@@ -447,10 +502,10 @@ func TestTaskLLMRuntimeErrorSkipsWorkerReplay(t *testing.T) {
 		chainExhausted: false,
 		cause:          errors.New("insufficient_quota after partial output"),
 	}
-	if retryableWorkerModelError(harness.ReasonModelError, partialStreamErr) {
+	if retryableWorkerModelError(askernel.ReasonModelError, partialStreamErr) {
 		t.Fatal("worker must not replay an intent after the task router handled a mid-stream quota error")
 	}
-	if !retryableWorkerModelError(harness.ReasonModelError, errors.New("temporary network error")) {
+	if !retryableWorkerModelError(askernel.ReasonModelError, errors.New("temporary network error")) {
 		t.Fatal("ordinary model errors should retain the existing worker retry behavior")
 	}
 }
@@ -463,7 +518,7 @@ func TestTaskLLMStreamRetriesTransientPreCommitOnSameProvider(t *testing.T) {
 	provider := &flakyThenOKProvider{
 		failCount: 2, // fail twice, succeed on the 3rd attempt (initial + 2 retries)
 		failErr:   errors.New("anthropic: overloaded_error"),
-		okEvents:  []llm.StreamEvent{{Type: llm.SEMessageStart}, {Type: llm.SETextDelta, Text: "ok"}},
+		okChunks:  []*schema.Message{emptyChunk(), textChunk("ok")},
 	}
 	exhausted := 0
 	hooks := taskLLMStreamHooks{
@@ -475,7 +530,7 @@ func TestTaskLLMStreamRetriesTransientPreCommitOnSameProvider(t *testing.T) {
 			return db.TaskLLMTransition{}, nil
 		},
 	}
-	events, err := collectTaskLLMStream(streamTaskLLM(context.Background(), "7", llm.CompletionRequest{}, hooks))
+	events, err := collectTaskLLMStream(streamTaskLLM(context.Background(), "7", nil, nil, hooks))
 	if err != nil {
 		t.Fatalf("transient pre-commit failure should have been retried to success, got %v", err)
 	}
@@ -485,7 +540,7 @@ func TestTaskLLMStreamRetriesTransientPreCommitOnSameProvider(t *testing.T) {
 	if exhausted != 0 {
 		t.Fatalf("same-provider retry must not change failover state (exhausted=%d)", exhausted)
 	}
-	if len(events) == 0 || events[len(events)-1].Text != "ok" {
+	if len(events) == 0 || events[len(events)-1].Content != "ok" {
 		t.Fatalf("recovered stream missing its committed output: %+v", events)
 	}
 }
@@ -506,7 +561,7 @@ func TestTaskLLMStreamSurfacesTransientAfterRetriesExhausted(t *testing.T) {
 			return db.TaskLLMTransition{}, nil
 		},
 	}
-	_, err := collectTaskLLMStream(streamTaskLLM(context.Background(), "7", llm.CompletionRequest{}, hooks))
+	_, err := collectTaskLLMStream(streamTaskLLM(context.Background(), "7", nil, nil, hooks))
 	if err == nil {
 		t.Fatal("persistent transient failure must still surface an error")
 	}
@@ -531,7 +586,7 @@ func TestTaskLLMStreamDoesNotRetryDeterministicRejection(t *testing.T) {
 			return db.TaskLLMTransition{}, nil
 		},
 	}
-	_, err := collectTaskLLMStream(streamTaskLLM(context.Background(), "7", llm.CompletionRequest{}, hooks))
+	_, err := collectTaskLLMStream(streamTaskLLM(context.Background(), "7", nil, nil, hooks))
 	if err == nil {
 		t.Fatal("expected the deterministic rejection to surface")
 	}
@@ -629,7 +684,7 @@ func TestTaskLLMStreamStopsWhenChainExhausted(t *testing.T) {
 		transition: func(taskLLMSelection, db.TaskLLMTransition, error) { transitions++ },
 	}
 
-	_, err := collectTaskLLMStream(streamTaskLLM(context.Background(), "7", llm.CompletionRequest{}, hooks))
+	_, err := collectTaskLLMStream(streamTaskLLM(context.Background(), "7", nil, nil, hooks))
 	if !isTaskLLMChainExhausted(err) {
 		t.Fatalf("expected chain-exhausted error, got %v", err)
 	}
