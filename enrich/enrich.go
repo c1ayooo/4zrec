@@ -265,7 +265,15 @@ func (e *Engine) fingerprintSite(rawURL string, resp *http.Response, rawBody []b
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
 	obs.IconHash = fingerprint.FetchIconHash(ctx, e.client, rawURL)
-	matches := fingerprint.MatchObservation(fingerprint.DefaultRules(), obs)
+	// ActiveRules: 优先走 PG 规则库(自动同步维护,带编译缓存),store 为空时
+	// 回退内置快照——首启同步完成前也有规则可用。
+	var rules []fingerprint.CompiledRule
+	if e.as != nil && e.as.DB() != nil {
+		rules = fingerprint.ActiveRules(e.as.DB().DB)
+	} else {
+		rules = fingerprint.DefaultRules()
+	}
+	matches := fingerprint.MatchObservation(rules, obs)
 	seen := make(map[string]bool, len(matches))
 	var names []string
 	for _, m := range matches {

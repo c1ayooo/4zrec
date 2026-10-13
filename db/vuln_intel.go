@@ -48,47 +48,51 @@ RETURNING id, (xmax = 0)`,
 	return inserted, nil
 }
 
-// ListVulnIntel 分页列出情报,按入库时间倒序。severity 精确过滤,q 模糊
-// 匹配标题/CVE/来源。
-func (d *DB) ListVulnIntel(q, severity string, page, size int) ([]VulnIntel, int, error) {
+// ListVulnIntel 分页列出情报(含富化字段),按入库时间倒序。severity 精确
+// 过滤,q 模糊匹配标题/CVE/来源。
+func (d *DB) ListVulnIntel(q, severity string, page, size int) ([]EnrichedVulnIntel, int, error) {
 	if size <= 0 {
 		size = 50
 	}
 	if page < 0 {
 		page = 0
 	}
-	where := " WHERE 1=1"
+	where := " WHERE 1=1" // 列名不带前缀;dataQ 处统一替换表名
 	var args []any
 	if q != "" {
 		args = append(args, "%"+q+"%")
-		where += ` AND (title ILIKE $1 OR cve ILIKE $1 OR source ILIKE $1)`
+		where += ` AND (v.title ILIKE $1 OR v.cve ILIKE $1 OR v.source ILIKE $1)`
 	}
 	if severity != "" {
 		args = append(args, severity)
-		where += ` AND severity = $` + strconv.Itoa(len(args))
+		where += ` AND v.severity = $` + strconv.Itoa(len(args))
 	}
 	var total int
-	if err := d.QueryRow("SELECT COUNT(*) FROM vuln_intel"+where, args...).Scan(&total); err != nil {
+	if err := d.QueryRow("SELECT COUNT(*) FROM vuln_intel v"+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	dataQ := `
-SELECT id, title, COALESCE(description,''), COALESCE(severity,''), COALESCE(cve,''),
-       COALESCE(disclosure,''), COALESCE(solutions,''), COALESCE(source,''),
-       COALESCE(source_url,''), tags, refs, created_at, updated_at
-FROM vuln_intel` + where + `
-ORDER BY created_at DESC, id DESC
+SELECT v.id, v.title, COALESCE(v.description,''), COALESCE(v.severity,''), COALESCE(v.cve,''),
+       COALESCE(v.disclosure,''), COALESCE(v.solutions,''), COALESCE(v.source,''),
+       COALESCE(v.source_url,''), v.tags, v.refs, v.created_at, v.updated_at,
+       v.github_poc, v.cvss_score, COALESCE(v.cvss_vector,''), v.cwes, v.affected,
+       v.lab_only, v.enriched_at
+FROM vuln_intel v` + where + `
+ORDER BY v.created_at DESC, v.id DESC
 LIMIT ` + strconv.Itoa(size) + " OFFSET " + strconv.Itoa(page*size)
 	rows, err := d.Query(dataQ, args...)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer rows.Close()
-	out := []VulnIntel{}
+	out := []EnrichedVulnIntel{}
 	for rows.Next() {
-		var v VulnIntel
+		v := EnrichedVulnIntel{}
 		if err := rows.Scan(&v.ID, &v.Title, &v.Description, &v.Severity, &v.CVE,
 			&v.Disclosure, &v.Solutions, &v.Source, &v.SourceURL, &v.Tags, &v.Refs,
-			&v.CreatedAt, &v.UpdatedAt); err != nil {
+			&v.CreatedAt, &v.UpdatedAt,
+			&v.GithubPoc, &v.CvssScore, &v.CvssVector, &v.Cwes, &v.Affected,
+			&v.LabOnly, &v.EnrichedAt); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, v)

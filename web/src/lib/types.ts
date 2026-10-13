@@ -1638,7 +1638,7 @@ export interface VulnKBStats {
   types: { name: string; count: number }[];
 }
 
-/** 自动抓取的漏洞情报一条记录。 */
+/** 自动抓取的漏洞情报一条记录(含富化字段)。 */
 export interface VulnIntelEntry {
   id: number;
   title: string;
@@ -1653,6 +1653,26 @@ export interface VulnIntelEntry {
   refs: string;
   created_at: string;
   updated_at: string;
+  /** 富化字段(GitHub PoC / GHSA+NVD 元数据 / triage 结论)。 */
+  github_poc: string;
+  cvss_score: number | null;
+  cvss_vector: string;
+  cwes: string;
+  affected: string;
+  lab_only: boolean;
+  enriched_at: string | null;
+}
+
+/** github_poc 数组里的一项。 */
+export interface VulnIntelPOC {
+  full_name: string;
+  url: string;
+  description?: string;
+  stars: number;
+  pushed_at?: string;
+  verdict?: string;
+  triage_score?: number;
+  triage_reasons?: string[];
 }
 
 /** 情报轮询状态。 */

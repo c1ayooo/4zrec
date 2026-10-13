@@ -27,22 +27,6 @@ type Rule struct {
 	UpdatedAt  string `json:"updated_at,omitempty"`
 }
 
-// WappalyzerImportStats 上游指纹库导入统计(移植保留,dddd 翻译器在用)。
-type WappalyzerImportStats struct {
-	TechnologiesTotal   int      `json:"technologies_total"`
-	TechnologiesSkipped int      `json:"technologies_skipped"`
-	PatternsSkipped     int      `json:"patterns_skipped"`
-	SkipSamples         []string `json:"skip_samples,omitempty"`
-}
-
-// appendSkipSample 保留前 5 条跳过原因。
-func appendSkipSample(samples []string, name, reason string) []string {
-	if len(samples) >= 5 {
-		return samples
-	}
-	return append(samples, name+": "+reason)
-}
-
 // DefaultSeedsDir 种子目录(相对服务工作目录;仓库随二进制分发 configs/)。
 const DefaultSeedsDir = "configs/fingerprint-seeds"
 

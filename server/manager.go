@@ -17,6 +17,7 @@ import (
 	"github.com/Autumn-27/artex/agent"
 	pgdb "github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/enrich"
+	vulnfp "github.com/Autumn-27/artex/fingerprint"
 	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/artex/intercept"
 	actool "github.com/Autumn-27/artex/tools"
@@ -376,6 +377,15 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	}
 	if err := pg.EnsureLLMUsageTable(); err != nil {
 		log.Printf("[llmusage] create table: %v", err)
+	}
+	// 指纹规则库:建表 + 启动自动同步(24h 周期,上游不可达时快照兜底)。
+	if fpStore, err := vulnfp.NewStore(pg.DB); err != nil {
+		log.Printf("[fingerprint] 建表失败: %v", err)
+	} else {
+		vulnfp.NewUpdater(fpStore, func() string {
+			v, _, _ := pg.GetSetting("fingerprint.github_token")
+			return v
+		}).Start()
 	}
 	// 漏洞知识库后台导入:按 content_hash 幂等,放好 vulnkb/ 目录重启即入库。
 	vulnkbDir := os.Getenv("ARTEX_VULNKB_DIR")

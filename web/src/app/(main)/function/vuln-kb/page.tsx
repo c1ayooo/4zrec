@@ -21,7 +21,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import type { VulnIntelEntry, VulnIntelStatus, VulnKBEntry, VulnKBStats } from "@/lib/types";
+import type { VulnIntelEntry, VulnIntelPOC, VulnIntelStatus, VulnKBEntry, VulnKBStats } from "@/lib/types";
 
 const PAGE_SIZES = [25, 50, 100];
 const FP_MAX_LEN = 48;
@@ -47,6 +47,21 @@ function truncate(s: string, maxLen: number): string {
   const first = s.split("\n")[0];
   if (first.length <= maxLen) return first;
   return first.slice(0, maxLen) + "…";
+}
+
+function verdictTone(v: string): string {
+  if (v === "act") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400";
+  if (v === "watch") return "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400";
+  return "";
+}
+
+function parseJSONPOC(s: string): VulnIntelPOC[] {
+  try {
+    const v = JSON.parse(s);
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
 }
 
 function parseJSONArr(s: string): string[] {
@@ -558,6 +573,63 @@ function IntelTab() {
                 <FieldRow label="描述" value={selected.description ?? ""} />
                 <FieldRow label="处置建议" value={selected.solutions ?? ""} />
                 <FieldRow label="披露时间" value={selected.disclosure} />
+                {selected.cvss_score ? (
+                  <FieldRow
+                    label={`CVSS ${selected.cvss_score.toFixed(1)}`}
+                    value={selected.cvss_vector || "—"}
+                    mono
+                  />
+                ) : null}
+                {parseJSONArr(selected.affected).length > 0 ? (
+                  <div className="grid gap-1">
+                    <span className="text-xs font-medium text-muted-foreground">受影响包</span>
+                    <div className="flex flex-wrap gap-1">
+                      {parseJSONArr(selected.affected).map((a, i) => (
+                        <Badge key={i} variant="outline" className="font-mono text-[10px]">
+                          {a}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {selected.lab_only ? (
+                  <Badge variant="outline" className="border-muted-foreground/30 text-muted-foreground">
+                    仅实验室(无可实际利用 PoC)
+                  </Badge>
+                ) : null}
+                {parseJSONPOC(selected.github_poc).length > 0 ? (
+                  <div className="grid gap-1.5">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      PoC 仓库({parseJSONPOC(selected.github_poc).length},经五档体检)
+                    </span>
+                    {parseJSONPOC(selected.github_poc).map((r) => (
+                      <div key={r.full_name} className="rounded-md border p-2 text-xs">
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={r.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-mono font-medium text-primary underline-offset-4 hover:underline"
+                          >
+                            {r.full_name}
+                          </a>
+                          <span className="text-muted-foreground">★ {r.stars}</span>
+                          {r.verdict ? (
+                            <Badge variant="outline" className={verdictTone(r.verdict)}>
+                              {r.verdict.toUpperCase()}
+                            </Badge>
+                          ) : null}
+                        </div>
+                        {r.description ? (
+                          <p className="mt-1 line-clamp-2 text-muted-foreground">{r.description}</p>
+                        ) : null}
+                        {r.triage_reasons?.length ? (
+                          <p className="mt-1 text-[10px] text-muted-foreground/70">{r.triage_reasons.join(" · ")}</p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
                 {selected.source_url ? (
                   <div className="grid gap-1">
                     <span className="text-xs font-medium text-muted-foreground">来源</span>

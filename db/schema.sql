@@ -1431,3 +1431,13 @@ CREATE TABLE IF NOT EXISTS vuln_intel (
 CREATE INDEX IF NOT EXISTS idx_vuln_intel_severity ON vuln_intel(severity);
 CREATE INDEX IF NOT EXISTS idx_vuln_intel_cve ON vuln_intel(cve) WHERE cve <> '';
 CREATE INDEX IF NOT EXISTS idx_vuln_intel_created ON vuln_intel(created_at DESC);
+
+-- 漏洞情报富化列(GitHub PoC / GHSA+NVD 元数据 / 实验室标记)。ALTER 幂等,
+-- 与「重启即迁移」约定一致。
+ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS github_poc TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS cvss_score REAL;
+ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS cvss_vector TEXT NOT NULL DEFAULT '';
+ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS cwes TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS affected TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS lab_only BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS enriched_at TIMESTAMPTZ;

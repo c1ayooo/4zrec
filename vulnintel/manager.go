@@ -64,11 +64,12 @@ type PollResult struct {
 	Failed  int
 }
 
-// Manager 持有全部抓取器并驱动轮询。
+// Manager 持有全部抓取器并驱动轮询与富化。
 type Manager struct {
 	pg        *db.DB
 	grabbers  []grab.Grabber
 	refreshCh chan struct{}
+	enr       *enricher
 	mu        sync.Mutex
 	lastPoll  time.Time
 	lastRes   PollResult
@@ -77,7 +78,7 @@ type Manager struct {
 
 // NewManager 装配全部 9 源。
 func NewManager(pg *db.DB) *Manager {
-	return &Manager{
+	m := &Manager{
 		pg: pg,
 		grabbers: []grab.Grabber{
 			grab.NewAVDCrawler(),       // 阿里云漏洞库
@@ -92,12 +93,22 @@ func NewManager(pg *db.DB) *Manager {
 		},
 		refreshCh: make(chan struct{}, 1),
 	}
+	m.enr = newEnricher(pg)
+	return m
 }
 
 // Start 启动轮询循环:立即跑一轮,此后按间隔;refresh 通道随时插队。
 func (m *Manager) Start() {
 	go func() {
-		m.pollOnce()
+		// 富化独立节拍(纯 timer,不消费 refreshCh——那是抓取循环的信号),
+		// 消化积压(首轮几百条)与 7 天重富化。
+		m.enr.enrichPending()
+		for {
+			time.Sleep(10 * time.Minute)
+			m.enr.enrichPending()
+		}
+	}()
+	go func() {
 		for {
 			iv := interval(m.pg)
 			if !defaultEnabled(m.pg) {
