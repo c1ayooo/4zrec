@@ -21,6 +21,7 @@ import (
 	"github.com/Autumn-27/artex/intercept"
 	actool "github.com/Autumn-27/artex/tools"
 	"github.com/Autumn-27/artex/traffic"
+	"github.com/Autumn-27/artex/vulnintel"
 	"github.com/Autumn-27/artex/vulnkb"
 )
 
@@ -225,6 +226,8 @@ type Manager struct {
 	interceptor *intercept.Interceptor // user-configured tool-call interception rules
 
 	companyMu sync.Mutex // serializes task/company-scope commits with live handle registration
+	// vulnIntel 是漏洞情报自动抓取管线(9 公开源,定时轮询入库)。
+	vulnIntel *vulnintel.Manager
 	// taskStateMu preserves commit order between PostgreSQL lifecycle writes and
 	// their in-memory mirrors. lifecycleMu makes snapshots race-free, but without
 	// this outer write lock an older request could commit first and publish last.
@@ -381,6 +384,8 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	}
 	vulnkb.Bootstrap(pg, vulnkbDir)
 	m := &Manager{dir: dir, pg: pg, assets: pg.Assets(), tasks: map[string]*Task{}, interceptor: intercept.New(pg)}
+	m.vulnIntel = vulnintel.NewManager(pg)
+	m.vulnIntel.Start()
 	if proxyAddr != "" {
 		tr, err := traffic.Open(filepath.Join(dir, "traffic"), proxyAddr)
 		if err != nil {

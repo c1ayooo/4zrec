@@ -1637,3 +1637,28 @@ export interface VulnKBStats {
   with_fingerprint: number;
   types: { name: string; count: number }[];
 }
+
+/** 自动抓取的漏洞情报一条记录。 */
+export interface VulnIntelEntry {
+  id: number;
+  title: string;
+  description?: string;
+  severity: string;
+  cve: string;
+  disclosure: string;
+  solutions?: string;
+  source: string;
+  source_url: string;
+  tags: string;
+  refs: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** 情报轮询状态。 */
+export interface VulnIntelStatus {
+  polling: boolean;
+  last: string;
+  result: { New: number; Updated: number; Sources: number; Failed: number };
+  sources: number;
+}

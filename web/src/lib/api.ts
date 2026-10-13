@@ -102,6 +102,8 @@ import type {
   TrafficResp,
   UpdateCheck,
   UsageStats,
+  VulnIntelEntry,
+  VulnIntelStatus,
   VulnKBEntry,
   VulnKBStats,
   WorkspaceFile,
@@ -1327,4 +1329,16 @@ export const api = {
   },
   vulnKbEntry: (id: number) => get<{ entry: VulnKBEntry }>(`/vulnkb/${id}`),
   vulnKbStats: () => get<{ stats: VulnKBStats }>("/vulnkb/stats"),
+
+  // ---- vuln intel (自动抓取的漏洞情报流) ----
+  vulnIntel: (params?: { q?: string; severity?: string; page?: number; size?: number }) => {
+    const sp = new URLSearchParams();
+    if (params?.q) sp.set("q", params.q);
+    if (params?.severity) sp.set("severity", params.severity);
+    sp.set("page", String(params?.page ?? 0));
+    sp.set("size", String(params?.size ?? 50));
+    return get<{ entries: VulnIntelEntry[]; total: number }>(`/vulnintel?${sp}`);
+  },
+  vulnIntelRefresh: () => post<{ ok: boolean }>("/vulnintel/refresh"),
+  vulnIntelStatus: () => get<VulnIntelStatus>("/vulnintel/status"),
 };

@@ -1408,3 +1408,26 @@ CREATE TABLE IF NOT EXISTS vuln_kb (
 CREATE INDEX IF NOT EXISTS idx_vuln_kb_product ON vuln_kb(product);
 CREATE INDEX IF NOT EXISTS idx_vuln_kb_type ON vuln_kb(vuln_type);
 CREATE INDEX IF NOT EXISTS idx_vuln_kb_cve ON vuln_kb(cve) WHERE cve <> '';
+
+-- 漏洞情报流(vuln_intel):9 个公开情报源自动抓取的增量漏洞通告(标题/等级/
+-- CVE/披露时间/参考),由 vulnintel 管理器定时轮询入库。与 vuln_kb(1day 打击
+-- 库,带指纹与 Payload)分表:情报是「新披露了什么」,1day 是「怎么打」。
+CREATE TABLE IF NOT EXISTS vuln_intel (
+    id          BIGSERIAL PRIMARY KEY,
+    unique_key  TEXT NOT NULL UNIQUE,
+    title       TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    severity    TEXT NOT NULL DEFAULT '',
+    cve         TEXT NOT NULL DEFAULT '',
+    disclosure  TEXT NOT NULL DEFAULT '',
+    solutions   TEXT NOT NULL DEFAULT '',
+    source      TEXT NOT NULL DEFAULT '',
+    source_url  TEXT NOT NULL DEFAULT '',
+    tags        TEXT NOT NULL DEFAULT '[]',
+    refs        TEXT NOT NULL DEFAULT '[]',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_vuln_intel_severity ON vuln_intel(severity);
+CREATE INDEX IF NOT EXISTS idx_vuln_intel_cve ON vuln_intel(cve) WHERE cve <> '';
+CREATE INDEX IF NOT EXISTS idx_vuln_intel_created ON vuln_intel(created_at DESC);
