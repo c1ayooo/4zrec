@@ -103,8 +103,16 @@ export default function VulnKbPage() {
 function KBTab() {
   const [page, setPage] = React.useState(0);
   const [size, setSize] = React.useState(50);
-  const [query, setQuery] = React.useState("");
-  const [queryQ, setQueryQ] = React.useState("");
+  // 初始查询串支持 ?q= 预填(资产页技术徽章联动入口)。
+  const [query, setQuery] = React.useState(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("q") ?? "";
+  });
+  const [queryQ, setQueryQ] = React.useState(() => {
+    if (typeof window === "undefined") return "";
+    const q = new URLSearchParams(window.location.search).get("q") ?? "";
+    return q.trim();
+  });
   const [typeFilter, setTypeFilter] = React.useState("");
 
   const [entries, setEntries] = React.useState<VulnKBEntry[]>([]);

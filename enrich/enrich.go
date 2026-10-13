@@ -7,6 +7,7 @@
 package enrich
 
 import (
+	"context"
 	"crypto/tls"
 	"html"
 	"io"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/fingerprint"
 
 	"github.com/miekg/dns"
 	"github.com/projectdiscovery/dnsx/libs/dnsx"
@@ -240,12 +242,39 @@ func (e *Engine) doHTTP(id int64, rawURL string) {
 	statusCode := resp.StatusCode
 	bodyLen := int64(len(body))
 	title := extractTitle(body)
+	techs, iconHash := e.fingerprintSite(rawURL, resp, body)
 	_, _ = e.as.UpsertHTTPService(db.UpsertHTTPServiceReq{
 		URL:           rawURL,
 		StatusCode:    &statusCode,
 		ContentLength: &bodyLen,
 		PageTitle:     title,
+		Technologies:  techs,
+		FaviconMMH3:   iconHash,
 	})
+}
+
+// fingerprintSite 对一次已完成的探测跑指纹规则集,返回命中产品名与 favicon
+// 哈希。规则集进程内常驻(内置快照+种子,首次调用时编译);favicon 是一次
+// 额外 GET,失败只损失 icon_hash 类规则,不阻塞其余字段。
+func (e *Engine) fingerprintSite(rawURL string, resp *http.Response, rawBody []byte) ([]string, string) {
+	decoded := fingerprint.DecodeBody(rawBody, resp.Header.Get("Content-Type"))
+	obs := fingerprint.ObservationFromResponse(rawURL, resp, rawBody, decoded)
+	if obs.Title == "" {
+		obs.Title = extractTitle(rawBody)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	obs.IconHash = fingerprint.FetchIconHash(ctx, e.client, rawURL)
+	matches := fingerprint.MatchObservation(fingerprint.DefaultRules(), obs)
+	seen := make(map[string]bool, len(matches))
+	var names []string
+	for _, m := range matches {
+		if !seen[m.Product] {
+			seen[m.Product] = true
+			names = append(names, m.Product)
+		}
+	}
+	return names, obs.IconHash
 }
 
 func extractTitle(body []byte) string {

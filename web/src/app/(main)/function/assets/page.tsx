@@ -2,6 +2,8 @@
 
 import * as React from "react";
 
+import Link from "next/link";
+
 import {
   BuildingIcon,
   ChevronLeftIcon,
@@ -647,7 +649,7 @@ export default function AssetsPage() {
                     {a.page_title || "—"}
                   </TableCell>
                   <TableCell>
-                    <Chips items={a.technologies ?? []} />
+                    <Chips items={a.technologies ?? []} vulnKb />
                   </TableCell>
                   <TableCell>
                     {(a.auth ?? []).length === 0 ? (
@@ -927,16 +929,24 @@ function AssetCard({
   );
 }
 
-function Chips({ items, mono }: { items: string[]; mono?: boolean }) {
+function Chips({ items, mono, vulnKb }: { items: string[]; mono?: boolean; vulnKb?: boolean }) {
   const clean = items.filter(Boolean);
   if (clean.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
   return (
     <div className="flex flex-wrap gap-1">
-      {clean.map((s, i) => (
-        <Badge key={i} variant="outline" className={cn("text-[10px]", mono && "font-mono")}>
-          {s}
-        </Badge>
-      ))}
+      {clean.map((s, i) =>
+        vulnKb ? (
+          <Link key={i} href={`/function/vuln-kb?q=${encodeURIComponent(s)}`} title={`在漏洞库中检索 ${s}`}>
+            <Badge variant="outline" className={cn("text-[10px] transition-colors hover:border-primary/50 hover:text-primary", mono && "font-mono")}>
+              {s}
+            </Badge>
+          </Link>
+        ) : (
+          <Badge key={i} variant="outline" className={cn("text-[10px]", mono && "font-mono")}>
+            {s}
+          </Badge>
+        ),
+      )}
     </div>
   );
 }
