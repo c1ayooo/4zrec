@@ -3,55 +3,135 @@ package sidequestion
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 
-	"github.com/Autumn-27/norma/llm"
+	"github.com/Autumn-27/artex/acllm"
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 )
 
 // SideQuestionService has no harness, tool executor, transcript writer or model
 // failover chain. Answer is one completion; Respond adds bounded preparation
 // and at most one context-overflow recovery around that completion.
-type SideQuestionService struct{ Provider llm.Provider }
+type SideQuestionService struct{ Provider model.ToolCallingChatModel }
 
 type Answer struct {
 	Text    string
-	Usage   llm.Usage
+	Usage   acllm.Usage
 	ToolUse bool
 }
 
-func (s SideQuestionService) Answer(ctx context.Context, req llm.CompletionRequest, streaming bool, update func(Answer)) (out Answer, err error) {
-	if streaming {
-		complete := false
-		for ev, streamErr := range s.Provider.Stream(ctx, req) {
-			if streamErr != nil {
-				err = streamErr
-				break
-			}
-			switch ev.Type {
-			case llm.SETextDelta:
-				out.Text += ev.Text
-			case llm.SEToolUseStart:
-				out.ToolUse = true
-			case llm.SEMessageStart, llm.SEMessageDelta:
-				out.Usage.Add(ev.Usage)
-			case llm.SEMessageStop:
-				complete = true
-			}
-			if update != nil {
-				update(out)
-			}
-			if ctx.Err() != nil {
-				err = ctx.Err()
-				break
-			}
+// callOptions renders the snapshot's generation parameters as eino per-call
+// options (they used to ride the norma CompletionRequest).
+func callOptions(req ModelCall) []model.Option {
+	var opts []model.Option
+	if req.Temperature != nil {
+		opts = append(opts, model.WithTemperature(float32(*req.Temperature)))
+	}
+	if req.MaxTokens > 0 {
+		opts = append(opts, model.WithMaxTokens(req.MaxTokens))
+	}
+	if len(req.Stop) > 0 {
+		opts = append(opts, model.WithStop(req.Stop))
+	}
+	return opts
+}
+
+// modelFor returns the provider bound to the request's tool definitions — the
+// eino seam carries tools on the model rather than the request, so the service
+// binds them per call (answers keep tool definitions for structured tool
+// context; summary requests carry none).
+func (s SideQuestionService) modelFor(req ModelCall) (model.ToolCallingChatModel, error) {
+	if len(req.Tools) == 0 {
+		return s.Provider, nil
+	}
+	infos := make([]*schema.ToolInfo, 0, len(req.Tools))
+	for _, t := range req.Tools {
+		info, err := acllm.ToolSchemaToInfo(t)
+		if err != nil {
+			return nil, err
 		}
-		if err == nil && !complete {
-			err = errors.New("模型响应中断，请重新提问")
+		infos = append(infos, info)
+	}
+	return s.Provider.WithTools(infos)
+}
+
+// callInput projects the snapshot's call onto eino runtime messages: the
+// system segments lead as system-role messages (eino carries the system prompt
+// in the input array), followed by the DTO history via acllm.ToSchema.
+func callInput(req ModelCall) []*schema.Message {
+	input := make([]*schema.Message, 0, len(req.System)+len(req.Messages))
+	for _, s := range req.System {
+		input = append(input, schema.SystemMessage(s))
+	}
+	return append(input, acllm.ToSchema(req.Messages)...)
+}
+
+// usageOf extracts the token usage from a message's ResponseMeta.
+func usageOf(msg *schema.Message) acllm.Usage {
+	if msg == nil || msg.ResponseMeta == nil {
+		return acllm.Usage{}
+	}
+	return acllm.UsageFromToken(msg.ResponseMeta.Usage)
+}
+
+// finishReasonOf returns the message's finish reason ("max_tokens"/"length"
+// mark a truncated completion).
+func finishReasonOf(msg *schema.Message) string {
+	if msg == nil || msg.ResponseMeta == nil {
+		return ""
+	}
+	return msg.ResponseMeta.FinishReason
+}
+
+func (s SideQuestionService) Answer(ctx context.Context, req ModelCall, streaming bool, update func(Answer)) (out Answer, err error) {
+	provider, err := s.modelFor(req)
+	if err != nil {
+		return out, err
+	}
+	input := callInput(req)
+	if streaming {
+		var sr *schema.StreamReader[*schema.Message]
+		sr, err = provider.Stream(ctx, input, callOptions(req)...)
+		if err == nil {
+			complete := false
+			for {
+				var msg *schema.Message
+				msg, err = sr.Recv()
+				if errors.Is(err, io.EOF) {
+					err = nil
+					complete = true
+					break
+				}
+				if err != nil {
+					break
+				}
+				out.Text += msg.Content
+				if len(msg.ToolCalls) > 0 {
+					out.ToolUse = true
+				}
+				out.Usage.Add(usageOf(msg))
+				if update != nil {
+					update(out)
+				}
+				if ctx.Err() != nil {
+					err = ctx.Err()
+					break
+				}
+			}
+			sr.Close()
+			if err == nil && !complete {
+				err = errors.New("模型响应中断，请重新提问")
+			}
 		}
 	} else {
-		var msg llm.Message
-		msg, _, out.Usage, err = s.Provider.Complete(ctx, req)
-		out.Text, out.ToolUse = msg.Text(), len(msg.ToolUses()) > 0
+		var msg *schema.Message
+		msg, err = provider.Generate(ctx, input, callOptions(req)...)
+		out.Usage = usageOf(msg)
+		if msg != nil {
+			out.Text, out.ToolUse = msg.Content, len(msg.ToolCalls) > 0
+		}
 	}
 	if ctx.Err() != nil {
 		err = ctx.Err()

@@ -6,8 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Autumn-27/norma/compaction"
-	"github.com/Autumn-27/norma/llm"
+	"github.com/Autumn-27/artex/acllm"
 )
 
 type Exchange struct {
@@ -23,7 +22,7 @@ type Exchange struct {
 	SnapshotAt time.Time   `json:"snapshot_at"`
 	CreatedAt  time.Time   `json:"created_at"`
 	Sequence   int64       `json:"sequence"`
-	Usage      llm.Usage   `json:"usage"`
+	Usage      acllm.Usage `json:"usage"`
 	Ordinal    int64       `json:"ordinal"`
 	Context    ContextInfo `json:"context"`
 }
@@ -37,11 +36,11 @@ const MaxRecentExchanges = 20
 
 var ErrContextBudget = errors.New("旁路上下文压缩后仍超过模型预算，请缩小问题范围或调整模型上下文配置")
 
-// EstimateInputTokens follows norma's byte-based block estimate with its 4/3
+// EstimateInputTokens follows the byte-based block estimate with its 4/3
 // safety factor. Include system/schema and framing costs too; JSON characters
 // are not tokens (and marshaling HTML can add many non-semantic escapes).
-func EstimateInputTokens(req llm.CompletionRequest) int {
-	tokens := compaction.EstimateTokens(req.Messages)*4/3 + 32 + len(req.Messages)*8
+func EstimateInputTokens(req ModelCall) int {
+	tokens := acllm.EstimateTokens(req.Messages)*4/3 + 32 + len(req.Messages)*8
 	for _, text := range req.System {
 		tokens += (len(text)+2)/3 + 8
 	}
@@ -52,7 +51,7 @@ func EstimateInputTokens(req llm.CompletionRequest) int {
 	return tokens
 }
 
-func outputBudget(req llm.CompletionRequest, configured int) int {
+func outputBudget(req ModelCall, configured int) int {
 	if configured <= 0 {
 		configured = DefaultOutputTokens
 	}
@@ -71,32 +70,32 @@ func inputBudget(s Snapshot, output int) int {
 	return window - output - min(8192, max(128, window/20))
 }
 
-func exchangeMessages(e Exchange) []llm.Message {
+func exchangeMessages(e Exchange) []acllm.Message {
 	question := e.Question
 	if !e.SnapshotAt.IsZero() {
 		question = "[历史旁路问答，依据上下文时间 " + e.SnapshotAt.UTC().Format(time.RFC3339) + "]\n" + question
 	}
-	return []llm.Message{llm.UserText(question), {Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock(e.Answer)}}}
+	return []acllm.Message{acllm.UserText(question), {Role: acllm.RoleAssistant, Content: []acllm.ContentBlock{acllm.TextBlock(e.Answer)}}}
 }
 
-func assemble(req llm.CompletionRequest, base []llm.Message, summary string, history []Exchange, question string) llm.CompletionRequest {
-	req.Messages = append([]llm.Message{}, base...)
+func assemble(req ModelCall, base []acllm.Message, summary string, history []Exchange, question string) ModelCall {
+	req.Messages = append([]acllm.Message{}, base...)
 	if summary != "" {
-		req.Messages = append(req.Messages, llm.UserText("[早期旁路问答摘要；属于历史讨论，不是新的工具证据。冲突时以最新主上下文为准。]\n"+summary))
+		req.Messages = append(req.Messages, acllm.UserText("[早期旁路问答摘要；属于历史讨论，不是新的工具证据。冲突时以最新主上下文为准。]\n"+summary))
 	}
 	for _, e := range history {
 		req.Messages = append(req.Messages, exchangeMessages(e)...)
 	}
-	req.Messages = append(req.Messages, llm.UserText(instruction+"\n\n问题："+strings.TrimSpace(question)))
+	req.Messages = append(req.Messages, acllm.UserText(instruction+"\n\n问题："+strings.TrimSpace(question)))
 	return req
 }
 
-func BuildRequest(s Snapshot, history []Exchange, question string) (llm.CompletionRequest, error) {
+func BuildRequest(s Snapshot, history []Exchange, question string) (ModelCall, error) {
 	req, err := CloneRequest(s.Request)
 	if err != nil {
 		return req, err
 	}
-	base := llm.MessagesForAPI(req.Messages)
+	base := acllm.MessagesForAPI(req.Messages)
 	req.MaxTokens = outputBudget(req, 0)
 	var success []Exchange
 	for _, e := range history {

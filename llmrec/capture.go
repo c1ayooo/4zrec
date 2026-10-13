@@ -11,21 +11,22 @@ import (
 type captureContextKey struct{}
 
 // Capture collects the untouched wire bodies of one logical LLM call. The
-// Recorder creates it and puts it on the context; the HTTP transport that norma
-// dials through (agent.quotaAwareTransport) finds it there and fills it in.
+// Recorder creates it and puts it on the context; the HTTP transport the
+// provider dials through (agent.quotaAwareTransport) finds it there and fills
+// it in.
 //
 // This exists because everything the Recorder itself sees is already normalized:
-// llm.CompletionRequest is re-serialized rather than the body buildBody() sent,
-// and the response arrives as decoded StreamEvents, not the SSE frames. For
-// debugging a live provider, the bytes on the wire are the only ground truth.
+// the eino call is re-serialized rather than the body the provider adapter sent,
+// and the response arrives as decoded schema.Message chunks, not the SSE frames.
+// For debugging a live provider, the bytes on the wire are the only ground truth.
 //
-// norma's doStream retries the request-establishment phase, so one Stream can
-// issue several HTTP attempts. Each attempt is kept: the discarded ones (see
-// norma/llm/retry.go, which closes non-final bodies unread) are exactly what
-// makes rate-limit and gateway failures diagnosable.
+// The provider's retry layer (acllm/retry.go) re-establishes failed calls, so one
+// logical call can issue several HTTP attempts. Each attempt is kept: the
+// discarded ones (whose bodies are closed unread) are exactly what makes
+// rate-limit and gateway failures diagnosable.
 //
-// The transport writes from norma's stream-reading goroutine while the Recorder
-// snapshots at stream end, so all state is mutex-guarded.
+// The transport writes from the provider's stream-reading goroutine while the
+// Recorder snapshots at stream end, so all state is mutex-guarded.
 type Capture struct {
 	mu       sync.Mutex
 	request  string

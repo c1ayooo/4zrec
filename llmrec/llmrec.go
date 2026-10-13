@@ -1,19 +1,24 @@
-// Package llmrec implements a recording decorator for llm.Provider. It intercepts
-// every Stream call, captures the full request and accumulated response, and
-// persists them to PostgreSQL for later inspection.
+// Package llmrec implements a recording decorator for eino chat models
+// (model.ToolCallingChatModel). It intercepts every Generate/Stream call,
+// derives the token usage from the model's ResponseMeta, and persists a
+// lightweight llm_usage metering row per call — plus, when body recording is
+// enabled, a full llm_records trace of the call.
 package llmrec
 
 import (
 	"context"
 	"encoding/json"
-	"iter"
+	"errors"
+	"io"
 	"log"
 	"strings"
 	"time"
 
+	"github.com/Autumn-27/artex/acllm"
 	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/norma/llm"
-	"github.com/Autumn-27/norma/transcript"
+	"github.com/Autumn-27/artex/transcript"
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 )
 
 type taskIDContextKey struct{}
@@ -60,29 +65,80 @@ func workerFrom(ctx context.Context) string {
 	return strings.TrimSpace(worker)
 }
 
-// Recorder wraps an llm.Provider and records every completion call.
+// Recorder wraps a model.ToolCallingChatModel and records every call made
+// through it (and through any model derived from it via WithTools).
 type Recorder struct {
-	inner llm.Provider
+	inner model.ToolCallingChatModel
 	pg    *db.DB
-	model string // model name (from config, not in CompletionRequest)
+	model string // model name (from config, not in the call input)
 	prof  string // LLM profile name (from llm_profiles)
-	// thinkingType / reasoningEffort 是配置级思考参数(思考开关 / 思考强度)。它们在
-	// norma 的 buildBody() 里从 provider 配置注入真正的 HTTP body,不出现在
-	// CompletionRequest 上,故 Recorder 需在此单独带一份,序列化时写进录制。
+	// thinkingType / reasoningEffort 是配置级思考参数(思考开关 / 思考强度)。eino 接缝下
+	// 它们被烘焙进底层模型(acllm.Config → claudeThinking / ReasoningEffort),不再随
+	// 每次调用传参,故 Recorder 在此单独带一份,序列化时写进录制。
 	thinkingType    string
 	reasoningEffort string
-	enabled         func() bool // reports whether recording is currently on; nil = always record
+	boundTools      []*schema.ToolInfo // tools attached via WithTools on this Recorder
+	enabled         func() bool        // reports whether recording is currently on; nil = always record
 }
 
-// Wrap returns a Provider that records calls to pg when enabled() reports true.
-// profName is the LLM profile name (e.g. "default"); may be empty. thinkingType /
-// reasoningEffort are the config-level thinking params actually sent to the API
-// (empty = not sent). A nil enabled predicate records unconditionally.
-func Wrap(inner llm.Provider, pg *db.DB, model, profName, thinkingType, reasoningEffort string, enabled func() bool) *Recorder {
+// Wrap returns a ToolCallingChatModel that records calls to pg when enabled()
+// reports true. profName is the LLM profile name (e.g. "default"); may be empty.
+// thinkingType / reasoningEffort are the config-level thinking params baked into
+// the wrapped model (empty = not sent). A nil enabled predicate records
+// unconditionally.
+func Wrap(inner model.ToolCallingChatModel, pg *db.DB, modelName, profName, thinkingType, reasoningEffort string, enabled func() bool) *Recorder {
 	return &Recorder{
-		inner: inner, pg: pg, model: model, prof: profName,
+		inner: inner, pg: pg, model: modelName, prof: profName,
 		thinkingType: thinkingType, reasoningEffort: reasoningEffort, enabled: enabled,
 	}
+}
+
+// WithTools re-wraps the derived model so recording survives tool binding. The
+// derived Recorder remembers the bound tools so the serialized call trace can
+// name them.
+func (r *Recorder) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	inner, err := r.inner.WithTools(tools)
+	if err != nil {
+		return nil, err
+	}
+	c := *r
+	c.inner = inner
+	c.boundTools = append(append([]*schema.ToolInfo{}, r.boundTools...), tools...)
+	return &c, nil
+}
+
+// attribution is the per-call task/worker/session bookkeeping parsed from ctx.
+type attribution struct {
+	session string
+	taskID  string
+	worker  string
+	expID   int64
+}
+
+// attribute derives task id, worker lane and exploration id from the call
+// context. The session identifier (e.g. "exp1-worker-i3") is carried on ctx by
+// the kernel via transcript.WithSessionID; reading it per-call is race-free even
+// when planner and multiple workers share one Recorder instance.
+func (r *Recorder) attribute(ctx context.Context) attribution {
+	session := transcript.SessionIDFrom(ctx)
+	parsedID, worker := parseSession(session)
+	if ov := workerFrom(ctx); ov != "" {
+		worker = ov
+	}
+	taskID := TaskIDFrom(ctx)
+	if taskID == "" {
+		// Backward compatibility for non-task callers. For task calls, the task
+		// runtime always supplies the registry id explicitly.
+		taskID = parsedID
+	}
+	return attribution{session: session, taskID: taskID, worker: worker, expID: db.ParseExpID(parsedID)}
+}
+
+func (a attribution) status(err error) (string, string) {
+	if err == nil {
+		return "ok", ""
+	}
+	return "error", err.Error()
 }
 
 // parseSession extracts task id and worker role from session strings like
@@ -109,162 +165,153 @@ func parseSession(s string) (taskID, worker string) {
 	return taskID, worker
 }
 
-// Stream implements llm.Provider. It delegates to the inner provider, accumulates
-// the streamed events to reconstruct the response, and records the full exchange.
-//
-// The session identifier (e.g. "exp1-worker-i3") is carried on ctx by the norma
-// harness via transcript.WithSessionID; reading it per-call is race-free even when
-// planner and multiple workers share one Recorder instance.
-func (r *Recorder) Stream(ctx context.Context, req llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
-	// Body recording (the heavy debug trace: full request/response) is gated by the
-	// llm_record setting. Lightweight usage metering always runs — it powers token
-	// stats and must be complete even for interrupted/failed runs, so it is NOT
-	// gated. Only body serialization + response accumulation are skipped when off.
+// Generate implements model.ToolCallingChatModel. It delegates to the inner
+// model and records the exchange: usage from the response's ResponseMeta, plus
+// the full trace when body recording is on.
+func (r *Recorder) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
 	recordBodies := r.enabled == nil || r.enabled()
 	start := time.Now()
-	session := transcript.SessionIDFrom(ctx)
-	parsedID, worker := parseSession(session)
-	if ov := workerFrom(ctx); ov != "" {
-		worker = ov
-	}
-	expID := db.ParseExpID(parsedID)
-	taskID := TaskIDFrom(ctx)
-	if taskID == "" {
-		// Backward compatibility for non-task callers. For task calls, the task
-		// runtime always supplies the registry id explicitly.
-		taskID = parsedID
-	}
+	attr := r.attribute(ctx)
 
-	// Serialize the request only when storing bodies (this is the expensive part).
+	// Serialize the call only when storing bodies (this is the expensive part).
 	// Alongside it, attach a Capture so the HTTP transport can hand back the
 	// untouched wire bodies — the normalized view below cannot reconstruct them
-	// (tool schemas are dropped, tool_use blocks never reach this layer, and the
-	// SSE framing is already decoded). See capture.go.
+	// (tool schemas are collapsed to names, and the SSE framing is already
+	// decoded). See capture.go.
 	reqBody := ""
 	var capt *Capture
 	if recordBodies {
-		reqBody = r.serializeRequest(req)
+		reqBody = r.serializeCall(input, opts)
 		ctx, capt = NewCapture(ctx)
 	}
 
-	return func(yield func(llm.StreamEvent, error) bool) {
-		var (
-			textBuf     strings.Builder
-			thinkingBuf strings.Builder
-			usage       llm.Usage
-			stopReason  string
-			streamErr   error
-		)
-
-		finished := false
-		finish := func(err error) {
-			if finished {
-				return
-			}
-			finished = true
-			status := "ok"
-			if err != nil {
-				status = "error"
-			}
-			// Lightweight metering row — always written.
-			r.recordUsage(taskID, expID, worker, usage, int(time.Since(start).Milliseconds()), status)
-			// Heavy trace row — only when body recording is on.
-			if recordBodies {
-				r.record(req, session, taskID, worker, reqBody, capt, start, textBuf.String(), thinkingBuf.String(), usage, stopReason, err)
-			}
-		}
-		defer func() { finish(ctx.Err()) }()
-
-		for ev, err := range r.inner.Stream(ctx, req) {
-			if err != nil {
-				streamErr = err
-				finish(streamErr)
-				if !yield(ev, err) {
-					return
-				}
-				return
-			}
-			// Always track usage (cheap); accumulate text/thinking only for bodies.
-			// Anthropic (and the other providers) split token usage across events:
-			// message_start carries ONLY the input side (input + cache), message_delta
-			// ONLY the output. They must be FOLDED with Add — overwriting on delta
-			// would zero out the input already counted at start (mirrors the SDK's own
-			// llm.Accumulator; see norma/llm/accumulate.go).
-			switch ev.Type {
-			case llm.SETextDelta:
-				if recordBodies {
-					textBuf.WriteString(ev.Text)
-				}
-			case llm.SEThinkingDelta:
-				if recordBodies {
-					thinkingBuf.WriteString(ev.Text)
-				}
-			case llm.SEMessageStart:
-				usage.Add(ev.Usage)
-			case llm.SEMessageDelta:
-				if ev.StopReason != "" {
-					stopReason = ev.StopReason
-				}
-				usage.Add(ev.Usage)
-			}
-			if !yield(ev, err) {
-				return
-			}
-		}
-
-		// Stream completed normally.
-		finish(streamErr)
+	msg, err := r.inner.Generate(ctx, input, opts...)
+	var usage acllm.Usage
+	if msg != nil && msg.ResponseMeta != nil {
+		usage = acllm.UsageFromToken(msg.ResponseMeta.Usage)
 	}
+	status, errMsg := attr.status(err)
+	// Lightweight metering row — always written.
+	r.recordUsage(attr.taskID, attr.expID, attr.worker, usage, int(time.Since(start).Milliseconds()), status)
+	// Heavy trace row — only when body recording is on.
+	if recordBodies {
+		r.record(attr, reqBody, capt, start, messageText(msg), messageReasoning(msg), finishReason(msg), usage, status, errMsg)
+	}
+	return msg, err
 }
 
-// Complete implements the atomic completion path while preserving the same
-// usage metering, normalized body recording and raw wire capture as Stream.
-func (r *Recorder) Complete(ctx context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
+// Stream implements model.ToolCallingChatModel. eino stream readers are
+// single-reader, so the inner stream is tee'd with Copy(2): one branch is
+// returned to the caller untouched (identical chunks, identical order), the
+// other is drained by an observer goroutine that folds the usage from the
+// usage-bearing final chunk and writes the metering/trace rows once the stream
+// settles. The observer drains even when the consumer abandons its branch
+// early, so usage stays complete for interrupted runs; a cancellation that
+// reaches the model (or is pending at stream end) records status=error.
+func (r *Recorder) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
 	recordBodies := r.enabled == nil || r.enabled()
 	start := time.Now()
-	session := transcript.SessionIDFrom(ctx)
-	parsedID, worker := parseSession(session)
-	if ov := workerFrom(ctx); ov != "" {
-		worker = ov
-	}
-	expID := db.ParseExpID(parsedID)
-	taskID := TaskIDFrom(ctx)
-	if taskID == "" {
-		taskID = parsedID
-	}
+	attr := r.attribute(ctx)
 
 	reqBody := ""
 	var capt *Capture
 	if recordBodies {
-		reqBody = r.serializeRequest(req)
+		reqBody = r.serializeCall(input, opts)
 		ctx, capt = NewCapture(ctx)
 	}
 
-	msg, stopReason, usage, err := r.inner.Complete(ctx, req)
-	status := "ok"
+	sr, err := r.inner.Stream(ctx, input, opts...)
 	if err != nil {
-		status = "error"
+		// The call never produced a stream: record the failure synchronously.
+		status, errMsg := attr.status(err)
+		r.recordUsage(attr.taskID, attr.expID, attr.worker, acllm.Usage{}, int(time.Since(start).Milliseconds()), status)
+		if recordBodies {
+			r.record(attr, reqBody, capt, start, "", "", "", acllm.Usage{}, status, errMsg)
+		}
+		return nil, err
 	}
-	r.recordUsage(taskID, expID, worker, usage, int(time.Since(start).Milliseconds()), status)
-	if recordBodies {
-		r.record(req, session, taskID, worker, reqBody, capt, start, msg.Text(), thinkingText(msg), usage, stopReason, err)
-	}
-	return msg, stopReason, usage, err
+
+	branches := sr.Copy(2) // tee: [0] for the caller, [1] for the observer
+	go r.observe(attr, branches[1], ctx, start, reqBody, capt, recordBodies, input, opts)
+	return branches[0], nil
 }
 
-func thinkingText(msg llm.Message) string {
-	var b strings.Builder
-	for _, block := range msg.Content {
-		if block.Type == llm.BlockThinking && block.Thinking != "" {
-			b.WriteString(block.Thinking)
+// observe drains the tee'd branch, folds usage from the final usage-bearing
+// chunk and writes the llm_usage row (plus the llm_records trace when enabled).
+func (r *Recorder) observe(attr attribution, sr *schema.StreamReader[*schema.Message], ctx context.Context, start time.Time, reqBody string, capt *Capture, recordBodies bool, input []*schema.Message, opts []model.Option) {
+	defer sr.Close()
+
+	var (
+		chunks     []*schema.Message // accumulated only for the trace
+		usage      acllm.Usage
+		stopReason string
+		streamErr  error
+	)
+	for {
+		msg, err := sr.Recv()
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				streamErr = err
+			}
+			break
+		}
+		if msg == nil {
+			continue
+		}
+		// Providers attach the WHOLE call's usage to the final chunk (eino's
+		// ResponseMeta contract), so the last usage-bearing chunk wins — there
+		// is no norma-style start/delta split to fold with Add.
+		if msg.ResponseMeta != nil {
+			if msg.ResponseMeta.FinishReason != "" {
+				stopReason = msg.ResponseMeta.FinishReason
+			}
+			if msg.ResponseMeta.Usage != nil {
+				usage = acllm.UsageFromToken(msg.ResponseMeta.Usage)
+			}
+		}
+		if recordBodies {
+			chunks = append(chunks, msg)
 		}
 	}
-	return b.String()
+
+	// A cancellation that was pending when the stream settled means the
+	// consumer walked away (or the run was interrupted): mirror norma's
+	// finish(ctx.Err()) and mark the row as an error.
+	if streamErr == nil {
+		streamErr = ctx.Err()
+	}
+	status, errMsg := attr.status(streamErr)
+	r.recordUsage(attr.taskID, attr.expID, attr.worker, usage, int(time.Since(start).Milliseconds()), status)
+	if recordBodies {
+		final, _ := schema.ConcatMessages(chunks) // nil-safe: only used for text below
+		r.record(attr, reqBody, capt, start, messageText(final), messageReasoning(final), stopReason, usage, status, errMsg)
+	}
+}
+
+func messageText(msg *schema.Message) string {
+	if msg == nil {
+		return ""
+	}
+	return msg.Content
+}
+
+func messageReasoning(msg *schema.Message) string {
+	if msg == nil {
+		return ""
+	}
+	return msg.ReasoningContent
+}
+
+func finishReason(msg *schema.Message) string {
+	if msg == nil || msg.ResponseMeta == nil {
+		return ""
+	}
+	return msg.ResponseMeta.FinishReason
 }
 
 // recordUsage appends one lightweight metering row to llm_usage (no bodies). Skips
 // zero-token calls with no model, which carry nothing worth metering.
-func (r *Recorder) recordUsage(taskID string, expID int64, worker string, usage llm.Usage, latencyMs int, status string) {
+func (r *Recorder) recordUsage(taskID string, expID int64, worker string, usage acllm.Usage, latencyMs int, status string) {
 	if r.pg == nil {
 		return
 	}
@@ -290,16 +337,13 @@ func (r *Recorder) recordUsage(taskID string, expID int64, worker string, usage 
 	}
 }
 
-// record persists one LLM call to PostgreSQL before the provider stream returns.
-// Keeping the write inside the owning task operation means task deletion can
-// drain calls and then remove records without a late async insert recreating one.
-func (r *Recorder) record(req llm.CompletionRequest, session, taskID, worker, reqBody string, capt *Capture, start time.Time, text, thinking string, usage llm.Usage, stopReason string, streamErr error) {
-	latency := int(time.Since(start).Milliseconds())
-	status := "ok"
-	errMsg := ""
-	if streamErr != nil {
-		status = "error"
-		errMsg = streamErr.Error()
+// record persists one LLM call to PostgreSQL. On the Generate path this runs
+// inside the calling operation; on the Stream path it runs on the observer
+// goroutine once the tee'd branch settles — shortly after stream end rather
+// than strictly inside the consumer's loop.
+func (r *Recorder) record(attr attribution, reqBody string, capt *Capture, start time.Time, text, thinking, stopReason string, usage acllm.Usage, status, errMsg string) {
+	if r.pg == nil {
+		return
 	}
 
 	// Build response body JSON.
@@ -318,19 +362,13 @@ func (r *Recorder) record(req llm.CompletionRequest, session, taskID, worker, re
 	}
 	respBody, _ := json.Marshal(resp)
 
-	model := ""
-	if len(req.System) > 0 {
-		// model is not in CompletionRequest; use the configured model name
-	}
-	model = r.model
-
 	rec := &db.LLMRecord{
-		SessionID:    session,
-		TaskID:       taskID,
-		Worker:       worker,
-		Model:        model,
+		SessionID:    attr.session,
+		TaskID:       attr.taskID,
+		Worker:       attr.worker,
+		Model:        r.model,
 		ProfileName:  r.prof,
-		LatencyMs:    latency,
+		LatencyMs:    int(time.Since(start).Milliseconds()),
 		InputTokens:  usage.InputTokens,
 		OutputTokens: usage.OutputTokens,
 		CacheRead:    usage.CacheReadTokens,
@@ -351,38 +389,63 @@ func (r *Recorder) record(req llm.CompletionRequest, session, taskID, worker, re
 	}
 }
 
-// serializeRequest builds a JSON representation of the completion request.
-func (r *Recorder) serializeRequest(req llm.CompletionRequest) string {
+// serializeCall builds a JSON representation of the eino model call: the input
+// messages projected back to the DTO vocabulary, the system segments, the bound
+// tool names and the effective call options. This replaces norma's
+// CompletionRequest serialization; the JSON shape differs (messages are DTO
+// blocks, options are read off model.Option, and the per-request thinking
+// override no longer exists — thinking params are config-level only).
+func (r *Recorder) serializeCall(input []*schema.Message, opts []model.Option) string {
+	common := model.GetCommonOptions(&model.Options{}, opts...)
 	m := map[string]any{
-		"system":     req.System,
-		"messages":   req.Messages,
-		"max_tokens": req.MaxTokens,
+		"messages": acllm.FromSchema(input),
 	}
-	// 记录本次调用实际发出的思考参数。type 采用「有效值」：每请求覆盖 req.Thinking
-	// 优先于配置级 thinkingType(与 norma buildBody 的判定一致，如 compaction 摘要会
-	// 强制 disabled)；effort 无每请求覆盖，直接取配置值。两者皆空则不写 thinking 字段。
-	effType := r.thinkingType
-	if req.Thinking != "" {
-		effType = req.Thinking
+	if system := systemSegments(input); len(system) > 0 {
+		m["system"] = system
 	}
-	if effType != "" || r.reasoningEffort != "" {
-		m["thinking"] = map[string]string{"type": effType, "effort": r.reasoningEffort}
+	// 记录本次调用生效的思考参数。type/effort 均取配置级值(eino 接缝下思考参数不随
+	// 调用传参;norma 时代 compaction 摘要的每请求 disabled 覆盖随接缝消失)。
+	if r.thinkingType != "" || r.reasoningEffort != "" {
+		m["thinking"] = map[string]string{"type": r.thinkingType, "effort": r.reasoningEffort}
 	}
-	if len(req.Tools) > 0 {
+	tools := append(append([]*schema.ToolInfo{}, r.boundTools...), common.Tools...)
+	if len(tools) > 0 {
 		// Store tool names only (full schemas are huge).
-		names := make([]string, len(req.Tools))
-		for i, t := range req.Tools {
+		names := make([]string, len(tools))
+		for i, t := range tools {
 			names[i] = t.Name
 		}
 		m["tools"] = names
-		m["tools_count"] = len(req.Tools)
+		m["tools_count"] = len(tools)
 	}
-	if req.Temperature != nil {
-		m["temperature"] = *req.Temperature
+	if common.Model != nil {
+		m["model"] = *common.Model
 	}
-	if len(req.Stop) > 0 {
-		m["stop"] = req.Stop
+	if common.Temperature != nil {
+		m["temperature"] = *common.Temperature
+	}
+	if common.TopP != nil {
+		m["top_p"] = *common.TopP
+	}
+	if common.MaxTokens != nil {
+		m["max_tokens"] = *common.MaxTokens
+	}
+	if len(common.Stop) > 0 {
+		m["stop"] = common.Stop
 	}
 	b, _ := json.Marshal(m)
 	return string(b)
+}
+
+// systemSegments collects the system-role input messages. eino carries the
+// system prompt in the input array (acllm.FromSchema skips it), so it is
+// recorded separately to keep the old "system" key recognizable.
+func systemSegments(input []*schema.Message) []string {
+	var out []string
+	for _, m := range input {
+		if m != nil && m.Role == schema.System {
+			out = append(out, m.Content)
+		}
+	}
+	return out
 }

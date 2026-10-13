@@ -1,7 +1,7 @@
-// Package llmpool implements LLM failover ("轮询"): a Provider decorator that
-// walks an ordered chain of LLM profiles and moves to the next one when the
-// current one can't serve the request — out of credit, revoked key, rate-limited
-// past the SDK's own retries, or down.
+// Package llmpool implements LLM failover ("轮询"): a model.ToolCallingChatModel
+// decorator (cloudwego/eino) that walks an ordered chain of LLM profiles and
+// moves to the next one when the current one can't serve the request — out of
+// credit, revoked key, rate-limited past the SDK's own retries, or down.
 //
 // The chain is built by the server from llm_profiles (active profile first, then
 // by priority), so the whole process shares ONE chain and ONE circuit-breaker
