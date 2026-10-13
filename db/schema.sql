@@ -1384,3 +1384,27 @@ CREATE INDEX IF NOT EXISTS idx_notification_deliveries_batch
     ON notification_deliveries(batch_id) WHERE batch_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_notification_deliveries_channel
     ON notification_deliveries(channel_id, id DESC);
+
+-- 漏洞知识库（vuln_kb）：老 4zreco 项目 1day 漏洞库的结构化形态。导入器按
+-- content_hash（原始 md 的 sha256）幂等 upsert，重复导入零成本；source_path
+-- 保留仓库内相对路径便于溯源。body 为原始 markdown，列表接口不返回。
+CREATE TABLE IF NOT EXISTS vuln_kb (
+    id           BIGSERIAL PRIMARY KEY,
+    content_hash TEXT NOT NULL UNIQUE,
+    title        TEXT NOT NULL DEFAULT '',
+    product      TEXT NOT NULL DEFAULT '',
+    vuln_type    TEXT NOT NULL DEFAULT '',
+    cve          TEXT NOT NULL DEFAULT '',
+    fingerprint  TEXT NOT NULL DEFAULT '',
+    request_line TEXT NOT NULL DEFAULT '',
+    headers      TEXT NOT NULL DEFAULT '',
+    payload      TEXT NOT NULL DEFAULT '',
+    response_sig TEXT NOT NULL DEFAULT '',
+    expected     TEXT NOT NULL DEFAULT '',
+    body         TEXT NOT NULL DEFAULT '',
+    source_path  TEXT NOT NULL DEFAULT '',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_vuln_kb_product ON vuln_kb(product);
+CREATE INDEX IF NOT EXISTS idx_vuln_kb_type ON vuln_kb(vuln_type);
+CREATE INDEX IF NOT EXISTS idx_vuln_kb_cve ON vuln_kb(cve) WHERE cve <> '';

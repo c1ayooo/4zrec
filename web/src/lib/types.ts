@@ -1610,3 +1610,30 @@ export interface InterceptExecution {
   seq: number;
   items: Activity[];
 }
+
+/** 漏洞知识库(1day 库)的一条记录。列表接口不带 body。 */
+export interface VulnKBEntry {
+  id: number;
+  title: string;
+  product: string;
+  vuln_type: string;
+  cve: string;
+  fingerprint: string;
+  request_line: string;
+  headers: string;
+  payload: string;
+  response_sig: string;
+  expected: string;
+  body?: string;
+  source_path: string;
+}
+
+/** 漏洞库概览统计。 */
+export interface VulnKBStats {
+  total: number;
+  products: number;
+  with_cve: number;
+  with_payload: number;
+  with_fingerprint: number;
+  types: { name: string; count: number }[];
+}

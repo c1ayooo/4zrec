@@ -102,6 +102,8 @@ import type {
   TrafficResp,
   UpdateCheck,
   UsageStats,
+  VulnKBEntry,
+  VulnKBStats,
   WorkspaceFile,
   WorkspaceListing,
 } from "@/lib/types";
@@ -1313,4 +1315,16 @@ export const api = {
   // 202 即返回，实际下载在后台跑，进度走 /api/update/stream。
   applyUpdate: () => post<{ ok: boolean; target: string }>(`/update/apply`),
   rollbackUpdate: () => post<{ ok: boolean }>(`/update/rollback`),
+
+  // ---- vuln kb (1day 漏洞知识库) ----
+  vulnKb: (params?: { q?: string; type?: string; page?: number; size?: number }) => {
+    const sp = new URLSearchParams();
+    if (params?.q) sp.set("q", params.q);
+    if (params?.type) sp.set("type", params.type);
+    sp.set("page", String(params?.page ?? 0));
+    sp.set("size", String(params?.size ?? 50));
+    return get<{ entries: VulnKBEntry[]; total: number }>(`/vulnkb?${sp}`);
+  },
+  vulnKbEntry: (id: number) => get<{ entry: VulnKBEntry }>(`/vulnkb/${id}`),
+  vulnKbStats: () => get<{ stats: VulnKBStats }>("/vulnkb/stats"),
 };

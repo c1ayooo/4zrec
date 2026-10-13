@@ -792,6 +792,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/traffic/blob", s.getTrafficBlob)
 	mux.HandleFunc("GET /api/commands", s.pgListCommands)
 	mux.HandleFunc("GET /api/commands/stats", s.pgToolStats) // 按工具聚合调用次数
+	mux.HandleFunc("GET /api/vulnkb", s.pgListVulnKB)        // 漏洞知识库(1day 库)
+	mux.HandleFunc("GET /api/vulnkb/stats", s.pgVulnKBStats)
+	mux.HandleFunc("GET /api/vulnkb/{id}", s.pgGetVulnKB)
 	mux.HandleFunc("GET /api/llm/records", s.pgListLLMRecords)
 	mux.HandleFunc("DELETE /api/llm/records", s.pgDeleteLLMRecords)
 	mux.HandleFunc("GET /api/llm/records/tasks", s.pgLLMTasks)

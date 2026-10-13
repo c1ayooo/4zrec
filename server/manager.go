@@ -21,6 +21,7 @@ import (
 	"github.com/Autumn-27/artex/intercept"
 	actool "github.com/Autumn-27/artex/tools"
 	"github.com/Autumn-27/artex/traffic"
+	"github.com/Autumn-27/artex/vulnkb"
 )
 
 // Task is one engagement: a description + goal + its own exploration store,
@@ -373,6 +374,12 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	if err := pg.EnsureLLMUsageTable(); err != nil {
 		log.Printf("[llmusage] create table: %v", err)
 	}
+	// 漏洞知识库后台导入:按 content_hash 幂等,放好 vulnkb/ 目录重启即入库。
+	vulnkbDir := os.Getenv("ARTEX_VULNKB_DIR")
+	if vulnkbDir == "" {
+		vulnkbDir = vulnkb.DefaultDir
+	}
+	vulnkb.Bootstrap(pg, vulnkbDir)
 	m := &Manager{dir: dir, pg: pg, assets: pg.Assets(), tasks: map[string]*Task{}, interceptor: intercept.New(pg)}
 	if proxyAddr != "" {
 		tr, err := traffic.Open(filepath.Join(dir, "traffic"), proxyAddr)
