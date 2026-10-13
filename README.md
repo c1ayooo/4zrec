@@ -1,11 +1,10 @@
 <div align="center">
 
-# ARTEX
+# 4zrec
 
 AI 自主渗透测试系统（Go 后端 + Next.js 前端）
 
 
-🌐 **在线 Demo**： [https://artex-demo.vercel.app/](https://artex-demo.vercel.app/)
 
 </div>
 
@@ -13,7 +12,6 @@ AI 自主渗透测试系统（Go 后端 + Next.js 前端）
 
 ## 截图预览
 
-> 完整交互见[在线 Demo](https://artex-demo.vercel.app/)。
 
 | 仪表盘（总览 / Token 消耗 / 活动流） | 任务列表 |
 | :---: | :---: |
@@ -49,7 +47,7 @@ AI 自主渗透测试系统（Go 后端 + Next.js 前端）
 ## 审批记录详情
 
 全局「审批记录」、任务内「拦截审批」及对话中的审批卡片均支持展开查看详情。展示结构参考
-[AegisHook 的审批详情组件](https://github.com/RuoJi6/AegisHook/blob/main/web/src/components/CallDetail.vue)，沿用 ARTEX 的组件和主题：
+[AegisHook 的审批详情组件](https://github.com/RuoJi6/AegisHook/blob/main/web/src/components/CallDetail.vue)，沿用 ARTEX 的组件和主题（本项目的前身）：
 
 
 ## 资产同步（ScopeSentry）
@@ -58,7 +56,7 @@ AI 自主渗透测试系统（Go 后端 + Next.js 前端）
 
 - 在「**资产同步**」页填 ScopeSentry 的地址与 API Key，接入数据源；
 - 按**项目**或**任务**维度选择要同步的目标与资产类型（域名 / 子域 / IP / 端口 / 站点 / 端点…）；
-- 一键导入并按公司资产范围归并，直接进入 ARTEX 的资产图供 agent 探索使用。
+- 一键导入并按公司资产范围归并，直接进入 4zrec 的资产图供 agent 探索使用。
 
 ---
 
@@ -69,8 +67,8 @@ AI 自主渗透测试系统（Go 后端 + Next.js 前端）
 ### 方式一：一键安装脚本（推荐）
 
 ```bash
-git clone https://github.com/Autumn-27/ARTEX.git
-cd ARTEX
+git clone https://github.com/c1ayooo/4zrec.git
+cd 4zrec
 ./install.sh
 ```
 
@@ -84,8 +82,8 @@ cd ARTEX
 ### 方式二：Docker Compose（手动）
 
 ```bash
-git clone https://github.com/Autumn-27/ARTEX.git
-cd ARTEX
+git clone https://github.com/c1ayooo/4zrec.git
+cd 4zrec
 cp .env.example .env          # 填 POSTGRES_PASSWORD、可选 ANTHROPIC_API_KEY
 docker compose up -d          # 拉取 autumn27/artex 镜像 + postgres
 # → http://localhost:8787
@@ -100,7 +98,7 @@ docker compose up -d          # 拉取 autumn27/artex 镜像 + postgres
 
 ### 方式三：下载预编译二进制（Releases）
 
-到 [Releases](https://github.com/Autumn-27/ARTEX/releases) 下载对应平台的 zip，解压后得到 `artex` + `start.sh`（Windows 为 `start.bat`）+ `skills/` + `config.example.json`：
+到 [Releases](https://github.com/c1ayooo/4zrec/releases) 下载对应平台的 zip，解压后得到 `artex` + `start.sh`（Windows 为 `start.bat`）+ `skills/` + `config.example.json`：
 
 ```bash
 cp config.example.json config.json   # 填好 database 连接
@@ -160,7 +158,7 @@ ARTEX_TARGETS=linux/amd64,windows/amd64 ./build.sh --release
 ### 方式二：一键更新脚本
 
 ```bash
-cd ARTEX
+cd 4zrec
 ./update.sh
 ```
 
@@ -172,7 +170,7 @@ cd ARTEX
 ### 方式三：Docker Compose（手动）
 
 ```bash
-cd ARTEX
+cd 4zrec
 git pull                       # 更新 compose / 脚本（可选）
 # 指定版本：在 .env 设 ARTEX_TAG=v0.2.0；不设则用 latest
 docker compose pull artex
@@ -182,7 +180,7 @@ docker image prune -f          # 清理旧镜像（可选）
 
 ### 方式四：预编译二进制（Releases）
 
-到 [Releases](https://github.com/Autumn-27/ARTEX/releases) 下载新版本 zip，停掉旧进程后覆盖 `artex` 与 `skills/`（保留你的 `config.json` 与 `data/`），重启即可：
+到 [Releases](https://github.com/c1ayooo/4zrec/releases) 下载新版本 zip，停掉旧进程后覆盖 `artex` 与 `skills/`（保留你的 `config.json` 与 `data/`），重启即可：
 
 ```bash
 cp -r <解压目录>/skills ./ && cp <解压目录>/artex ./
@@ -282,7 +280,7 @@ server {
 
 ## 系统技术架构
 
-ARTEX 是一套 **LLM 多 agent 驱动的自主渗透系统**：Go 单体后端（内嵌 Next.js 前端）+ PostgreSQL，agent 能力由 [`norma`](https://github.com/Autumn-27/norma) SDK 提供（`agentcore` / `tool` / `permission` / `harness` / `memory` / `transcript`）。核心是**双图架构**，以及围绕它的两条自主性机制：**worker 间过程级信息交换**与 **planner 多轮共享 todolist 稳定攻击链路**。
+4zrec 是一套 **LLM 多 agent 驱动的自主渗透系统**：Go 单体后端（内嵌 Next.js 前端）+ PostgreSQL，agent 能力构建在 [cloudwego/eino](https://github.com/cloudwego/eino) v0.9.21（ADK Runner 路线）之上——自研 `askernel` 运行内核（DTO 主历史 + schema 投影）负责门控、压缩与恢复，模型接入经 eino-ext（openai / claude，OpenAI Responses API 由自研 provider 保全支持），会话压缩（MicroCompact / AutoCompact / Reactive）与延迟工具 / skill 解锁为自研中间件。核心是**双图架构**，以及围绕它的两条自主性机制：**worker 间过程级信息交换**与 **planner 多轮共享 todolist 稳定攻击链路**。
 
 ### 总体分层
 
@@ -446,7 +444,7 @@ flowchart TB
   R3["第 3 轮（②产出 fact）　派意图③"] --> T3
 ```
 
-于是攻击链在“事件驱动 + 无状态会话”的环境下依然**稳定推进、不重复、不错序**——这是 ARTEX 能自主走完多步利用链的关键。
+于是攻击链在“事件驱动 + 无状态会话”的环境下依然**稳定推进、不重复、不错序**——这是 4zrec 能自主走完多步利用链的关键。
 
 ---
 
@@ -476,7 +474,7 @@ https://github.com/oritera/Cairn
 
 > ⚠️ **重要提示**：开源协议本身不限制软件的使用用途。以下的「使用限制」与「免责声明」是作者对使用者的额外约定与郑重声明，请务必遵守。
 
-**ARTEX 仅供个人学习、代码研究与本地技术验证使用，不得用于对任何线上系统或网站发起实际测试。**
+**4zrec 仅供个人学习、代码研究与本地技术验证使用，不得用于对任何线上系统或网站发起实际测试。**
 
 ### 允许使用范围
 
