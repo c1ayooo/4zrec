@@ -715,6 +715,8 @@ func (s *AssetStore) UpsertHTTPService(req UpsertHTTPServiceReq) (int64, error) 
 		taskIDs = "{}"
 	}
 
+	// 变更4：写侧指纹归一唯一咽喉——sync/enrich/agent-insert/REST 全部汇入本方法
+	req.Technologies = s.db.NormalizeTechnologies(req.Technologies)
 	techsArr := marshalStringArray(req.Technologies)
 	authJSON, err := marshalJSONBArray(req.Auth)
 	if err != nil {
