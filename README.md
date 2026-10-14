@@ -85,7 +85,7 @@ cd 4zrec
 git clone https://github.com/c1ayooo/4zrec.git
 cd 4zrec
 cp .env.example .env          # 填 POSTGRES_PASSWORD、可选 ANTHROPIC_API_KEY
-docker compose up -d          # 拉取 autumn27/artex 镜像 + postgres
+docker compose up -d          # 拉取 ghcr.io/c1ayooo/4zrec 镜像 + postgres
 # → http://localhost:8787
 ```
 
@@ -448,21 +448,27 @@ flowchart TB
 
 ---
 
-## 交流群
+## 本仓库相对上游 ARTEX 的变更与优化
 
-扫码关注微信公众号 **SecSentry**，在公众号后台私信即可入群交流。
+> 本项目是 [ARTEX](https://github.com/Autumn-27/ARTEX)（AGPL-3.0）的深度二开分支。以下是本仓库的全部实质变更：
 
-<div align="center">
+### 底座重写
 
-<img src="screenshots/wx.png" alt="微信公众号 SecSentry" width="480" />
+- **Agent 运行底座从自研 norma 库整体迁移到 [cloudwego/eino](https://github.com/cloudwego/eino) v0.9.21（ADK Runner 路线）**：自研 `askernel` 内核（DTO 主历史 + schema 投影）负责门控、压缩与恢复；模型接入经 eino-ext，OpenAI Responses API 由自研 provider 保全。迁移按行为不变量验收，对用户可见行为保持不变（存量会话/事件形状/审批语义逐项对齐）。
 
-</div>
+### 新增子系统
+
+- **1day 漏洞知识库**：5,233 篇实战漏洞库（指纹表达式 / 请求 / Payload）解析入库，「漏洞库」页四字段检索；agent 新增 `search_vuln_kb` 工具——识别出产品直接拿现成利用，替代凭模型记忆构造。
+- **漏洞情报自动采集与富化**：9 个公开情报源（阿里云 AVD / 长亭 / 奇安信 TI / OSCS / 微步 / Seebug / CISA KEV / Apache / 启明星辰）定时轮询入库；对带 CVE 条目自动富化 GitHub PoC（五档体检：恶意隔离 / 实验室标记）、GHSA+NVD 的 CVSS/CWE/受影响包、EPSS/KEV。
+- **原生指纹引擎**：三上游自动同步（wappalyzergo / webanalyze / dddd，15,000+ 规则，24h 周期 + 快照兜底），接入资产自动补全管线——HTTP 探测自动识别技术栈落 `technologies`，资产页徽章可点击直达漏洞库检索。
+- **AI 渗透测试报告（移植自 AntiFox 并改造）**：AI 只写散文、测试过程由 agent 就地记录的结构化复现步骤（`reproduction`）确定性渲染——防编造；python-docx 渲染器内嵌，交付级 .docx（封面 / 目录域 / CVSS 指标表）；报告出具方 / Logo / 人员组织级设置。
+
+### 品牌与其他
+
+- 品牌 / 登录名 / Logo 更换为 4zrec；产品名下所有二进制与数据格式不变。
+- 移除上游的技能包等与现状不符的内容。
 
 ---
-## 参考
-
-https://github.com/oritera/Cairn
-
 
 ## 许可与免责声明
 

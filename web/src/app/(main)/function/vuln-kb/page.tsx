@@ -442,10 +442,12 @@ function IntelTab() {
             ? `${status.sources} 个公开源自动轮询${status.result?.New !== undefined ? ` · 上轮新增 ${status.result.New}` : ""}`
             : "9 个公开情报源自动轮询"}
         </p>
-        <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing}>
-          {refreshing ? <Loader2Icon className="mr-1 size-4 animate-spin" /> : <RefreshCwIcon className="mr-1 size-4" />}
-          立即抓取
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing}>
+            {refreshing ? <Loader2Icon className="mr-1 size-4 animate-spin" /> : <RefreshCwIcon className="mr-1 size-4" />}
+            立即抓取
+          </Button>
+        </div>
       </div>
 
       <Card className="p-4">

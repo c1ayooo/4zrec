@@ -1501,3 +1501,4 @@ CREATE TABLE IF NOT EXISTS report_templates (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
