@@ -36,6 +36,11 @@ Thumbs.db
 
 # 内嵌前端的单二进制产物
 /artex
+# 运行日志绝不提交（含真实任务目标/LLM 流量；曾在 b39ee22 误入一次）
+/artex.log
+# 手动留存的旧二进制备份
+/artex.prev*
+/artex.old-*
 # 一键更新在可执行文件旁留下的中间产物（暂存件 / 备份 / 失败版本 / 升级标记）
 /artex.new
 /artex.new.sha256

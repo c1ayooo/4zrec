@@ -5,6 +5,7 @@ on:
 
 permissions:
   contents: write # 创建 Release 需要
+  packages: write # 推 GHCR 镜像需要
 
 jobs:
   # ① 前端静态导出（一次），产物给交叉编译各平台复用
@@ -81,6 +82,7 @@ jobs:
     needs: binaries
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4 # 取 CHANGELOG.md 提取本版发布说明
       - uses: actions/download-artifact@v4
         with:
           pattern: pkg-*
@@ -89,14 +91,25 @@ jobs:
       - name: Generate checksums
         working-directory: dist
         run: sha256sum *.zip > SHA256SUMS
+      # 发布说明取 CHANGELOG.md 对应版本段落——前端"检查更新"弹层展示的正是
+      # 这段正文；仓库无 PR 流程，GitHub 自动生成的 notes 只是 commit 列表，没用。
+      - name: Extract release notes from CHANGELOG
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          awk -v marker="## [${ver}]" '
+            index($0, marker) == 1 { found = 1; next }
+            /^## \[/ && found { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          [ -s release-notes.md ] || echo "发布 ${GITHUB_REF_NAME}，变更详见 CHANGELOG.md。" > release-notes.md
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.zip
             dist/SHA256SUMS
-          generate_release_notes: true
+          body_path: release-notes.md
 
-  # ④ 多架构镜像 → 推 Docker Hub（复用 binaries 编好的 Linux 二进制，
+  # ④ 多架构镜像 → 推 GHCR（复用 binaries 编好的 Linux 二进制，
   #    镜像里只装工具 + 放二进制；arm64 仅需模拟 apt 层，构建快很多）
   docker:
     needs: binaries
@@ -113,14 +126,16 @@ jobs:
           path: dist/arm64
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
+      # GHCR 直接用仓库自带的 GITHUB_TOKEN，无需配置任何 secret。
       - uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/metadata-action@v5
         id: meta
         with:
-          images: autumn27/artex
+          images: ghcr.io/${{ github.repository }}
           tags: |
             type=ref,event=tag
             type=raw,value=latest
