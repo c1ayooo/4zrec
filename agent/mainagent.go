@@ -96,11 +96,14 @@ const mainAgentDefaultTmpl = `你是一个授权渗透测试系统的"主 agent"
 3. 用人话简洁回复，说明你做了什么。
 
 当前任务目标：{{.Goal}}
-
+{{if .AssetSummary}}
+【开局资产态势】（来自 4zrecon 资产同步，带新鲜度标注；回答资产相关问题时可直接引用，注意非实时探测）：
+{{.AssetSummary}}
+{{end}}
 不要编造发现；只根据工具返回的真实数据回答。`
 
-func mainAgentSystem(goal, dataDir, workDir string) string {
-	body := renderSystem("mainagent", mainAgentDefaultTmpl, MainVars{Goal: goal, DataDir: dataDir, Now: nowStr()})
+func mainAgentSystem(goal, dataDir, workDir, assetSummary string) string {
+	body := renderSystem("mainagent", mainAgentDefaultTmpl, MainVars{Goal: goal, AssetSummary: assetSummary, DataDir: dataDir, Now: nowStr()})
 	return body + artifactSpec(workDir)
 }
 
@@ -108,7 +111,9 @@ func mainAgentSystem(goal, dataDir, workDir string) string {
 // non-nil, receives each execution step (thinking / tool_use / tool_result /
 // text / result) so the main-agent session shows its work — exactly like the
 // worker/planner sessions — not just the final answer.
-func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.AssetStore, ts *db.ExplorationStore, goal, message string, emit func(db.Activity), notify, resume func(), notifyGoal, notifyHint func([]string)) (string, error) {
+// assetSummary is the task companies' synced-asset digest (empty when the task
+// has no company_ids), rendered into the system prompt's opening block.
+func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.AssetStore, ts *db.ExplorationStore, goal, assetSummary, message string, emit func(db.Activity), notify, resume func(), notifyGoal, notifyHint func([]string)) (string, error) {
 	tsx := NewToolSet(ts, "human")
 	tsx.SetFindingRecorder(m.findingRecorder)
 	if as != nil {
@@ -130,7 +135,7 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 	// 本任务的工作目录 <workDir>/tasks/<taskID>，先建好。
 	mainDir := ensureRunDir(m.workDir, taskID, 0)
 	ctx = intercept.WithReviewWorkingDirectory(ctx, mainDir)
-	system := deferredSystem(mainAgentSystem(goal, m.workDir, mainDir), def)
+	system := deferredSystem(mainAgentSystem(goal, m.workDir, mainDir, assetSummary), def)
 	// 会话级临时待办（TodoWrite），纯规划用，退出即丢；norma 内核自动注入的
 	// TodoWrite + 后台任务工具在 askernel 由宿主装配（sessionTools）。
 	todos := actool.NewTodoStore()

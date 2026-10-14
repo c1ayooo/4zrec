@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### 资产同步（4zrecon，原 ScopeSentry）
+
+#### 新增的功能
+
+- **增量水位 + 定时同步**：新表 `sync_state` 按 (数据源×类型) 记水位，存上游原生字符串时间、只前进不后退；同步走服务端 time 倒序 + 客户端水位截断（新水位回拨 60s 防边界丢数，重复拉取由幂等 upsert 吸收）。独立 ticker 默认 30 分钟一轮（`config.json` 的 `sync.4zrecon_interval_minutes` 可调，负数关闭）；首刷自动全量建水位；达单轮上限截断时落 `sync_state.last_result` 留痕并向启用中的通知渠道直发告警。手动 `POST /api/sync/4zrecon/sync` 新增 `mode=full|inc`（空 mode 带 targets 的旧客户端仍按全量处理）。
+- **交互查询通道通电**：数据源启用即向 planner/worker 一次性播种 4 个只读 MCP 工具授权（`list_assets` / `count_assets` / `get_asset_detail` / `list_tasks`；写操作类不默认授予，用户可在可见性页自行开启；播种幂等，之后的用户删改不因重启复活）。`agent_visibility` 读侧实装工具级过滤：同服务器存在整服务器行时以整服务器行为准，UI 的服务器级开关语义不变。
+- **开局资产态势（AssetSummary 接线）**：带 `company_ids` 的任务，planner 与主 agent 的系统提示注入按公司聚合的态势摘要（各型资产计数、存活站点 top10、根域名清单、技术栈 top10），末行标注 `source=4zrecon sync` 与最近同步时间——防 agent 把同步资产当实时探测结论。每轮规划现算，无 company_ids 的任务行为不变。
+- **根域名默认纳入同步**：类型集扩为子域名/根域名/服务/App 四型（上游 `asset_type=RootDomain`）；UrlScan、敏感信息、漏洞按既有决策不进默认同步。
+- 同步页新增「增量同步全部」按钮与各类型水位/最近轮次/截断状态展示。
+
+#### 变更（破坏性）
+
+- **数据源更名 ScopeSentry → 4zrecon（全量）**：REST 端点 `/api/sync/scopesentry/*` → `/api/sync/4zrecon/*`；`mcp_servers` 行名改为 `4zrecon`（MCP 工具名随之变为 `mcp__4zrecon__*`）；skill 目录 `skills/scopesentry` → `skills/4zrecon`；config 键更名 `sync.4zrecon_interval_minutes`；Go/TS 标识符统一 recon 前缀（`server/sync_recon.go`）。**存量数据库升级前需确保数据源行已改名**（`UPDATE mcp_servers SET name='4zrecon' WHERE name='ScopeSentry'`；行 id 不变，URL/密钥/授权原样保留），否则同步页会看到一个新的空占位数据源。
+
 ## [0.4.0] - 2026-10-14
 
 ### 底座
@@ -744,7 +758,7 @@
 #### 修复的问题
 
 - 修复企业归属重算被单行脏数据打挂：`assets.ip` 存了主机名（Agent 或资产 API 写入）时，`a.ip::inet` 会抛 `22P02`，导致新增/修改企业资产范围和删除企业全部失败并回滚。改用安全转换 `try_inet()`，非法值跳过而不是中断整条语句。
-- 无法解析的 `ip` 不再静默跳过：企业范围保存后会明确提示有多少条资产的 `ip` 不是合法 IP（含具体 id 和取值），提醒这些资产不会被 IP/CIDR 规则归属；同一信息也写入服务端日志，覆盖没有前端响应的路径（删除企业、scopesentry 同步、Agent 写入）。
+- 无法解析的 `ip` 不再静默跳过：企业范围保存后会明确提示有多少条资产的 `ip` 不是合法 IP（含具体 id 和取值），提醒这些资产不会被 IP/CIDR 规则归属；同一信息也写入服务端日志，覆盖没有前端响应的路径（删除企业、4zrecon 同步、Agent 写入）。
 - 任务测试范围的 IP/CIDR 匹配同步改用 `try_inet()`，替换原先只检查字符集的正则守卫（`abc.def` 这类全 hex 字母的主机名此前仍会漏过并触发同样的报错）。
 
 #### 修改的功能

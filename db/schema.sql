@@ -854,11 +854,11 @@ DROP TRIGGER IF EXISTS trg_mcp_upd ON mcp_servers;
 CREATE TRIGGER trg_mcp_upd BEFORE UPDATE ON mcp_servers
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
--- 默认数据源占位：ScopeSentry 资产同步 MCP（地址与认证均留空、未启用）。
+-- 默认数据源占位：4zrecon 资产同步 MCP（地址与认证均留空、未启用）。
 -- 供「资产同步」页检测数据源是否已配置；用户在页面填入 url 与 X-API-Key 后再启用。
 -- 仅在缺失时插入，绝不覆盖用户已配置/已启用的服务器（schema.sql 每次启动都会 Exec）。
 INSERT INTO mcp_servers (name, transport, url, env, enabled)
-VALUES ('ScopeSentry', 'http', NULL, '{"X-API-Key":""}', false)
+VALUES ('4zrecon', 'http', NULL, '{"X-API-Key":""}', false)
 ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS mcp_tools_cache (
@@ -893,6 +893,27 @@ CREATE TABLE IF NOT EXISTS agent_skill_visibility (
     PRIMARY KEY (agent_id, skill_name)
 );
 CREATE INDEX IF NOT EXISTS idx_askv_skill ON agent_skill_visibility(skill_name);
+
+-- =====================================================================
+-- 资产同步水位（4zrecon → 本仓）
+-- =====================================================================
+-- watermark 存上游原生的 "2006-01-02 15:04:05" 字符串（节点时区、无 tz 标记），
+-- 与响应体同源做字符串比较，禁止本地时钟生成水位。asset_type 是本仓侧的类型键
+-- （subdomain/root_domain/service/app），datasource_id 指向 mcp_servers 行。
+CREATE TABLE IF NOT EXISTS sync_state (
+    id            BIGSERIAL PRIMARY KEY,
+    datasource_id BIGINT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+    asset_type    TEXT   NOT NULL,
+    watermark     TEXT   NOT NULL DEFAULT '',
+    last_run_at   TIMESTAMPTZ,
+    last_result   TEXT   NOT NULL DEFAULT '',
+    truncated     BOOLEAN NOT NULL DEFAULT false,
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (datasource_id, asset_type)
+);
+-- 每日对账（施工单变更1兜底）：上游总数快照 + 两次对账间的增量入库累计。
+ALTER TABLE sync_state ADD COLUMN IF NOT EXISTS upstream_total INT NOT NULL DEFAULT 0;
+ALTER TABLE sync_state ADD COLUMN IF NOT EXISTS inc_taken INT NOT NULL DEFAULT 0;
 
 -- Skill 调用账本（见 db/skill_usage.go）。一次 Skill() 调用一行，只记维度不记正文。
 -- 刻意不设外键：任务/会话删除后统计仍要保留（与 llm_usage 同理），skill 本身也只是

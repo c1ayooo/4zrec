@@ -14,21 +14,39 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import type { SSProject, SSTask } from "@/lib/types";
+import type { ReconProject, ReconTask } from "@/lib/types";
 
-type SSStatus = {
+type ReconSyncState = {
+  asset_type: string;
+  watermark: string;
+  last_run_at: string | null;
+  last_result: string;
+  truncated: boolean;
+};
+
+type ReconStatus = {
   exists: boolean;
   configured: boolean;
   enabled: boolean;
   reachable: boolean;
   url?: string;
   tools: string[];
+  sync_state?: ReconSyncState[];
 };
 
 type Dimension = "project" | "task";
 
+const typeLabels: Record<string, string> = {
+  subdomain: "子域名",
+  root_domain: "根域名",
+  service: "服务",
+  app: "App",
+  ip: "IP",
+};
+
 const ASSET_TYPES: { key: string; label: string }[] = [
   { key: "subdomain", label: "子域名" },
+  { key: "root_domain", label: "根域名" },
   { key: "service", label: "服务" },
   { key: "app", label: "App" },
 ];
@@ -38,28 +56,28 @@ export default function AssetSyncPage() {
     <div className="p-4 md:p-6">
       <div className="mb-4">
         <h1 className="font-semibold text-xl">资产同步</h1>
-        <p className="text-muted-foreground text-sm">从外部数据源同步资产入库</p>
+        <p className="text-muted-foreground text-sm">从 4zrecon 同步资产入库</p>
       </div>
-      <Tabs defaultValue="scopesentry">
+      <Tabs defaultValue="4zrecon">
         <TabsList>
-          <TabsTrigger value="scopesentry">ScopeSentry</TabsTrigger>
+          <TabsTrigger value="4zrecon">4zrecon</TabsTrigger>
         </TabsList>
-        <TabsContent value="scopesentry" className="mt-4">
-          <ScopeSentryPanel />
+        <TabsContent value="4zrecon" className="mt-4">
+          <ReconPanel />
         </TabsContent>
       </Tabs>
     </div>
   );
 }
 
-function ScopeSentryPanel() {
-  const [status, setStatus] = React.useState<SSStatus | null>(null);
+function ReconPanel() {
+  const [status, setStatus] = React.useState<ReconStatus | null>(null);
   const [loadingStatus, setLoadingStatus] = React.useState(true);
 
   const loadStatus = React.useCallback(() => {
     setLoadingStatus(true);
     api
-      .ssStatus()
+      .reconStatus()
       .then(setStatus)
       .catch((e) => toast.error(`读取数据源状态失败：${e.message}`))
       .finally(() => setLoadingStatus(false));
@@ -94,7 +112,7 @@ function DataSourceCard({
   loading,
   onChanged,
 }: {
-  status: SSStatus | null;
+  status: ReconStatus | null;
   loading: boolean;
   onChanged: () => void;
 }) {
@@ -109,8 +127,8 @@ function DataSourceCard({
   const create = async () => {
     setBusy(true);
     try {
-      await api.ssDatasource({});
-      toast.success("已创建 ScopeSentry 数据源，请填写地址与密钥");
+      await api.reconDatasource({});
+      toast.success("已创建 4zrecon 数据源，请填写地址与密钥");
       onChanged();
     } catch (e) {
       toast.error(`创建失败：${(e as Error).message}`);
@@ -123,7 +141,7 @@ function DataSourceCard({
     if (!url.trim()) return toast.error("请填写 MCP 地址");
     setBusy(true);
     try {
-      const r = await api.ssDatasource({ url: url.trim(), api_key: apiKey.trim() });
+      const r = await api.reconDatasource({ url: url.trim(), api_key: apiKey.trim() });
       toast.success(r.enabled ? "已保存并启用数据源" : "已保存（尚未满足启用条件）");
       setApiKey("");
       onChanged();
@@ -149,7 +167,7 @@ function DataSourceCard({
         {!status?.exists ? (
           <div className="flex items-center justify-between gap-4">
             <p className="text-muted-foreground text-sm">
-              尚未创建 ScopeSentry 数据源。创建后会新增一个占位 MCP（地址/密钥为空、未启用）。
+              尚未创建 4zrecon 数据源。创建后会新增一个占位 MCP（地址/密钥为空、未启用）。
             </p>
             <Button onClick={create} disabled={busy}>
               创建数据源
@@ -188,6 +206,22 @@ function DataSourceCard({
                 <span className="text-muted-foreground text-xs">已发现 {status.tools.length} 个工具</span>
               )}
             </div>
+            {status.enabled && (status.sync_state?.length ?? 0) > 0 && (
+              <div className="space-y-1 rounded-md border bg-muted/40 p-2.5">
+                <p className="text-muted-foreground text-xs">
+                  增量水位（每类型最近一轮；截断=达单轮上限，剩余下轮继续）
+                </p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                  {status.sync_state?.map((st) => (
+                    <span key={st.asset_type}>
+                      {typeLabels[st.asset_type] ?? st.asset_type}:{" "}
+                      {st.last_run_at ? new Date(st.last_run_at).toLocaleString() : "未跑过"}
+                      {st.truncated && <span className="text-amber-600 dark:text-amber-500">（截断）</span>}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         )}
       </CardContent>
@@ -195,7 +229,7 @@ function DataSourceCard({
   );
 }
 
-function StatusBadge({ status, loading }: { status: SSStatus | null; loading: boolean }) {
+function StatusBadge({ status, loading }: { status: ReconStatus | null; loading: boolean }) {
   if (loading || !status) return <Badge variant="secondary">检测中…</Badge>;
   if (!status.exists) return <Badge variant="destructive">未创建</Badge>;
   if (!status.configured) return <Badge variant="outline">未配置</Badge>;
@@ -219,28 +253,29 @@ function SyncWorkbench() {
   const [dimension, setDimension] = React.useState<Dimension>("project");
   const [assetTypes, setAssetTypes] = React.useState<Record<string, boolean>>({
     subdomain: true,
+    root_domain: true,
     service: true,
     app: true,
   });
   const [createCompany, setCreateCompany] = React.useState(true);
 
-  const [projects, setProjects] = React.useState<SSProject[]>([]);
-  const [tasks, setTasks] = React.useState<SSTask[]>([]);
+  const [projects, setProjects] = React.useState<ReconProject[]>([]);
+  const [tasks, setTasks] = React.useState<ReconTask[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [search, setSearch] = React.useState("");
   const [page, setPage] = React.useState(1);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
 
   const [syncing, setSyncing] = React.useState(false);
-  const [result, setResult] = React.useState<Awaited<ReturnType<typeof api.ssSync>> | null>(null);
+  const [result, setResult] = React.useState<Awaited<ReturnType<typeof api.reconSync>> | null>(null);
 
   const load = React.useCallback(() => {
     setLoading(true);
     setSelected(new Set());
     const fn =
       dimension === "project"
-        ? api.ssProjects(page, 50, search).then((r) => setProjects(r.projects))
-        : api.ssTasks(page, 50, search).then(setTasks);
+        ? api.reconProjects(page, 50, search).then((r) => setProjects(r.projects))
+        : api.reconTasks(page, 50, search).then(setTasks);
     fn.catch((e) => toast.error(`加载列表失败：${e.message}`)).finally(() => setLoading(false));
   }, [dimension, page, search]);
 
@@ -249,7 +284,7 @@ function SyncWorkbench() {
   }, [load]);
 
   const rows = dimension === "project" ? projects : tasks;
-  const idOf = (row: SSProject | SSTask) => (dimension === "project" ? (row as SSProject).id : (row as SSTask).name);
+  const idOf = (row: ReconProject | ReconTask) => (dimension === "project" ? (row as ReconProject).id : (row as ReconTask).name);
 
   const toggle = (id: string) => {
     setSelected((prev) => {
@@ -271,7 +306,8 @@ function SyncWorkbench() {
     setSyncing(true);
     setResult(null);
     try {
-      const r = await api.ssSync({
+      const r = await api.reconSync({
+        mode: "full",
         dimension,
         targets: [...selected],
         asset_types: chosenTypes,
@@ -282,6 +318,22 @@ function SyncWorkbench() {
       toast.success(`同步完成，共入库 ${total} 条资产`);
     } catch (e) {
       toast.error(`同步失败：${(e as Error).message}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  // 全局增量（同后台 ticker 的通道）：按水位只拉新数据，不选项目/任务。
+  const runIncremental = async () => {
+    setSyncing(true);
+    setResult(null);
+    try {
+      const r = await api.reconSync({ mode: "inc" });
+      setResult(r);
+      const total = Object.values(r.synced ?? {}).reduce((a, b) => a + b, 0);
+      toast.success(`增量同步完成，本轮入库 ${total} 条资产`);
+    } catch (e) {
+      toast.error(`增量同步失败：${(e as Error).message}`);
     } finally {
       setSyncing(false);
     }
@@ -397,6 +449,9 @@ function SyncWorkbench() {
           </Button>
           <div className="flex-1" />
           <span className="text-muted-foreground text-xs">已选 {selected.size}</span>
+          <Button variant="outline" onClick={runIncremental} disabled={syncing}>
+            <RefreshCwIcon className={syncing ? "size-4 animate-spin" : "size-4"} /> 增量同步全部
+          </Button>
           <Button onClick={runSync} disabled={syncing || selected.size === 0}>
             <DownloadIcon className={syncing ? "size-4 animate-pulse" : "size-4"} /> 同步选中
           </Button>
@@ -451,15 +506,14 @@ function SyncWorkbench() {
   );
 }
 
-function SyncResult({ result }: { result: Awaited<ReturnType<typeof api.ssSync>> }) {
+function SyncResult({ result }: { result: Awaited<ReturnType<typeof api.reconSync>> }) {
   const synced = result.synced ?? {};
-  const labels: Record<string, string> = { subdomain: "子域名", service: "服务", app: "App", ip: "IP" };
   return (
     <div className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm">
       <div className="flex flex-wrap gap-3">
         {Object.entries(synced).map(([k, v]) => (
           <Badge key={k} variant="secondary">
-            {labels[k] ?? k}: {v}
+            {typeLabels[k] ?? k}: {v}
           </Badge>
         ))}
       </div>

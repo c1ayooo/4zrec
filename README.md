@@ -50,13 +50,14 @@ AI 自主渗透测试系统（Go 后端 + Next.js 前端）
 [AegisHook 的审批详情组件](https://github.com/RuoJi6/AegisHook/blob/main/web/src/components/CallDetail.vue)，沿用 ARTEX 的组件和主题（本项目的前身）：
 
 
-## 资产同步（ScopeSentry）
+## 资产同步（4zrecon）
 
-支持从 [ScopeSentry](https://github.com/Autumn-27/ScopeSentry) 直接同步资产数据，免去重复收集：
+支持从 [4zrecon](https://github.com/c1ayooo/4zrecon) 直接同步资产数据，免去重复收集：
 
-- 在「**资产同步**」页填 ScopeSentry 的地址与 API Key，接入数据源；
-- 按**项目**或**任务**维度选择要同步的目标与资产类型（域名 / 子域 / IP / 端口 / 站点 / 端点…）；
-- 一键导入并按公司资产范围归并，直接进入 4zrec 的资产图供 agent 探索使用。
+- 在「**资产同步**」页填 4zrecon 的 MCP 地址与 API Key（`ssk_`），接入数据源；接入即自动授权 planner/worker 四个只读查询工具（`list_assets` / `count_assets` / `get_asset_detail` / `list_tasks`），agent 会话内可直接查未同步类型（如敏感信息）；
+- 按**项目**或**任务**维度选择目标做**全量同步**（子域名 / 根域名 / 服务 / App），或用**增量同步全部**按水位只拉新数据；
+- **定时增量**：默认每 30 分钟自动跑一轮全局增量（首刷自动全量建水位），周期在 `config.json` 的 `sync.4zrecon_interval_minutes` 调整，负数关闭；
+- 一键导入并按公司资产范围归并，直接进入 4zrec 的资产图；带 `company_ids` 的新任务开局即在提示词里拿到资产态势摘要（AssetSummary，标注来源与最近同步时间）。
 
 ---
 

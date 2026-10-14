@@ -815,7 +815,7 @@ type MCPServer struct {
 	Env       json.RawMessage `json:"env"`
 	URL       string          `json:"url,omitempty"`
 	Enabled   bool            `json:"enabled"`
-	Insecure  bool            `json:"insecure"` // http: skip TLS cert verification (self-signed servers, issue #108)
+	Insecure  bool            `json:"insecure"`        // http: skip TLS cert verification (self-signed servers, issue #108)
 	Tools     []string        `json:"tools,omitempty"` // cached tool names (mcp_tools_cache)
 }
 
@@ -1073,6 +1073,52 @@ ON CONFLICT (agent_id,resource_kind,resource_id,mcp_tool_name) DO UPDATE SET ena
 		}
 	}
 	return tx.Commit()
+}
+
+// AgentVisibleMCP returns an agent's MCP visibility split in two: toolGrants is
+// server_id → set of granted tool names (rows with non-empty mcp_tool_name),
+// wholeServers is the set of server ids granted as a whole (mcp_tool_name 留空).
+// A whole-server row wins: when present, the caller shows the full tool list;
+// tool rows restrict visibility only when no whole-server row exists for that
+// server (so the UI's server-level toggle keeps meaning "everything").
+func (d *DB) AgentVisibleMCP(agentID int64) (toolGrants map[int64]map[string]bool, wholeServers map[int64]bool, err error) {
+	rows, err := d.Query(`SELECT resource_id, mcp_tool_name FROM agent_visibility
+		WHERE agent_id=$1 AND resource_kind='mcp' AND enabled`, agentID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	toolGrants, wholeServers = map[int64]map[string]bool{}, map[int64]bool{}
+	for rows.Next() {
+		var rid int64
+		var tool string
+		if err := rows.Scan(&rid, &tool); err != nil {
+			return nil, nil, err
+		}
+		if tool == "" {
+			wholeServers[rid] = true
+			continue
+		}
+		if toolGrants[rid] == nil {
+			toolGrants[rid] = map[string]bool{}
+		}
+		toolGrants[rid][tool] = true
+	}
+	return toolGrants, wholeServers, rows.Err()
+}
+
+// GrantMCPTools idempotently inserts (agent, server, tool) visibility rows.
+// Conflicts are left untouched: a tool the user turned off in the UI stays off —
+// this only ever adds missing rows, never flips existing ones.
+func (d *DB) GrantMCPTools(agentID, resourceID int64, toolNames []string) error {
+	for _, tn := range toolNames {
+		if _, err := d.Exec(`INSERT INTO agent_visibility(agent_id,resource_kind,resource_id,mcp_tool_name,enabled)
+			VALUES ($1,'mcp',$2,$3,true)
+			ON CONFLICT (agent_id,resource_kind,resource_id,mcp_tool_name) DO NOTHING`, agentID, resourceID, tn); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ToggleVisibility sets one (agent, kind, resource) visibility on/off (idempotent).

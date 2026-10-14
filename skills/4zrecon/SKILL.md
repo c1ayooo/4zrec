@@ -1,11 +1,11 @@
 ---
 
-## name: scopesentry-mcp
-description: 通过 ScopeSentry MCP 管理安全扫描平台（项目、任务、模板、资产、节点）。在用户提到 ScopeSentry、MCP、API Key、扫描任务、资产查询时使用。
+## name: 4zrecon-mcp
+description: 通过 4zrecon MCP 管理安全扫描平台（项目、任务、模板、资产、节点）。在用户提到 4zrecon、MCP、API Key、扫描任务、资产查询时使用。
 
-# ScopeSentry MCP 使用指南
+# 4zrecon MCP 使用指南
 
-面向**已部署 ScopeSentry 实例**的用户。通过 Cursor（或其他 MCP 客户端）连接平台，无需本地源码。
+面向**已部署 4zrecon 实例**的用户。通过 Cursor（或其他 MCP 客户端）连接平台，无需本地源码。
 
 ## 1. 准备工作
 
@@ -16,7 +16,7 @@ description: 通过 ScopeSentry MCP 管理安全扫描平台（项目、任务�
 
 ### 1.2 创建 API Key
 
-1. 浏览器登录 ScopeSentry Web 界面
+1. 浏览器登录 4zrecon Web 界面
 2. 进入 **API Key** 管理页创建密钥（或通过管理员提供的接口创建）
 3. 保存返回的 `ssk_...` 字符串（**仅显示一次**）
 
@@ -27,7 +27,7 @@ Cursor → Settings → MCP → 添加服务器：
 ```json
 {
   "mcpServers": {
-    "scopesentry": {
+    "4zrecon": {
       "url": "http://<你的主机>:8082/mcp",
       "headers": {
         "X-API-Key": "ssk_你的密钥"
@@ -355,7 +355,7 @@ JSON 对象：同 key 多个值为 **OR**，不同 key 为 **AND**。
 
 | 现象        | 处理                                                 |
 | --------- | -------------------------------------------------- |
-| MCP 无工具   | 检查 URL、API Key、ScopeSentry 是否运行                    |
+| MCP 无工具   | 检查 URL、API Key、4zrecon 是否运行                    |
 | 401 / 403 | 重新创建或更换 API Key                                    |
 | 资产查不到     | 确认 `filter.project` 为 ObjectID；勿在 search 写 project |
 | 模板/任务创建失败 | `template` 必须是模板 ObjectID；`node` 填在线节点名            |

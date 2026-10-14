@@ -323,7 +323,7 @@ func (c *Client) wrap(rt remoteTool) tools.CoreTool {
 }
 
 // Call invokes one tool and returns the concatenated text of its content blocks
-// (ScopeSentry answers with a single JSON text block). Unlike the CoreTool wrapper
+// (4zrecon answers with a single JSON text block). Unlike the CoreTool wrapper
 // from Tools(), this bypasses the agent permission (AskUser) layer — it is meant
 // for backend batch jobs (e.g. asset sync) that call MCP tools programmatically.
 func (c *Client) Call(ctx context.Context, tool string, args any) (string, error) {

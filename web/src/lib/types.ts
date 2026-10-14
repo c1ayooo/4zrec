@@ -1364,8 +1364,8 @@ export interface InterceptApprovalRow extends InterceptPending {
   rule_name: string; // "" if rule was deleted
 }
 
-// ── 资产同步 (ScopeSentry 数据源) ──────────────────────────────────────────────
-export interface SSProject {
+// ── 资产同步 (4zrecon 数据源) ──────────────────────────────────────────────
+export interface ReconProject {
   id: string; // MongoDB ObjectID — used as filter.project
   name: string;
   logo?: string;
@@ -1373,7 +1373,7 @@ export interface SSProject {
   tag?: string;
 }
 
-export interface SSTask {
+export interface ReconTask {
   id: string;
   name: string; // used as filter.task
   status?: number;

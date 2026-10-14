@@ -34,7 +34,7 @@ func TestRenderSystemOverrideAndFallback(t *testing.T) {
 	// full plannerSystem path: DB body [A] is honored, then the code-owned tail
 	// [C] (中间产物输出规约) is ALWAYS appended — editing the body can't drop it.
 	PromptOverride = func(k string) (string, bool) { return "PLANNER {{.Goal}}", true }
-	got := plannerSystem("拿下X", "/data", "/data")
+	got := plannerSystem("拿下X", "/data", "/data", "")
 	if !strings.HasPrefix(got, "PLANNER 拿下X") {
 		t.Fatalf("plannerSystem body not honored: %q", got)
 	}

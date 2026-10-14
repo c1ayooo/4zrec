@@ -72,6 +72,9 @@ func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.Cor
 		globalSet := map[string]bool{}
 		{
 			mcpIDs, _ := pg.AgentVisible(a.ID, "mcp")
+			// Tool-level grants: servers with per-tool rows expose ONLY those tools
+			// (unless a whole-server row also exists, which restores full visibility).
+			toolGrants, wholeServers, _ := pg.AgentVisibleMCP(a.ID)
 			want := idSet(mcpIDs)
 			all, _ := pg.ListMCP()
 			for _, m := range all {
@@ -94,7 +97,15 @@ func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.Cor
 					log.Printf("[mcp] %s tools/list 失败: %v", m.Name, err)
 					continue
 				}
+				// Granted names are raw tool names; runtime tools carry the
+				// mcp__server__ prefix, so match both spellings.
+				grants, restricted := toolGrants[m.ID], !wholeServers[m.ID]
+				prefix := "mcp__" + m.Name + "__"
 				for _, t := range ts {
+					if restricted && len(grants) > 0 &&
+						!grants[t.Name()] && !grants[strings.TrimPrefix(t.Name(), prefix)] {
+						continue
+					}
 					extra = append(extra, t)
 					allNames = append(allNames, t.Name())
 					serverTools[m.Name] = append(serverTools[m.Name], t.Name())

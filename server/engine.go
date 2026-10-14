@@ -387,6 +387,17 @@ func (e *Engine) ActiveLLMCalls(taskID string) int64 {
 
 func (e *Engine) touch(taskID string) { e.lastAct.Store(taskID, time.Now().Unix()) }
 
+// taskAssetSummary 生成任务公司的开局资产态势（AssetSummary 提示词变量，施工单
+// 变更3）。无 company_ids / 无资产 / 查询失败返回空串——模板条件块吞掉，行为与
+// 接线前一致。每次规划/会话现算而非建任务时缓存：查询只打 company 索引（毫秒级），
+// 换来新鲜度标注（最近同步时间）始终准确。
+func taskAssetSummary(ctx context.Context, m *Manager, companyIDs []int64) string {
+	if m == nil || len(companyIDs) == 0 || m.Assets() == nil {
+		return ""
+	}
+	return m.Assets().CompanyAssetSummary(ctx, companyIDs)
+}
+
 func NewEngine(m *Manager) *Engine {
 	return &Engine{m: m, debounce: 800 * time.Millisecond, bc: NewBroadcaster(),
 		execCancel: map[string]context.CancelCauseFunc{}, execCtx: map[string]context.Context{},
@@ -878,7 +889,7 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 		triggers := t.drainTriggers()
 		taskIDInt, _ := strconv.ParseInt(t.ID, 10, 64)
 		e.BeginLLMCall(t.ID)
-		met, reason, err := planner.Plan(ectx, taskIDInt, e.m.assets, t.Store, t.Goal, triggers, emit)
+		met, reason, err := planner.Plan(ectx, taskIDInt, e.m.assets, t.Store, t.Goal, taskAssetSummary(ectx, e.m, t.CompanyIDs), triggers, emit)
 		e.EndLLMCall(t.ID)
 		switch {
 		case err != nil && ectx.Err() == nil:

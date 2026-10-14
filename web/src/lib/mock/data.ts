@@ -3235,8 +3235,8 @@ export const skills: SkillItem[] = [
     last_used: "2026-08-19T21:40:00Z",
   },
   {
-    name: "scopesentry",
-    description: "从 ScopeSentry 拉取资产并归并到公司范围；批量导入资产时使用。",
+    name: "4zrecon",
+    description: "从 4zrecon 拉取资产并归并到公司范围；批量导入资产时使用。",
     files: ["SKILL.md", "assets/mapping.md"],
     calls: 0,
     tasks: 0,

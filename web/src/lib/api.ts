@@ -76,8 +76,8 @@ import type {
   Severity,
   SkillCall,
   SkillItem,
-  SSProject,
-  SSTask,
+  ReconProject,
+  ReconTask,
   Stats,
   Task,
   TaskArchive,
@@ -1116,34 +1116,36 @@ export const api = {
   mcpTools: (id: number) => get<{ tools: MCPTool[] }>(`/mcp/${id}/tools`).then((r) => arr(r.tools)),
   refreshMcpServer: (id: number) => post<{ tools: MCPTool[] }>(`/mcp/${id}/refresh`, {}).then((r) => arr(r.tools)),
 
-  // ---- 资产同步 (ScopeSentry 数据源) ----
-  ssStatus: () =>
+  // ---- 资产同步 (4zrecon 数据源) ----
+  reconStatus: () =>
     get<{ exists: boolean; configured: boolean; enabled: boolean; reachable: boolean; url?: string; tools: string[] }>(
-      "/sync/scopesentry/status",
+      "/sync/4zrecon/status",
     ),
-  ssDatasource: (body: { url?: string; api_key?: string }) =>
-    post<{ id: number; enabled: boolean }>("/sync/scopesentry/datasource", body),
-  ssProjects: (page = 1, size = 50, search = "") =>
-    get<{ projects: SSProject[]; tag: Record<string, number> }>(
-      `/sync/scopesentry/projects?page=${page}&size=${size}${search ? `&search=${encodeURIComponent(search)}` : ""}`,
+  reconDatasource: (body: { url?: string; api_key?: string }) =>
+    post<{ id: number; enabled: boolean }>("/sync/4zrecon/datasource", body),
+  reconProjects: (page = 1, size = 50, search = "") =>
+    get<{ projects: ReconProject[]; tag: Record<string, number> }>(
+      `/sync/4zrecon/projects?page=${page}&size=${size}${search ? `&search=${encodeURIComponent(search)}` : ""}`,
     ).then((r) => ({ projects: arr(r.projects), tag: r.tag ?? {} })),
-  ssTasks: (page = 1, size = 50, search = "") =>
-    get<{ tasks: SSTask[] }>(
-      `/sync/scopesentry/tasks?page=${page}&size=${size}${search ? `&search=${encodeURIComponent(search)}` : ""}`,
+  reconTasks: (page = 1, size = 50, search = "") =>
+    get<{ tasks: ReconTask[] }>(
+      `/sync/4zrecon/tasks?page=${page}&size=${size}${search ? `&search=${encodeURIComponent(search)}` : ""}`,
     ).then((r) => arr(r.tasks)),
-  ssSync: (body: {
-    dimension: "project" | "task";
-    targets: string[];
-    asset_types: string[];
+  reconSync: (body: {
+    mode?: "full" | "inc"; // full=目标全量(需 dimension/targets); inc=全局增量(同定时通道)
+    dimension?: "project" | "task";
+    targets?: string[];
+    asset_types?: string[];
     create_company?: boolean;
     page_size?: number;
   }) =>
     post<{
+      mode?: string;
       synced: Record<string, number>;
       companies: string[] | null;
       warnings: string[] | null;
       errors: string[] | null;
-    }>("/sync/scopesentry/sync", body),
+    }>("/sync/4zrecon/sync", body),
 
   // ---- skills (文件系统) ----
   skills: () => get<{ skills: SkillItem[] }>("/skills").then((r) => arr(r.skills)),
