@@ -94,6 +94,10 @@ func NewManager(pg *db.DB) *Manager {
 		refreshCh: make(chan struct{}, 1),
 	}
 	m.enr = newEnricher(pg)
+	m.enr.SetTokenProvider(func() string {
+		v, _, _ := pg.GetSetting(githubTokenSetting)
+		return v
+	})
 	return m
 }
 

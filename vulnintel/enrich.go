@@ -79,6 +79,9 @@ func newEnricher(pg *db.DB) *enricher {
 	}
 }
 
+// SetTokenProvider 注入 GitHub token 读取(settings 热更新生效)。
+func (e *enricher) SetTokenProvider(fn func() string) { e.tok = fn }
+
 // httpGetJSON 是统一出站:UA + 限量读体。
 func (e *enricher) httpGetJSON(ctx context.Context, url string, token string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
