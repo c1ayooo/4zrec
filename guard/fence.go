@@ -62,6 +62,14 @@ var reIPv4 = regexp.MustCompile(`(?:[0-9]{1,3}\.){3}[0-9]{1,3}`)
 // reToken 裸 token 切分:非 [字母数字.-] 均为分隔符。
 var reToken = regexp.MustCompile(`[a-z0-9.-]+`)
 
+// reQuoted 单引号段与反引号段:shell 里它们是字面载荷——python -c 代码、
+// awk/sed 脚本、curl -d 的 JSON 数据、解析日志用的正则——里面的裸 token
+// 是代码/数据不是命令行目标,从裸 token 扫描中整段剔除。双引号不剔除:
+// 双引号常用来包裹真实参数(nmap "sub.example.com"),漏掉真实目标的代价
+// 大于双引号载荷里偶发的裸域名噪音(后者还有 TLD 白名单兜底)。带 scheme
+// 的 URL 不在此列——第一步已在全文提取,引号内外一视同仁。
+var reQuoted = regexp.MustCompile("`[^`]*`|'[^']*'")
+
 // extBlocklist 这些后缀的带点 token 几乎总是文件/库/配置名而非目标主机;
 // 误拦的代价是多一次审批,误放的代价是越界测试,宁可保守但也要控制噪音。
 var extBlocklist = map[string]bool{
@@ -203,7 +211,9 @@ var publicInfraIPs = map[string]bool{
 }
 
 // ExtractFenceTargets 从任意文本提取字面目标(IPv4 + 域名,URL 的 host 归类)。
-// 提取顺序:URL(剥离)→ IPv4 → 裸域名 token。导出供测试与后续网络层兜底复用。
+// 提取顺序:URL(全文,引号内外一视同仁——带 scheme 的是明确请求形态)→
+// 剔除单引号/反引号载荷段(代码与数据,不是命令行目标)→ IPv4 → 裸域名
+// token(仅命令参数区)。导出供测试与后续网络层兜底复用。
 func ExtractFenceTargets(text string) fenceTargets {
 	var t fenceTargets
 	seen := map[string]bool{}
@@ -240,6 +250,10 @@ func ExtractFenceTargets(text string) fenceTargets {
 				addDomain(host)
 			}
 		}
+		rest = strings.ReplaceAll(rest, m, " ")
+	}
+	// 引号载荷段(代码/数据)整段剔除:只对剩余的命令参数区做裸 token 扫描。
+	for _, m := range reQuoted.FindAllString(rest, -1) {
 		rest = strings.ReplaceAll(rest, m, " ")
 	}
 	lower := strings.ToLower(rest)

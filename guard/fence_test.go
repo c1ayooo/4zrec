@@ -73,9 +73,29 @@ func TestExtractFenceTargets(t *testing.T) {
 			cmd:  `python3 -c "import re,os,json; print(re.findall(r'[0-9]+', os.popen('echo hi').read())); json.loads('{}')"; pip install requests==2.31.0`,
 		},
 		{
-			name:    "公共 DNS 解析器直接排除,真正目标照常提取",
-			cmd:     `dig @8.8.8.8 +short sub.example.com; nslookup x.com 114.114.114.114`,
+			name: "公共 DNS 解析器直接排除,真正目标照常提取",
+			cmd:  `dig @8.8.8.8 +short sub.example.com; nslookup x.com 114.114.114.114`,
 			domains: []string{"sub.example.com", "x.com"},
+		},
+		{
+			name: "单引号载荷(代码/数据)里的裸 token 不是目标",
+			cmd:  `dig +short sub.example.com | awk '{print $1}' && python3 -c 'x="other.evil.com"; print(len(x))'`,
+			domains: []string{"sub.example.com"},
+		},
+		{
+			name: "引号内带 scheme 的 URL 仍是目标(代码里的真实请求)",
+			cmd:  `python3 -c 'import requests; requests.get("https://api.evil.com/x")'`,
+			domains: []string{"api.evil.com"},
+		},
+		{
+			name:    "双引号包裹的真实目标仍识别",
+			cmd:     `nmap -p 80 "sub.example.com"`,
+			domains: []string{"sub.example.com"},
+		},
+		{
+			name:    "POST 载荷里的裸域名不算目标,请求 URL 才算",
+			cmd:     `curl -s -X POST -d '{"host":"inner.example"}' https://api.example.com/v1`,
+			domains: []string{"api.example.com"},
 		},
 		{
 			name: "直接对公共解析器本身操作也不进围栏",
