@@ -42,7 +42,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
-import type { Asset, Project } from "@/lib/types";
+import type { Asset, Company, Project } from "@/lib/types";
 
 function fmtTime(iso: string): string {
   const t = new Date(iso).getTime();
@@ -65,13 +65,25 @@ const SCOPE_HINT =
 
 export default function ProjectsPage() {
   const [projects, setProjects] = React.useState<Project[]>([]);
+  const [companies, setCompanies] = React.useState<Company[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [createOpen, setCreateOpen] = React.useState(false);
   const [newName, setNewName] = React.useState("");
   const [newDesc, setNewDesc] = React.useState("");
+  // "" = 不绑定企业;String(company.id) = 创建时挂到该企业
+  const [newCompany, setNewCompany] = React.useState("");
   const [creating, setCreating] = React.useState(false);
 
-  const [edit, setEdit] = React.useState<{ project: Project; scope: string; reason: string } | null>(null);
+  // 编辑态含基本信息(名称/描述/归属企业)+ 范围追加;company ""=解绑(发 0)
+  const [edit, setEdit] = React.useState<{
+    project: Project;
+    name: string;
+    desc: string;
+    company: string;
+    scope: string;
+    reason: string;
+  } | null>(null);
+  const [savingInfo, setSavingInfo] = React.useState(false);
   const [savingScope, setSavingScope] = React.useState(false);
 
   const [pending, setPending] = React.useState<Asset[]>([]);
@@ -81,7 +93,9 @@ export default function ProjectsPage() {
   const load = React.useCallback(async () => {
     setLoading(true);
     try {
-      setProjects(await api.projects());
+      const [ps, cs] = await Promise.all([api.projects(), api.companies()]);
+      setProjects(ps);
+      setCompanies(cs);
     } catch (e) {
       toast.error(`加载项目失败: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -112,16 +126,54 @@ export default function ProjectsPage() {
     if (!name) return;
     setCreating(true);
     try {
-      await api.createProject(name, null, newDesc.trim());
+      await api.createProject(name, newCompany ? Number(newCompany) : null, newDesc.trim());
       toast.success(`项目「${name}」已创建`);
       setCreateOpen(false);
       setNewName("");
       setNewDesc("");
+      setNewCompany("");
       await load();
     } catch (e) {
       toast.error(`创建失败: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setCreating(false);
+    }
+  };
+
+  const openEdit = (p: Project) =>
+    setEdit({
+      project: p,
+      name: p.name,
+      desc: p.description ?? "",
+      company: p.company_id ? String(p.company_id) : "",
+      scope: "",
+      reason: "",
+    });
+
+  // 保存基本信息(名称/描述/归属企业)。PATCH 是整体替换:name/description 必须
+  // 回填,status 不改也要带上(服务端缺省会强制回 active);company "" → 0 = 解绑。
+  const saveInfo = async () => {
+    if (!edit) return;
+    const name = edit.name.trim();
+    if (!name) {
+      toast.error("项目名称不能为空");
+      return;
+    }
+    setSavingInfo(true);
+    try {
+      const updated = await api.updateProject(edit.project.id, {
+        name,
+        company_id: edit.company ? Number(edit.company) : 0,
+        description: edit.desc.trim(),
+        status: edit.project.status,
+      });
+      toast.success("项目信息已保存");
+      await load();
+      setEdit((v) => (v ? { ...v, project: updated } : v));
+    } catch (e) {
+      toast.error(`保存失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSavingInfo(false);
     }
   };
 
@@ -308,7 +360,7 @@ export default function ProjectsPage() {
                     )}
                   </div>
                   <div className="flex shrink-0 gap-1">
-                    <Button variant="ghost" size="icon" className="size-7" onClick={() => setEdit({ project: p, scope: "", reason: "" })}>
+                    <Button variant="ghost" size="icon" className="size-7" onClick={() => openEdit(p)}>
                       <PencilIcon />
                     </Button>
                     <Button variant="ghost" size="icon" className="size-7" onClick={() => void deleteProject(p)}>
@@ -354,6 +406,18 @@ export default function ProjectsPage() {
           <div className="flex flex-col gap-3">
             <Input placeholder="项目名称（如：XX单位渗透测试）" value={newName} onChange={(e) => setNewName(e.target.value)} />
             <Input placeholder="描述（可选）" value={newDesc} onChange={(e) => setNewDesc(e.target.value)} />
+            <select
+              className="border-input bg-background rounded-md border px-2 py-2 text-sm"
+              value={newCompany}
+              onChange={(e) => setNewCompany(e.target.value)}
+            >
+              <option value="">不绑定企业</option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
             <p className="text-muted-foreground text-xs">
               创建后进入编辑录入授权范围；任务/对话挂到该项目即启用资产围栏。
             </p>
@@ -373,9 +437,43 @@ export default function ProjectsPage() {
       <Sheet open={!!edit} onOpenChange={(o) => !o && setEdit(null)}>
         <SheetContent className="flex w-full flex-col gap-4 overflow-y-auto sm:max-w-xl">
           <SheetHeader>
-            <SheetTitle>项目范围 — {edit?.project.name}</SheetTitle>
+            <SheetTitle>项目设置 — {edit?.project.name}</SheetTitle>
           </SheetHeader>
+          <div className="flex flex-col gap-2 border-b pb-4">
+            <p className="text-sm font-medium">基本信息</p>
+            <Input
+              placeholder="项目名称"
+              value={edit?.name ?? ""}
+              onChange={(e) => setEdit((v) => (v ? { ...v, name: e.target.value } : v))}
+            />
+            <Input
+              placeholder="描述（可选）"
+              value={edit?.desc ?? ""}
+              onChange={(e) => setEdit((v) => (v ? { ...v, desc: e.target.value } : v))}
+            />
+            <select
+              className="border-input bg-background rounded-md border px-2 py-2 text-sm"
+              value={edit?.company ?? ""}
+              onChange={(e) => setEdit((v) => (v ? { ...v, company: e.target.value } : v))}
+            >
+              <option value="">不绑定企业</option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-muted-foreground text-xs">
+              项目可挂到客户主体（企业）下，便于按企业归集；不绑定也不影响围栏。
+            </p>
+            <div className="flex justify-end">
+              <Button size="sm" onClick={() => void saveInfo()} disabled={!edit?.name.trim() || savingInfo}>
+                {savingInfo ? "保存中…" : "保存信息"}
+              </Button>
+            </div>
+          </div>
           <div>
+            <p className="mb-2 text-sm font-medium">授权范围（围栏白名单）</p>
             <p className="text-muted-foreground mb-2 text-xs whitespace-pre-line">{SCOPE_HINT}</p>
             <Textarea
               rows={5}
