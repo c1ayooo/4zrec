@@ -185,6 +185,23 @@ func validFenceDomain(s string) bool {
 	return true
 }
 
+// publicInfraIPs 是公网公共基础设施地址(以公共 DNS 解析器为主):dig/nslookup
+// 拿它们当解析器是正常操作,不是「测试目标」——从围栏提取中直接排除,否则
+// 每条 dig @8.8.8.8 都要弹一次审批(用户拍板:这类地址不应进围栏)。
+// 需要扩表(如内网解析器)时往这里加一行即可。
+var publicInfraIPs = map[string]bool{
+	"8.8.8.8": true, "8.8.4.4": true, // Google
+	"1.1.1.1": true, "1.0.0.1": true, // Cloudflare
+	"9.9.9.9": true, "149.112.112.112": true, // Quad9
+	"208.67.222.222": true, "208.67.220.220": true, // OpenDNS
+	"94.140.14.14": true, "94.140.15.15": true, // AdGuard
+	"223.5.5.5": true, "223.6.6.6": true, // AliDNS
+	"119.29.29.29": true, "182.254.116.116": true, // DNSPod
+	"114.114.114.114": true, "114.114.115.115": true, // 114DNS
+	"180.76.76.76": true, // Baidu
+	"1.2.4.8": true, "210.2.4.8": true, // CNNIC
+}
+
 // ExtractFenceTargets 从任意文本提取字面目标(IPv4 + 域名,URL 的 host 归类)。
 // 提取顺序:URL(剥离)→ IPv4 → 裸域名 token。导出供测试与后续网络层兜底复用。
 func ExtractFenceTargets(text string) fenceTargets {
@@ -198,7 +215,10 @@ func ExtractFenceTargets(text string) fenceTargets {
 		}
 	}
 	addIP := func(ip string) {
-		if ip != "" && !seen["i:"+ip] {
+		if ip == "" || publicInfraIPs[ip] {
+			return // 公共基础设施地址不是渗透目标,直接排除
+		}
+		if !seen["i:"+ip] {
 			seen["i:"+ip] = true
 			t.IPs = append(t.IPs, ip)
 		}

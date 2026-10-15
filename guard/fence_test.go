@@ -73,6 +73,15 @@ func TestExtractFenceTargets(t *testing.T) {
 			cmd:  `python3 -c "import re,os,json; print(re.findall(r'[0-9]+', os.popen('echo hi').read())); json.loads('{}')"; pip install requests==2.31.0`,
 		},
 		{
+			name:    "公共 DNS 解析器直接排除,真正目标照常提取",
+			cmd:     `dig @8.8.8.8 +short sub.example.com; nslookup x.com 114.114.114.114`,
+			domains: []string{"sub.example.com", "x.com"},
+		},
+		{
+			name: "直接对公共解析器本身操作也不进围栏",
+			cmd:  `curl -m 3 http://1.1.1.1/ && ping -c1 223.5.5.5`,
+		},
+		{
 			name:    "内网伪 TLD 主机名仍识别",
 			cmd:     `nmap -p 22 app.corp.local dc01.prod web.internal`,
 			domains: []string{"app.corp.local", "dc01.prod", "web.internal"},
