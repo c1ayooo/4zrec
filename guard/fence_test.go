@@ -98,6 +98,23 @@ func TestExtractFenceTargets(t *testing.T) {
 			domains: []string{"api.example.com"},
 		},
 		{
+			// 任务156实测形态:heredoc 里的 python 代码,m.group 撞内网伪 TLD。
+			name: "heredoc python 载荷里的代码标识符不当作目标",
+			cmd: `python3 - <<'EOF'
+import re
+for m in re.finditer(r'<script>(.*?)</script>', html, re.S):
+    t=m.group(1)
+    if 'version' in t: print(t)
+EOF`,
+		},
+		{
+			name:    "heredoc 之外的命令参数区目标照常识别",
+			cmd:     `grep -o sub.example.com index.html; python3 - <<'EOF'
+x=m.group(1)
+EOF`,
+			domains: []string{"sub.example.com"},
+		},
+		{
 			name: "直接对公共解析器本身操作也不进围栏",
 			cmd:  `curl -m 3 http://1.1.1.1/ && ping -c1 223.5.5.5`,
 		},

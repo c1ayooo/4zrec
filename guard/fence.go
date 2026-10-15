@@ -70,6 +70,51 @@ var reToken = regexp.MustCompile(`[a-z0-9.-]+`)
 // 的 URL 不在此列——第一步已在全文提取,引号内外一视同仁。
 var reQuoted = regexp.MustCompile("`[^`]*`|'[^']*'")
 
+// reHeredocStart 匹配 heredoc 开始(<<EOF / <<-'EOF' / <<< 变体排除在外)。
+// Go 的 RE2 不支持反向引用,结束标记(单独成行的同名 TAG)由 stripHeredocs
+// 手工扫描。
+var reHeredocStart = regexp.MustCompile(`<<-?[ \t]*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
+
+// stripHeredocs 把每段 heredoc(开始标记之后到单独成行的同名结束标记)整体
+// 替换为空格:heredoc 是喂给 stdin 的脚本/数据,里面的裸 token 不是命令行
+// 目标(worker 写 python 脚本的常态形态,m.group/re.finditer 是任务实测
+// 最大误报源);段内的出网目标只会以 URL 形态出现,而 URL 已在第一步全文
+// 提取。未闭合的 heredoc 视为其余全部文本都是载荷(整段剔除——宁可少问,
+// 不让残尾的代码 token 轰炸审批)。
+func stripHeredocs(text string) string {
+	for {
+		loc := reHeredocStart.FindStringSubmatchIndex(text)
+		if loc == nil {
+			return text
+		}
+		tag := text[loc[2]:loc[3]]
+		// 结束标记:行首(可有空白)+ TAG + 行尾。
+		endIdx := -1
+		searchFrom := loc[1]
+		for i := searchFrom; i < len(text); {
+			nl := strings.IndexByte(text[i:], '\n')
+			if nl < 0 {
+				break
+			}
+			lineStart := i + nl + 1
+			lineEnd := lineStart + strings.IndexByte(text[lineStart:], '\n')
+			if lineEnd < lineStart {
+				lineEnd = len(text)
+			}
+			line := strings.TrimSpace(text[lineStart:lineEnd])
+			if line == tag {
+				endIdx = lineEnd
+				break
+			}
+			i = lineEnd
+		}
+		if endIdx < 0 {
+			return text[:loc[0]] + " " // 未闭合:余下全是载荷
+		}
+		text = text[:loc[0]] + " " + text[endIdx:]
+	}
+}
+
 // extBlocklist 这些后缀的带点 token 几乎总是文件/库/配置名而非目标主机;
 // 误拦的代价是多一次审批,误放的代价是越界测试,宁可保守但也要控制噪音。
 var extBlocklist = map[string]bool{
@@ -252,6 +297,9 @@ func ExtractFenceTargets(text string) fenceTargets {
 		}
 		rest = strings.ReplaceAll(rest, m, " ")
 	}
+	// heredoc 段先于单引号剔除:<<'EOF' 的引号会被 reQuoted 当成一段单引号,
+	// 与载荷内配对引号错误拼段、破坏 heredoc 结构——顺序不可换。
+	rest = stripHeredocs(rest)
 	// 引号载荷段(代码/数据)整段剔除:只对剩余的命令参数区做裸 token 扫描。
 	for _, m := range reQuoted.FindAllString(rest, -1) {
 		rest = strings.ReplaceAll(rest, m, " ")
