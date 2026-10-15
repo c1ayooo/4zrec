@@ -9,6 +9,7 @@ import {
   PlusIcon,
   RefreshCwIcon,
   ShieldAlertIcon,
+  SparklesIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
@@ -17,6 +18,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -93,6 +95,10 @@ export default function ProjectsPage() {
   } | null>(null);
   const [savingInfo, setSavingInfo] = React.useState(false);
   const [savingScope, setSavingScope] = React.useState(false);
+  // 从资产生成的范围候选:勾选集 + 加载态
+  const [candidates, setCandidates] = React.useState<{ domain: string; assets: number }[]>([]);
+  const [picked, setPicked] = React.useState<Set<string>>(new Set());
+  const [loadingCandidates, setLoadingCandidates] = React.useState(false);
 
   const [pending, setPending] = React.useState<Asset[]>([]);
   const [pendingTotal, setPendingTotal] = React.useState(0);
@@ -162,7 +168,9 @@ export default function ProjectsPage() {
     }
   };
 
-  const openEdit = (p: Project) =>
+  const openEdit = (p: Project) => {
+    setCandidates([]);
+    setPicked(new Set());
     setEdit({
       project: p,
       name: p.name,
@@ -171,6 +179,48 @@ export default function ProjectsPage() {
       scope: "",
       reason: "",
     });
+  };
+
+  // 从资产生成范围候选:拉取预览并默认全选(生成的是发现实证,人工可再剔)。
+  const loadCandidates = async (projectID: number) => {
+    setLoadingCandidates(true);
+    try {
+      const list = await api.scopeCandidates(projectID);
+      setCandidates(list);
+      setPicked(new Set(list.map((c) => c.domain)));
+    } catch (e) {
+      toast.error(`生成候选失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setLoadingCandidates(false);
+    }
+  };
+
+  // 导入勾选的候选 → 范围,随后触发认领(后端联动),刷新视图。
+  const importCandidates = async () => {
+    if (!edit || picked.size === 0) return;
+    setSavingScope(true);
+    try {
+      const domains = candidates.filter((c) => picked.has(c.domain)).map((c) => c.domain);
+      const r = await api.importScope(edit.project.id, domains, edit.reason.trim() || "从项目资产自动生成");
+      if (r.invalid > 0) {
+        toast.warning(`导入 ${r.added} 条,${r.invalid} 条无效被跳过`, {
+          description: r.errors?.slice(0, 3).join("\n"),
+        });
+      } else {
+        toast.success(`已导入 ${r.added} 条范围,认领 ${r.claimed} 条资产归属本项目`);
+      }
+      setCandidates([]);
+      setPicked(new Set());
+      await load();
+      const fresh = await api.projects();
+      const p = fresh.find((x) => x.id === edit.project.id);
+      if (p) setEdit((v) => (v ? { ...v, project: p } : v));
+    } catch (e) {
+      toast.error(`导入失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSavingScope(false);
+    }
+  };
 
   // 保存基本信息(名称/描述/归属企业)。PATCH 是整体替换:name/description 必须
   // 回填,status 不改也要带上(服务端缺省会强制回 active);company "" → 0 = 解绑。
@@ -512,7 +562,62 @@ export default function ProjectsPage() {
             </div>
           </div>
           <div>
-            <p className="mb-2 text-sm font-medium">授权范围（围栏白名单）</p>
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-sm font-medium">授权范围（围栏白名单）</p>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={loadingCandidates || !edit}
+                onClick={() => edit && void loadCandidates(edit.project.id)}
+              >
+                <SparklesIcon className={loadingCandidates ? "animate-pulse" : undefined} />
+                从资产生成
+              </Button>
+            </div>
+            {candidates.length > 0 && (
+              <div className="mb-3 rounded-md border p-2">
+                <div className="text-muted-foreground mb-2 flex items-center justify-between text-xs">
+                  <span>
+                    从项目 {candidates.length} 个资产根域生成,默认全选——确认后写入即自动认领命中的待审批资产。
+                  </span>
+                  <span className="flex shrink-0 gap-2">
+                    <button
+                      className="hover:text-foreground"
+                      onClick={() => setPicked(new Set(candidates.map((c) => c.domain)))}
+                    >
+                      全选
+                    </button>
+                    <button className="hover:text-foreground" onClick={() => setPicked(new Set())}>
+                      清空
+                    </button>
+                  </span>
+                </div>
+                <div className="grid max-h-40 grid-cols-1 gap-1 overflow-y-auto sm:grid-cols-2">
+                  {candidates.map((c) => (
+                    <label key={c.domain} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-muted/60">
+                      <Checkbox
+                        checked={picked.has(c.domain)}
+                        onCheckedChange={(v) =>
+                          setPicked((prev) => {
+                            const next = new Set(prev);
+                            if (v === true) next.add(c.domain);
+                            else next.delete(c.domain);
+                            return next;
+                          })
+                        }
+                      />
+                      <span className="truncate font-mono text-xs">{c.domain}</span>
+                      <span className="text-muted-foreground ml-auto shrink-0 text-xs">{c.assets}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="mt-2 flex justify-end">
+                  <Button size="sm" onClick={() => void importCandidates()} disabled={picked.size === 0 || savingScope}>
+                    {savingScope ? "导入中…" : `导入选中 (${picked.size})`}
+                  </Button>
+                </div>
+              </div>
+            )}
             <p className="text-muted-foreground mb-2 text-xs whitespace-pre-line">{SCOPE_HINT}</p>
             <Textarea
               rows={5}

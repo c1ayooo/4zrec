@@ -175,6 +175,61 @@ func (s *Server) deleteProjectScope(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
+// scopeCandidates 从项目资产自动生成授权范围候选(GET /api/projects/{id}/scope/candidates)。
+// 只读预览:前端展示勾选,导入走下面批量接口。
+func (s *Server) scopeCandidates(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeErr(w, 400, "invalid project id")
+		return
+	}
+	candidates, err := pg.ProjectScopeCandidates(id)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"candidates": candidates})
+}
+
+type importScopeReq struct {
+	Domains []string `json:"domains"` // 勾选的候选根域
+	Reason  string   `json:"reason"`
+}
+
+// importScope 把勾选的候选根域写入 project_scope,并立即触发范围认领——
+// 命中的 pending 资产自动提为 approved,待审批队列随之清空(响应带认领数)。
+func (s *Server) importScope(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeErr(w, 400, "invalid project id")
+		return
+	}
+	var req importScopeReq
+	if err := decode(r, &req); err != nil || len(req.Domains) == 0 {
+		writeErr(w, 400, "domains 不能为空")
+		return
+	}
+	added, skipped, invalid, errMsgs := pg.ImportProjectScope(id, req.Domains, req.Reason)
+	claimed, cerr := pg.Projects().RecomputeProjectAttribution()
+	if cerr != nil {
+		errMsgs = append(errMsgs, "范围已保存,但存量资产认领失败: "+cerr.Error())
+		claimed = 0
+	}
+	p, _ := pg.Projects().GetProject(id)
+	writeJSON(w, 200, map[string]any{
+		"added": added, "skipped": skipped, "invalid": invalid,
+		"errors": errMsgs, "project": p, "claimed": claimed,
+	})
+}
+
 // --- 资产授权状态(待审批队列) ---
 
 // listPendingAssets 返回待审批资产;project_id>0 时按项目过滤,0=全部。

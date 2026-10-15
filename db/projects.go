@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net"
+	"sort"
 	"strings"
 	"time"
 )
@@ -189,6 +190,138 @@ VALUES ($1, $2, NULLIF($3,''), NULLIF($4,'')::cidr, NULLIF($5,''), $6, NULLIF($7
 func (s *ProjectStore) DeleteProjectScope(projectID, scopeID int64) error {
 	_, err := s.db.Exec(`DELETE FROM project_scope WHERE id=$1 AND project_id=$2`, scopeID, projectID)
 	return err
+}
+
+// ProjectScopeCandidates 从项目资产自动生成范围候选:扫 project_id 下全部
+// root_domain,归一化(去端口/协议/尾点/大小写)后按可注册基域聚合(两级
+// TLD 粗略规则 + 常见二级后缀白名单),带命中计数降序。脏数据天然出局:
+// 代码标识符残留(f.write/data.get)、解析噪声(b23.tv$p)过不了域名合法性
+// 校验。只有已在资产里实证存在的根域才入围——生成的是"从发现反推的授权
+// 面快照",人工勾选确认后才写入 project_scope(授权是合规动作,不自动落)。
+func (d *DB) ProjectScopeCandidates(projectID int64) ([]map[string]any, error) {
+	rows, err := d.Query(`
+SELECT COALESCE(root_domain, ''), count(*) FROM assets WHERE project_id=$1 GROUP BY root_domain`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	counts := map[string]int{}
+	for rows.Next() {
+		var rd string
+		var n int
+		if err := rows.Scan(&rd, &n); err != nil {
+			return nil, err
+		}
+		root := registrableRoot(rd)
+		if root == "" {
+			continue
+		}
+		counts[root] += n
+	}
+	out := make([]map[string]any, 0, len(counts))
+	for root, n := range counts {
+		out = append(out, map[string]any{"domain": root, "assets": n})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i]["assets"].(int) > out[j]["assets"].(int) })
+	return out, nil
+}
+
+// multiPartSuffixes 是多段公共后缀(cc.国别/地区 形态),取基域时多剥一段。
+// 粗略覆盖主流项即可:候选仍要过人工勾选,漏一段只是多一条候选。
+var multiPartSuffixes = map[string]bool{
+	"com.cn": true, "net.cn": true, "org.cn": true, "gov.cn": true, "edu.cn": true,
+	"co.uk": true, "org.uk": true, "ac.uk": true, "gov.uk": true,
+	"co.jp": true, "ne.jp": true, "or.jp": true, "ac.jp": true,
+	"com.hk": true, "org.hk": true, "edu.hk": true, "com.tw": true, "com.au": true,
+	"co.kr": true, "co.in": true, "com.br": true, "com.sg": true,
+}
+
+// TLDAllowlist 是真实 TLD 后缀白名单:常见通用/国别 TLD + 内网伪 TLD +
+// ICANN 保留字。两处消费:①范围候选生成器——把代码标识符化石(f.write、
+// data.get、json.loads 这类旧 bug 存进资产的脏数据)挡在候选之外;②执行侧
+// 围栏的裸 token 域名校验(guard 包引用本表,单一事实源)。冷门新 TLD 会
+// 漏——宁漏勿扰:漏拦只是少问一次,误拦是每个脚本都要审批。
+var TLDAllowlist = map[string]bool{
+	// 通用/主流
+	"com": true, "net": true, "org": true, "edu": true, "gov": true,
+	"mil": true, "int": true, "info": true, "biz": true, "io": true,
+	"co": true, "ai": true, "app": true, "dev": true, "cloud": true,
+	"tech": true, "xyz": true, "top": true, "vip": true, "site": true,
+	"online": true, "shop": true, "club": true, "fun": true, "ltd": true,
+	"group": true, "work": true, "website": true, "space": true, "icu": true,
+	"pro": true, "live": true, "life": true, "me": true, "tv": true, "cc": true,
+	// 常见国家/地区
+	"cn": true, "uk": true, "jp": true, "kr": true, "hk": true, "tw": true,
+	"ru": true, "in": true, "de": true, "fr": true, "it": true, "nl": true,
+	"se": true, "es": true, "br": true, "au": true, "ca": true, "us": true,
+	"sg": true, "my": true, "th": true, "id": true, "vn": true, "ph": true,
+	"nz": true, "za": true, "il": true, "ae": true, "sa": true, "mx": true,
+	"ar": true, "cl": true, "ch": true, "pl": true, "pt": true, "cz": true,
+	"gr": true, "hu": true, "ro": true, "ua": true,
+	// 内网命名伪 TLD(渗透现场常见内部主机名)
+	"local": true, "internal": true, "corp": true, "lan": true,
+	"prod": true, "lab": true, "vpn": true, "staging": true, "intranet": true,
+	// ICANN 保留(文档/测试用,测试夹具大量使用 *.example)
+	"example": true, "invalid": true, "test": true,
+}
+
+// registrableRoot 把 host 归一化到可注册基域:去协议/端口/路径/尾点、转小写,
+// 校验域名合法性(复用 guard 思路的形态校验:各 label 合法、末段纯字母),
+// 再按两级 TLD 规则剥到基域。噪声(含 $ / 代码标识符 / 单段)返回空串。
+func registrableRoot(host string) string {
+	host = strings.TrimSpace(strings.ToLower(host))
+	host = strings.TrimSuffix(host, ".")
+	// 剥协议与路径:取 // 后、第一个 / 前。
+	if i := strings.Index(host, "//"); i >= 0 {
+		if j := strings.Index(host[i+2:], "/"); j >= 0 {
+			host = host[i+2 : i+2+j]
+		} else {
+			host = host[i+2:]
+		}
+	} else if j := strings.Index(host, "/"); j >= 0 {
+		host = host[:j]
+	}
+	// 去端口与用户信息。
+	if i := strings.LastIndex(host, ":"); i >= 0 {
+		host = host[:i]
+	}
+	if i := strings.LastIndex(host, "@"); i >= 0 {
+		host = host[i+1:]
+	}
+	labels := strings.Split(host, ".")
+	// 形态校验:≥2 段、末段纯字母 ≥2、各 label 非空且不含非法字符。
+	if len(labels) < 2 {
+		return ""
+	}
+	for _, l := range labels {
+		if l == "" || len(l) > 63 {
+			return ""
+		}
+		for _, c := range l {
+			if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
+				return "" // $、_、中文等噪声在这里出局
+			}
+		}
+	}
+	tld := labels[len(labels)-1]
+	if !TLDAllowlist[tld] {
+		return "" // 代码标识符化石(write/get/loads)在这里出局
+	}
+	// 基域:两段(suffix=末段)或三段(suffix 命中多段后缀表)。
+	n := 2
+	if len(labels) >= 3 && multiPartSuffixes[strings.Join(labels[len(labels)-2:], ".")] {
+		n = 3
+	}
+	if len(labels) < n {
+		n = len(labels)
+	}
+	return strings.Join(labels[len(labels)-n:], ".")
+}
+
+// ImportProjectScope 把候选根域批量写入 project_scope(复用 AddProjectScope 的
+// 解析护栏),返回实际新增条数。已存在的相同规则按其内部 skip 逻辑去重。
+func (d *DB) ImportProjectScope(projectID int64, domains []string, reason string) (added, skipped, invalid int, errMsgs []string) {
+	return d.Projects().AddProjectScope(projectID, domains, reason)
 }
 
 // RecomputeProjectAttribution 把范围命中的未归属资产认领进项目——企业侧

@@ -772,6 +772,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /api/projects/{id}", s.updateProject)
 	mux.HandleFunc("DELETE /api/projects/{id}", s.deleteProject)
 	mux.HandleFunc("POST /api/projects/{id}/scope", s.addProjectScope)
+	mux.HandleFunc("GET /api/projects/{id}/scope/candidates", s.scopeCandidates)
+	mux.HandleFunc("POST /api/projects/{id}/scope/import", s.importScope)
 	mux.HandleFunc("DELETE /api/projects/{id}/scope/{sid}", s.deleteProjectScope)
 
 	// company system

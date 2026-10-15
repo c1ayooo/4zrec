@@ -176,36 +176,11 @@ func validFenceIPv4(s string) bool {
 	return true
 }
 
-// tldAllowlist 是裸 token 域名校验的后缀白名单:常见真实 TLD(渗透目标里
-// 实际会出现的)+ 内网命名伪 TLD + ICANN 保留字。代码标识符的尾缀——
-// re.findall 的 findall、os.path 的 path、json.dumps 的 dumps——不在表内,
-// 一律不当作目标:Python 一行流/脚本里的模块属性引用不再触发围栏审批。
-// URL host 分支不受此表影响(能被 url.Parse 解析出 host 的可信度高)。
-// 未列出的冷门新 TLD 会漏拦(宁漏勿扰:漏拦只是少问一次,误拦是每个脚本
-// 都要审批);发现实际目标命中冷门后缀时往这张表加一行即可。
-var tldAllowlist = map[string]bool{
-	// 通用/主流
-	"com": true, "net": true, "org": true, "edu": true, "gov": true,
-	"mil": true, "int": true, "info": true, "biz": true, "io": true,
-	"co": true, "ai": true, "app": true, "dev": true, "cloud": true,
-	"tech": true, "xyz": true, "top": true, "vip": true, "site": true,
-	"online": true, "shop": true, "club": true, "fun": true, "ltd": true,
-	"group": true, "work": true, "website": true, "space": true, "icu": true,
-	"pro": true, "live": true, "life": true, "me": true, "tv": true, "cc": true,
-	// 常见国家/地区
-	"cn": true, "uk": true, "jp": true, "kr": true, "hk": true, "tw": true,
-	"ru": true, "in": true, "de": true, "fr": true, "it": true, "nl": true,
-	"se": true, "es": true, "br": true, "au": true, "ca": true, "us": true,
-	"sg": true, "my": true, "th": true, "id": true, "vn": true, "ph": true,
-	"nz": true, "za": true, "il": true, "ae": true, "sa": true, "mx": true,
-	"ar": true, "cl": true, "ch": true, "pl": true, "pt": true, "cz": true,
-	"gr": true, "hu": true, "ro": true, "ua": true,
-	// 内网命名伪 TLD(渗透现场常见内部主机名)
-	"local": true, "internal": true, "corp": true, "lan": true,
-	"prod": true, "lab": true, "vpn": true, "staging": true, "intranet": true,
-	// ICANN 保留(文档/测试用,测试夹具大量使用 *.example)
-	"example": true, "invalid": true, "test": true,
-}
+// tldAllowlist 引用 db.TLDAllowlist(单一事实源,范围候选生成器共用同一张
+// 表):代码标识符的尾缀——re.findall 的 findall、os.path 的 path、
+// json.dumps 的 dumps——不在表内,一律不当作目标。URL host 分支不受此表
+// 影响(能被 url.Parse 解析出 host 的可信度高)。扩表直接改 db.TLDAllowlist。
+var tldAllowlist = db.TLDAllowlist
 
 // validFenceDomain 校验裸 token 是否像主机名:≥2 个 label、末 label 在
 // TLD 白名单内(见 tldAllowlist)、各 label 合法、后缀不在文件扩展名黑名单。

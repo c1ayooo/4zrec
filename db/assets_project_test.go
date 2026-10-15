@@ -87,6 +87,69 @@ func TestAssetProjectQueries(t *testing.T) {
 	}
 }
 
+// TestProjectScopeCandidates 自动生成范围候选:合法 root_domain 归一化到
+// 可注册基域并聚合计数;代码标识符残留(f.write/data.get)与解析噪声
+// (b23.tv$p)出局;多段后缀(com.cn)正确剥到三段基域。
+func TestProjectScopeCandidates(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v)", err)
+	}
+	defer d.Close()
+
+	suffix := time.Now().UnixNano()
+	p, err := d.Projects().CreateProject(fmt.Sprintf("候选生成-%d", suffix), nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Projects().DeleteProject(p.ID)
+
+	seeds := []string{
+		"api.biliapi.com", "app.biliapi.com", // 同根聚合
+		"www.bilibili.com.cn", // com.cn 多段后缀 → bilibili.com.cn
+		"i0.hdslb.org",
+		// 脏数据:必须出局
+		"f.write", "data.get", "json.loads", "b23.tv$p", "$d", "cdn.bilivideo.cn:8080",
+	}
+	for _, s := range seeds {
+		id, err := d.Assets().UpsertSubdomain(UpsertSubdomainReq{Domain: s})
+		if err != nil {
+			t.Fatalf("seed %s: %v", s, err)
+		}
+		defer deleteAsset(d, id)
+		if _, err := d.Exec(`UPDATE assets SET project_id=$1 WHERE id=$2`, p.ID, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := d.ProjectScopeCandidates(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	domains := map[string]int{}
+	for _, c := range got {
+		domains[c["domain"].(string)] = c["assets"].(int)
+	}
+	if domains["biliapi.com"] != 2 {
+		t.Fatalf("biliapi.com 聚合计数 = %d, want 2: %v", domains["biliapi.com"], got)
+	}
+	if domains["bilibili.com.cn"] != 1 {
+		t.Fatalf("com.cn 未剥到三段基域: %v", domains)
+	}
+	if domains["hdslb.org"] != 1 {
+		t.Fatalf("hdslb.org 缺失: %v", domains)
+	}
+	for _, bad := range []string{"f.write", "data.get", "json.loads", "b23.tv$p", "$d"} {
+		if _, ok := domains[bad]; ok {
+			t.Fatalf("脏数据 %s 不应成为候选: %v", bad, domains)
+		}
+	}
+	// 计数降序:聚合数最多的排最前。
+	if got[0]["domain"] != "biliapi.com" {
+		t.Fatalf("排序首位 = %v, want biliapi.com", got[0])
+	}
+}
+
 // TestProjectScopeClaimsAssets 范围命中认领存量资产:域名精确匹配与网段包含
 // 把 project_id IS NULL 的资产认领进项目,authz 空/pending 提为 approved;
 // rejected 不复活(只升不降);不命中的不动。

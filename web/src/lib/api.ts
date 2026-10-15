@@ -550,6 +550,15 @@ export const api = {
     http<{ ok: boolean }>(`/projects/${id}/scope/${scopeId}`, { method: "DELETE" }),
 
   // ---- 资产授权(项目围栏的待审批队列) ----
+  scopeCandidates: (id: number) =>
+    get<{ candidates: { domain: string; assets: number }[] }>(`/projects/${id}/scope/candidates`).then((r) =>
+      arr(r.candidates),
+    ),
+  importScope: (id: number, domains: string[], reason = "") =>
+    post<{ added: number; skipped: number; invalid: number; errors: string[]; project: Project; claimed: number }>(
+      `/projects/${id}/scope/import`,
+      { domains, reason },
+    ),
   pendingAssets: (projectId = 0, limit = 50, offset = 0) =>
     get<{ assets: Asset[]; total: number }>(
       `/assets/pending?project_id=${projectId}&limit=${limit}&offset=${offset}`,
