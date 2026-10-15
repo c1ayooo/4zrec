@@ -255,6 +255,9 @@ export interface Asset {
   task_source?: string;
   task_source_summary?: string;
   task_source_node_id?: number;
+  project_id?: number;
+  /** 授权状态:approved|pending|rejected;空=未打标(视为已授权) */
+  authz?: string;
 }
 
 export interface IntentAsset {
@@ -395,6 +398,33 @@ export interface ScopeRow {
 }
 
 // 企业：type=company 的资产节点 + 图标 + 资产计数 + 资产范围规则。
+export interface ProjectScope {
+  id: number;
+  project_id: number;
+  kind: "domain" | "ip" | "cidr" | "icp" | "keyword";
+  domain?: string;
+  net?: string;
+  value?: string;
+  raw: string;
+  reason?: string;
+  created_at: string;
+}
+
+export interface Project {
+  id: number;
+  name: string;
+  company_id?: number;
+  company_name?: string;
+  description?: string;
+  status: "active" | "archived";
+  asset_count: number;
+  pending_count: number;
+  task_count: number;
+  scope: ProjectScope[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Company {
   id: number;
   name: string;
@@ -488,6 +518,15 @@ export interface FindingAsset {
   label: string;
 }
 
+// FindingReproduction 是 agent report_finding 时上报的结构化复现过程
+// (与工具 schema 对齐;steps 的 request/expected 逐字取自真实请求响应)。
+export interface FindingReproduction {
+  entry_point?: string;
+  prerequisites?: string[];
+  steps?: { request: string; expected: string; proves?: string }[];
+  provenance?: string;
+}
+
 export interface Finding {
   // enrichment summary(列表合并展示;AI 分析产出)
   enr_name?: string;
@@ -506,6 +545,7 @@ export interface Finding {
   summary: string;
   evidence: string;
   report?: string; // 详细报告(Markdown);仅详情接口返回,列表为空
+  reproduction?: FindingReproduction; // 结构化复现过程;详情页优先按此渲染,空=未记录
   intent_id?: string;
   param_id?: string;
   task_id?: string;
@@ -745,6 +785,7 @@ export interface Conversation {
   agent_key: string;
   title: string;
   llm_profile_id?: number;
+  project_id?: number; // 归属项目(挂载后资产围栏生效)
   pinned?: boolean;
   pinned_at?: string | null;
   created_at: string;
@@ -1732,4 +1773,3 @@ export interface ReportTemplate {
   created_at?: string;
   updated_at?: string;
 }
-

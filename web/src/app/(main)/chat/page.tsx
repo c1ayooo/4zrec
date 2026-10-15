@@ -6,6 +6,7 @@ import {
   ArrowUpIcon,
   Bot,
   ChevronDownIcon,
+  FolderIcon,
   ChevronRightIcon,
   ListChecksIcon,
   Loader2Icon,
@@ -58,7 +59,7 @@ import { api } from "@/lib/api";
 import { shouldSubmitOnKey, useChatSendMode } from "@/lib/chat-send-mode";
 import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
 import { isBtwCommand } from "@/lib/side-questions";
-import type { Activity, Agent, ChatAttachment, Conversation, LLMProfile } from "@/lib/types";
+import type { Activity, Agent, ChatAttachment, Conversation, LLMProfile, Project } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 // fmtBytes renders a human file size for attachment chips (mirrors transcript.tsx).
@@ -272,6 +273,95 @@ function Composer({
           </Button>
         )}
       </div>
+    </div>
+  );
+}
+
+// ProjectRow shows the conversation's attached project and lets the user switch
+// it via a Popover. 挂载项目后资产围栏生效(执行侧授权闸门);不挂 = 纯助手,不启用。
+// 复测/侧问等嵌入式会话不走这里 —— 它们从所属任务自动继承项目。
+function ProjectRow({
+  projectId,
+  onChange,
+}: {
+  projectId: number | null;
+  onChange: (id: number | null) => void;
+}) {
+  const [projects, setProjects] = React.useState<Project[]>([]);
+  const [open, setOpen] = React.useState(false);
+  React.useEffect(() => {
+    let alive = true;
+    api
+      .projects()
+      .then((ps) => alive && setProjects(ps.filter((p) => p.status === "active")))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const current = projectId != null ? projects.find((p) => p.id === projectId) : null;
+
+  return (
+    <div className="flex min-w-0 shrink-0 items-center gap-1 px-1 pt-0.5 pb-1">
+      <FolderIcon className="text-muted-foreground/50 size-3 shrink-0" />
+      <span
+        className={cn("truncate text-xs", current ? "text-foreground/80" : "text-muted-foreground/70")}
+        title={current ? current.name : "未挂项目"}
+      >
+        {current ? current.name : "未挂项目"}
+      </span>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className="flex shrink-0 items-center gap-0.5 text-primary text-xs hover:underline"
+          >
+            {current ? "更换" : "挂载"}
+            <ChevronDownIcon className="size-3" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-72 p-1">
+          <p className="text-muted-foreground px-2 py-1 text-[11px] font-medium">挂载项目（资产围栏）</p>
+          <button
+            type="button"
+            onClick={() => {
+              onChange(null);
+              setOpen(false);
+            }}
+            className={cn(
+              "flex w-full flex-col rounded px-2 py-1.5 text-left hover:bg-accent",
+              current == null && "bg-accent",
+            )}
+          >
+            <span className="text-sm">不挂项目</span>
+            <span className="text-muted-foreground text-[11px]">纯助手模式,不启用资产围栏</span>
+          </button>
+          {projects.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => {
+                onChange(Number(p.id));
+                setOpen(false);
+              }}
+              className={cn(
+                "flex w-full flex-col rounded px-2 py-1.5 text-left hover:bg-accent",
+                current?.id === Number(p.id) && "bg-accent",
+              )}
+            >
+              <span className="text-sm">{p.name}</span>
+              <span className="text-muted-foreground text-[11px]">
+                资产 {p.asset_count} · 范围 {p.scope?.length ?? 0} 条{p.company_name ? ` · ${p.company_name}` : ""}
+              </span>
+            </button>
+          ))}
+          {projects.length === 0 && (
+            <p className="text-muted-foreground px-2 py-1.5 text-[11px]">
+              还没有项目 — 在「项目」页创建后即可挂载
+            </p>
+          )}
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }
@@ -519,6 +609,16 @@ function ChatView({
       onConvUpdated();
     } catch (e) {
       toast.error("切换 LLM 失败：" + (e as Error).message);
+    }
+  }
+
+  async function changeProject(id: number | null) {
+    try {
+      // PATCH 语义:project_id 指向 0 = 取消挂载;省略 = 不改。
+      await api.updateConversation(conv.id, { project_id: id ?? 0 });
+      onConvUpdated();
+    } catch (e) {
+      toast.error("挂载项目失败：" + (e as Error).message);
     }
   }
 
@@ -825,13 +925,19 @@ function ChatView({
         onRemoveAttachment={(path) => setAttachments((p) => p.filter((x) => x.path !== path))}
         uploading={uploading}
       />
-      <LLMProfileRow
-        profiles={profiles}
-        selected={currentProfileId}
-        onChange={changeProfile}
-        disabled={running || sending}
-        rightSlot={<TodoPopover seq={latestTodoSeq} fetchDetail={fetchDetail} />}
-      />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <LLMProfileRow
+          profiles={profiles}
+          selected={currentProfileId}
+          onChange={changeProfile}
+          disabled={running || sending}
+          rightSlot={<TodoPopover seq={latestTodoSeq} fetchDetail={fetchDetail} />}
+        />
+        <ProjectRow
+          projectId={conv.project_id ?? null}
+          onChange={changeProject}
+        />
+      </div>
     </SideQuestionWorkspace>
   );
 }

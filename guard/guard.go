@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/askernel"
+	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
 )
 
@@ -34,6 +35,16 @@ type Guard struct {
 	attrib      map[string]int // failure attribution counts (Observer / G5)
 	reg         *askernel.Registry
 	interceptor *intercept.Interceptor // optional; nil disables user-configured rules
+	fence       *AssetFence            // optional; nil disables the execution-side asset fence
+}
+
+// EnableAssetFence 开启资产围栏(执行侧授权闸门,见 fence.go)。需在会话启动前
+// 调用一次;dbh 为 nil 时无操作。
+func (g *Guard) EnableAssetFence(dbh *db.DB) {
+	if dbh == nil {
+		return
+	}
+	g.fence = NewAssetFence(dbh)
 }
 
 // New creates a Guard without user-configured intercept rules (used for pentest
@@ -83,6 +94,10 @@ func (g *Guard) preToolUse(ctx context.Context, ev askernel.Event) askernel.Resu
 func (g *Guard) applyIntercept(ctx context.Context, ev askernel.Event) askernel.Result {
 	if g.interceptor == nil {
 		return askernel.Result{}
+	}
+	// 资产围栏先于行为规则:授权是比命令形态更根本的边界。
+	if res, done := g.applyFence(ctx, ev); done {
+		return res
 	}
 	if !g.interceptor.IsToolEnabled(ev.ToolName) {
 		return askernel.Result{}

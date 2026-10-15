@@ -101,8 +101,12 @@ func (d *DB) CreateFindingRetest(ctx context.Context, findingID int64, notes str
 	if runes := []rune(title); len(runes) > 100 {
 		title = string(runes[:100])
 	}
-	c, err := scanConv(tx.QueryRowContext(ctx, `INSERT INTO conversations(agent_key,title) VALUES ($1,$2) RETURNING `+convCols,
-		FindingRetestAgentKey, fmt.Sprintf("复测 #%d · %s", findingID, title)))
+	// 复测会话从漏洞所属任务继承项目(资产围栏的授权语义随任务走,见 schema §R);
+	// 任务未挂项目 → NULL,围栏不启用。
+	c, err := scanConv(tx.QueryRowContext(ctx, `INSERT INTO conversations(agent_key,title,project_id)
+VALUES ($1,$2,(SELECT t.project_id FROM findings f JOIN tasks t ON t.id=f.task_id WHERE f.id=$3))
+RETURNING `+convCols,
+		FindingRetestAgentKey, fmt.Sprintf("复测 #%d · %s", findingID, title), findingID))
 	if err != nil {
 		return nil, nil, false, err
 	}

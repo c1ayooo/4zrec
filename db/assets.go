@@ -58,6 +58,29 @@ type Asset struct {
 	TaskSource        string         `json:"task_source,omitempty"`
 	TaskSourceSummary string         `json:"task_source_summary,omitempty"`
 	TaskSourceNodeID  *int64         `json:"task_source_node_id,omitempty"`
+	// 项目归属与授权状态(见 schema §R)。Authz 空串=未打标,读取侧视为 approved。
+	ProjectID *int64 `json:"project_id,omitempty"`
+	Authz     string `json:"authz,omitempty"` // approved|pending|rejected|""(=approved)
+}
+
+// AuthzState 返回资产的规范授权状态(NULL → approved)。
+func (a *Asset) AuthzState() string {
+	if a.Authz == "" {
+		return "approved"
+	}
+	return a.Authz
+}
+
+// AuthzLabel 返回授权状态的中文标签(给 agent 说明消息与 UI 共用)。
+func (a *Asset) AuthzLabel() string {
+	switch a.AuthzState() {
+	case "pending":
+		return "待审批"
+	case "rejected":
+		return "已拒绝"
+	default:
+		return "已授权"
+	}
 }
 
 // AuthItem is one entry in the auth array.
@@ -1077,18 +1100,7 @@ func (s *AssetStore) QueryByType(typ string, limit, offset int) ([]*Asset, error
 		offset = 0
 	}
 	rows, err := s.db.Query(`
-SELECT id, type, company_id, array_to_json(task_ids)::text,
-       COALESCE(domain,''), COALESCE(root_domain,''), COALESCE(ip,''),
-       COALESCE(c_segment::text,''), port,
-       COALESCE(icp,''), array_to_json(bound_domains)::text, array_to_json(open_ports)::text, COALESCE(record_type,''),
-       array_to_json(record_value)::text, COALESCE(bundle_id,''), COALESCE(app_name,''),
-       COALESCE(category,''), COALESCE(app_description,''), COALESCE(app_icp,''),
-       COALESCE(url,''), COALESCE(service_type,''), COALESCE(service_name,''),
-       COALESCE(favicon_mmh3,''), status_code, content_length,
-       COALESCE(page_title,''), array_to_json(technologies)::text, array_to_json(auth)::text,
-       COALESCE(method,''), array_to_json(params)::text, extra, last_seen::text
-FROM assets
-WHERE type = $1
+`+assetSelectCols+` WHERE type = $1
 ORDER BY last_seen DESC, id DESC
 LIMIT $2 OFFSET $3`, typ, limit, offset)
 	if err != nil {
@@ -1108,17 +1120,7 @@ func (s *AssetStore) CountByType(typ string) (int, error) {
 // QueryByCompany returns assets for a company, optionally filtered by type.
 // limit <= 0 means no limit.
 func (s *AssetStore) QueryByCompany(companyID int64, typ string, limit, offset int) ([]*Asset, error) {
-	q := `SELECT id, type, company_id, array_to_json(task_ids)::text,
-       COALESCE(domain,''), COALESCE(root_domain,''), COALESCE(ip,''),
-       COALESCE(c_segment::text,''), port,
-       COALESCE(icp,''), array_to_json(bound_domains)::text, array_to_json(open_ports)::text, COALESCE(record_type,''),
-       array_to_json(record_value)::text, COALESCE(bundle_id,''), COALESCE(app_name,''),
-       COALESCE(category,''), COALESCE(app_description,''), COALESCE(app_icp,''),
-       COALESCE(url,''), COALESCE(service_type,''), COALESCE(service_name,''),
-       COALESCE(favicon_mmh3,''), status_code, content_length,
-       COALESCE(page_title,''), array_to_json(technologies)::text, array_to_json(auth)::text,
-       COALESCE(method,''), array_to_json(params)::text, extra, last_seen::text
-FROM assets WHERE company_id = $1`
+	q := ``+assetSelectCols+` WHERE company_id = $1`
 	args := []any{companyID}
 	if typ != "" {
 		args = append(args, typ)
@@ -1148,17 +1150,7 @@ func (s *AssetStore) CountByCompany(companyID int64, typ string) (int, error) {
 // QueryUnassigned / CountUnassigned：未归属企业的资产（company_id IS NULL），
 // 资产页「归属企业 = 未归属」筛选项的后端。
 func (s *AssetStore) QueryUnassigned(typ string, limit, offset int) ([]*Asset, error) {
-	q := `SELECT id, type, company_id, array_to_json(task_ids)::text,
-       COALESCE(domain,''), COALESCE(root_domain,''), COALESCE(ip,''),
-       COALESCE(c_segment::text,''), port,
-       COALESCE(icp,''), array_to_json(bound_domains)::text, array_to_json(open_ports)::text, COALESCE(record_type,''),
-       array_to_json(record_value)::text, COALESCE(bundle_id,''), COALESCE(app_name,''),
-       COALESCE(category,''), COALESCE(app_description,''), COALESCE(app_icp,''),
-       COALESCE(url,''), COALESCE(service_type,''), COALESCE(service_name,''),
-       COALESCE(favicon_mmh3,''), status_code, content_length,
-       COALESCE(page_title,''), array_to_json(technologies)::text, array_to_json(auth)::text,
-       COALESCE(method,''), array_to_json(params)::text, extra, last_seen::text
-FROM assets WHERE company_id IS NULL`
+	q := ``+assetSelectCols+` WHERE company_id IS NULL`
 	args := []any{}
 	if typ != "" {
 		args = append(args, typ)
@@ -1200,17 +1192,7 @@ func pageClause(args *[]any, limit, offset int) string {
 
 // QueryByTask returns assets rows that have a given task_id in task_ids.
 func (s *AssetStore) QueryByTask(taskID int64, typ string, limit, offset int) ([]*Asset, error) {
-	q := `SELECT id, type, company_id, array_to_json(task_ids)::text,
-       COALESCE(domain,''), COALESCE(root_domain,''), COALESCE(ip,''),
-       COALESCE(c_segment::text,''), port,
-       COALESCE(icp,''), array_to_json(bound_domains)::text, array_to_json(open_ports)::text, COALESCE(record_type,''),
-       array_to_json(record_value)::text, COALESCE(bundle_id,''), COALESCE(app_name,''),
-       COALESCE(category,''), COALESCE(app_description,''), COALESCE(app_icp,''),
-       COALESCE(url,''), COALESCE(service_type,''), COALESCE(service_name,''),
-       COALESCE(favicon_mmh3,''), status_code, content_length,
-       COALESCE(page_title,''), array_to_json(technologies)::text, array_to_json(auth)::text,
-       COALESCE(method,''), array_to_json(params)::text, extra, last_seen::text
-FROM assets WHERE $1 = ANY(task_ids)`
+	q := ``+assetSelectCols+` WHERE $1 = ANY(task_ids)`
 	args := []any{taskID}
 	if typ != "" {
 		args = append(args, typ)
@@ -1407,7 +1389,8 @@ const assetSelectCols = `SELECT id, type, company_id, array_to_json(task_ids)::t
        COALESCE(url,''), COALESCE(service_type,''), COALESCE(service_name,''),
        COALESCE(favicon_mmh3,''), status_code, content_length,
        COALESCE(page_title,''), array_to_json(technologies)::text, array_to_json(auth)::text,
-       COALESCE(method,''), array_to_json(params)::text, extra, last_seen::text
+       COALESCE(method,''), array_to_json(params)::text, extra, last_seen::text,
+       project_id, COALESCE(authz,'')
 FROM assets`
 
 // GetByIDs returns assets with the given ids (order preserved by id array order).
@@ -1520,7 +1503,7 @@ func scanAssets(rows *sql.Rows) ([]*Asset, error) {
 		var taskIDsRaw, boundDomainsRaw, openPortsRaw, recordValueRaw, techsRaw, authRaw, paramsRaw, extraRaw []byte
 		var port, statusCode sql.NullInt64
 		var contentLength sql.NullInt64
-		var companyID sql.NullInt64
+		var companyID, projectID sql.NullInt64
 		if err := rows.Scan(
 			&a.ID, &a.Type, &companyID, &taskIDsRaw,
 			&a.Domain, &a.RootDomain, &a.IP, &a.CSegment, &port,
@@ -1531,12 +1514,17 @@ func scanAssets(rows *sql.Rows) ([]*Asset, error) {
 			&a.FaviconMMH3, &statusCode, &contentLength,
 			&a.PageTitle, &techsRaw, &authRaw,
 			&a.Method, &paramsRaw, &extraRaw, &a.LastSeen,
+			&projectID, &a.Authz,
 		); err != nil {
 			return nil, err
 		}
 		if companyID.Valid {
 			cid := companyID.Int64
 			a.CompanyID = &cid
+		}
+		if projectID.Valid {
+			pid := projectID.Int64
+			a.ProjectID = &pid
 		}
 		if port.Valid {
 			p := int(port.Int64)

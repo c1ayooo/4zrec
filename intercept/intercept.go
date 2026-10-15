@@ -71,6 +71,12 @@ func taskInfoFromCtx(ctx context.Context) (taskID, agentName string) {
 	return "", ""
 }
 
+// TaskInfoFromContext 导出版:供 guard 资产围栏等外部模块读取当前 taskID
+// (字符串形式,与 WithTaskContext 注入一致;空串=无任务上下文)。
+func TaskInfoFromContext(ctx context.Context) (taskID, agentName string) {
+	return taskInfoFromCtx(ctx)
+}
+
 func taskEmitFromCtx(ctx context.Context) func(db.Activity) {
 	f, _ := ctx.Value(taskEmitCtxKey).(func(db.Activity))
 	return f

@@ -763,6 +763,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/assets/counts", s.assetCounts)
 	mux.HandleFunc("POST /api/assets", s.insertAssets)
 	mux.HandleFunc("DELETE /api/assets", s.deleteAssets)
+	// 资产授权状态(项目围栏的待审批队列)
+	mux.HandleFunc("GET /api/assets/pending", s.listPendingAssets)
+	mux.HandleFunc("POST /api/assets/authz", s.setAssetAuthz)
+	// 项目管理(授权根:范围/归属)
+	mux.HandleFunc("GET /api/projects", s.listProjects)
+	mux.HandleFunc("POST /api/projects", s.createProject)
+	mux.HandleFunc("PATCH /api/projects/{id}", s.updateProject)
+	mux.HandleFunc("DELETE /api/projects/{id}", s.deleteProject)
+	mux.HandleFunc("POST /api/projects/{id}/scope", s.addProjectScope)
+	mux.HandleFunc("DELETE /api/projects/{id}/scope/{sid}", s.deleteProjectScope)
 
 	// company system
 	mux.HandleFunc("GET /api/companies", s.listCompanies)
@@ -780,6 +790,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/exploration/findings/export", s.findingsExport)
 	s.registerFindingTraffic(mux)
 	mux.HandleFunc("GET /api/exploration/findings/{id}", s.getFinding)
+	mux.HandleFunc("GET /api/exploration/findings/{id}/export", s.exportFinding)
 	mux.HandleFunc("GET /api/exploration/findings/{id}/lineage", s.findingLineage)
 	mux.HandleFunc("POST /api/exploration/findings/{id}/deepen", s.deepenFinding)
 	mux.HandleFunc("GET /api/exploration/findings/{id}/retests", s.listFindingRetests)
@@ -815,7 +826,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/vulnkb", s.pgListVulnKB)        // 漏洞知识库(1day 库)
 	mux.HandleFunc("GET /api/vulnkb/stats", s.pgVulnKBStats)
 	mux.HandleFunc("GET /api/vulnkb/{id}", s.pgGetVulnKB)
-	mux.HandleFunc("GET /api/vulnintel", s.pgListVulnIntel)    // 漏洞情报流(自动抓取)
+	mux.HandleFunc("GET /api/vulnintel", s.pgListVulnIntel) // 漏洞情报流(自动抓取)
 	mux.HandleFunc("POST /api/vulnintel/refresh", s.pgVulnIntelRefresh)
 	mux.HandleFunc("GET /api/vulnintel/status", s.pgVulnIntelStatus)
 
@@ -1504,6 +1515,8 @@ type createTaskReq struct {
 	CoverageEnabled      *bool    `json:"coverage_enabled,omitempty"`  // 资产覆盖度功能;省略/null=默认开(true)。false=关闭覆盖度计算/展示/自动累积范围+隐藏 add_task_scope/list_untested_assets。company 关联不受影响。
 	// InterceptRules 任务级资产拦截/允许规则(创建时录入,存 task_intercept_rules,不进全局表)。
 	InterceptRules []taskInterceptRuleReq `json:"intercept_rules,omitempty"`
+	// ProjectID 任务归属的项目(授权根);null/省略=不挂项目,资产围栏不启用。
+	ProjectID *int64 `json:"project_id,omitempty"`
 }
 
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
@@ -1561,6 +1574,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		TimeoutSeconds: req.TimeoutSeconds, PlanHeartbeatSeconds: req.PlanHeartbeatSeconds,
 		CoverageEnabled: req.CoverageEnabled,
 		InterceptRules:  interceptRules,
+		ProjectID:       req.ProjectID,
 	})
 	if err != nil {
 		if errors.Is(err, db.ErrTaskCategoryInvalid) || errors.Is(err, db.ErrTaskCategoryNotFound) {

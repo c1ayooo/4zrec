@@ -231,20 +231,38 @@ func (s *AssetStore) CheckAssetsIntercept(taskID int64, ids []int64) ([]AssetInt
 		blockRules = append(blockRules, tb...)
 		allowRules = ta
 	}
-	// 既无拦截规则、也无启用的允许规则 → 无需判定，全部放行。
-	if len(blockRules) == 0 && !hasEnabledRule(allowRules) {
-		return nil, nil
-	}
+	// 既无拦截规则、也无启用的允许规则 → 仍需检查授权状态：待审批/已拒绝的
+	// 资产不能因"无规则"而放行（项目围栏，见 schema §R）。
+	needRules := len(blockRules) > 0 || hasEnabledRule(allowRules)
 	assets, err := s.GetByIDs(ids)
 	if err != nil {
 		return nil, err
 	}
 	var hits []AssetInterceptHit
 	for _, a := range assets {
+		if reason, ok := authzRejectReason(a); ok {
+			hits = append(hits, AssetInterceptHit{Asset: a, Reason: reason})
+			continue
+		}
+		if !needRules {
+			continue
+		}
 		domains, ips, urls := a.interceptCandidates()
 		if d := EvaluateAssetGate(blockRules, allowRules, domains, ips, urls); !d.Allowed {
 			hits = append(hits, AssetInterceptHit{Asset: a, Reason: d.Reason})
 		}
 	}
 	return hits, nil
+}
+
+// authzRejectReason 返回资产因授权状态不可测的拒绝原因；approved（含 NULL 视为
+// approved）返回 ok=false。
+func authzRejectReason(a *Asset) (string, bool) {
+	switch a.AuthzState() {
+	case "pending":
+		return "资产处于待审批状态，未经人工批准不可测试（已进入资产页待审批队列，批准后自动放行）", true
+	case "rejected":
+		return "资产已被人工拒绝测试", true
+	}
+	return "", false
 }

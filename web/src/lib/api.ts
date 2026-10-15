@@ -46,6 +46,8 @@ import type {
   FindingsPage,
   FindingTraffic,
   FindingTrafficDetail,
+  Project,
+  ProjectScope,
   IntentAsset,
   InterceptApprovalFilter,
   InterceptApprovalRow,
@@ -245,11 +247,16 @@ export const api = {
   health: () => get<{ ok: boolean; service: string; version: string }>("/health"),
 
   // ---- auth ----
-  authStatus: () => get<{ initialized: boolean }>("/auth/status"),
+  authStatus: () => get<{ initialized: boolean; username: string }>("/auth/status"),
   login: (username: string, password: string) => post<{ token: string }>("/auth/login", { username, password }),
-  initPassword: (password: string) => post<{ token: string }>("/auth/init", { password }),
-  changePassword: (oldPassword: string, newPassword: string) =>
-    post<{ ok: boolean }>("/auth/change-password", { old_password: oldPassword, new_password: newPassword }),
+  initPassword: (password: string, username?: string) =>
+    post<{ token: string }>("/auth/init", { password, username: username || undefined }),
+  changePassword: (oldPassword: string, newPassword: string, newUsername?: string) =>
+    post<{ ok: boolean }>("/auth/change-password", {
+      old_password: oldPassword,
+      new_password: newPassword,
+      new_username: newUsername || undefined,
+    }),
 
   // ---- tasks ----
   tasks: () =>
@@ -517,6 +524,29 @@ export const api = {
   detachTaskAsset: (taskId: string, assetId: number) => del<{ detached: number }>(`/tasks/${taskId}/assets/${assetId}`),
   taskIntentAssets: (taskId: string) =>
     get<{ assets: IntentAsset[] }>(`/tasks/${taskId}/intent-assets`).then((r) => arr(r.assets)),
+
+  // ---- projects (项目=授权根；资产围栏的白名单来源) ----
+  projects: () => get<{ projects: Project[] }>("/projects").then((r) => arr(r.projects)),
+  createProject: (name: string, company_id: number | null, description = "") =>
+    post<Project>("/projects", { name, company_id, description }),
+  updateProject: (id: number, patch: { name: string; company_id: number | null; description: string; status?: string }) =>
+    http<Project>(`/projects/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteProject: (id: number) => http<{ ok: boolean }>(`/projects/${id}`, { method: "DELETE" }),
+  addProjectScope: (id: number, scope: string, reason = "") =>
+    post<{ added: number; skipped: number; invalid: number; errors: string[]; project: Project }>(
+      `/projects/${id}/scope`,
+      { scope, reason },
+    ),
+  deleteProjectScope: (id: number, scopeId: number) =>
+    http<{ ok: boolean }>(`/projects/${id}/scope/${scopeId}`, { method: "DELETE" }),
+
+  // ---- 资产授权(项目围栏的待审批队列) ----
+  pendingAssets: (projectId = 0, limit = 50, offset = 0) =>
+    get<{ assets: Asset[]; total: number }>(
+      `/assets/pending?project_id=${projectId}&limit=${limit}&offset=${offset}`,
+    ).then((r) => ({ assets: arr(r.assets), total: r.total })),
+  setAssetAuthz: (ids: number[], action: "approve" | "reject" | "pending", projectId = 0) =>
+    post<{ ok: boolean; updated: number }>("/assets/authz", { ids, action, project_id: projectId }),
 
   // ---- companies (企业 + 资产范围；归属唯一来源) ----
   companies: () => get<Company[]>("/companies").then(arr),
@@ -1016,7 +1046,7 @@ export const api = {
   conversations: () => get<{ conversations: Conversation[] }>("/conversations").then((r) => arr(r.conversations)),
   createConversation: (agent_key: string, title = "", llm_profile_id?: number | null) =>
     post<Conversation>("/conversations", { agent_key, title, llm_profile_id: llm_profile_id ?? null }),
-  updateConversation: (id: number, input: { title?: string; pinned?: boolean }) =>
+  updateConversation: (id: number, input: { title?: string; pinned?: boolean; project_id?: number }) =>
     patch<Conversation>(`/conversations/${id}`, input),
   renameConversation: (id: number, title: string) => patch<Conversation>(`/conversations/${id}`, { title }),
   pinConversation: (id: number, pinned: boolean) => patch<Conversation>(`/conversations/${id}`, { pinned }),
@@ -1385,6 +1415,9 @@ export const api = {
   saveReportSettings: (patch: Partial<ReportSettings>) => put<ReportSettings>(`/report-settings`, patch),
   reports: () => get<ReportRecord[]>(`/reports`).then(arr),
   reportRecordDownloadUrl: (id: number) => `/api/reports/${id}/download`,
+  // 发现页单条漏洞导出(format: md | docx);id 为 findings 表行 id(Finding.id)
+  findingExportUrl: (id: string, format: "md" | "docx") =>
+    `/api/exploration/findings/${id}/export?format=${format}`,
   deleteReport: (id: number) => del<{ ok: boolean }>(`/reports/${id}`),
   reportTemplates: () => get<ReportTemplate[]>(`/report-templates`).then(arr),
   createReportTemplate: (body: Partial<ReportTemplate>) => post<ReportTemplate>(`/report-templates`, body),

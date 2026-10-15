@@ -60,6 +60,7 @@ type TaskDTO struct {
 	SourceTaskIDs      []string           `json:"source_task_ids"`
 	ArchiveBlockedBy   string             `json:"archive_blocked_by_task_id,omitempty"`
 	CompanyIDs         []int64            `json:"company_ids"`
+	ProjectID          *int64             `json:"project_id,omitempty"` // 归属项目(授权根);nil=未挂
 	CoverageEnabled    bool               `json:"coverage_enabled"` // 资产覆盖度功能开关(创建时定)
 }
 
@@ -133,6 +134,7 @@ func taskDTO(t *Task, status string) TaskDTO {
 		LLMFailoverReason:  llmState.FailoverReason,
 		SourceTaskIDs:      sourceIDs,
 		CompanyIDs:         lifecycle.CompanyIDs,
+		ProjectID:          lifecycle.ProjectID,
 		CoverageEnabled:    t.CoverageEnabled,
 	}
 }
@@ -318,6 +320,8 @@ type FindingDTO struct {
 	Summary   string `json:"summary"`
 	Evidence  string `json:"evidence"`
 	Report    string `json:"report,omitempty"` // 详细报告(Markdown);仅详情接口返回,列表为空
+	// 结构化复现过程(agent report_finding 时就地上报;详情页按步骤确定性渲染,空=未记录)。
+	Reproduction json.RawMessage `json:"reproduction,omitempty"`
 
 	IntentID        string            `json:"intent_id,omitempty"`
 	ParamID         string            `json:"param_id,omitempty"`
@@ -370,11 +374,34 @@ func assetLabel(a *db.Asset) string {
 // findingPayload mirrors the JSON written by the worker's report_finding tool
 // (agent/tools.go addFinding): {vulnclass, severity, summary, evidence:{by,poc}}.
 type findingPayload struct {
-	VulnClass string          `json:"vulnclass"`
-	Name      string          `json:"name"`
-	Severity  string          `json:"severity"`
-	Summary   string          `json:"summary"`
-	Evidence  json.RawMessage `json:"evidence"`
+	VulnClass string `json:"vulnclass"`
+	Name      string `json:"name"`
+	Severity  string `json:"severity"`
+	Summary   string `json:"summary"`
+	Evidence  struct {
+		By  string `json:"by"`
+		PoC string `json:"poc"`
+	} `json:"evidence"`
+}
+
+// findingPayloadPoC 提取 finding 节点 payload 里的证据纯文本:evidence.poc(现行
+// 格式)优先,兼容直接存字符串的极旧节点;都没有时返回空。
+func findingPayloadPoC(payload json.RawMessage) string {
+	var probe struct {
+		Evidence json.RawMessage `json:"evidence"`
+	}
+	if json.Unmarshal(payload, &probe) != nil || len(probe.Evidence) == 0 {
+		return ""
+	}
+	var obj struct {
+		PoC string `json:"poc"`
+	}
+	if json.Unmarshal(probe.Evidence, &obj) == nil && obj.PoC != "" {
+		return obj.PoC
+	}
+	var bare string
+	_ = json.Unmarshal(probe.Evidence, &bare)
+	return bare
 }
 
 func findingDTO(n *db.Node) FindingDTO {
@@ -387,8 +414,11 @@ func findingDTO(n *db.Node) FindingDTO {
 		Severity:  p.Severity,
 		Status:    db.FindingPending,
 		Summary:   p.Summary,
-		Evidence:  rawString(p.Evidence),
-		TS:        rfc3339(n.CreatedAt),
+		// 下发 poc 纯文本(与发现页读 findings 表的 evidence 同源同格式),
+		// 而不是整个 {"by":…,"poc":…} 对象的 JSON 串——那会在任务 tab 显示
+		// 字面 \n 和 JSON 壳。
+		Evidence: findingPayloadPoC(n.Payload),
+		TS:       rfc3339(n.CreatedAt),
 	}
 	if n.SourceTaskID > 0 {
 		d.SourceTaskID = i64s(n.SourceTaskID)
@@ -456,6 +486,10 @@ func findingFromDB(f *db.DBFinding, assets map[int64]*db.Asset) FindingDTO {
 		Evidence:  f.Evidence,
 		Report:    f.Report,
 		TS:        rfc3339(f.CreatedAt),
+	}
+	// agent 未填时是 SQL NULL(空 slice)或字面 "null",都不下发。
+	if len(f.Reproduction) > 0 && string(f.Reproduction) != "null" {
+		d.Reproduction = f.Reproduction
 	}
 	d.Assets = findingAssetDTOs(f.AssetIDs, assets)
 	if f.TaskID != nil {

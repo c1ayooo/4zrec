@@ -125,7 +125,8 @@ func (t *ToolSet) insertAssets() actool.CoreTool {
 		"批量登记新发现的资产，一次可混合多种类型（type 见枚举）。\n"+
 			"各类型必填字段：root_domain→domain；ip→ip（须为 IPv4/IPv6，非主机名）；subdomain→domain；app→app_name；service(HTTP)→url；service(非HTTP)→service_name+port（ip/domain 至少填一个）；endpoint→url+method。其余字段含义见各自说明。\n"+
 			"auth/technologies/params 为追加合并(append)，不覆盖原值。\n"+
-			"返回：{results:[{index,id,type}], errors:[{index,error}]}",
+			"授权：命中拦截规则的资产禁止插入；范围外资产会入库为【待审批】（可见但不可测，见返回 pending 字段），批准后自动放行。\n"+
+			"返回：{results:[{index,id,type}], errors:[{index,error}], pending:[{index,id,type,target,message}]}",
 		obj(map[string]any{
 			// task_id 不暴露给模型：worker 归属哪个 task 由程序经 SetTaskID 权威赋值(见 handler)。
 			"assets": map[string]any{
@@ -226,6 +227,15 @@ func (t *ToolSet) insertAssets() actool.CoreTool {
 
 			var results []result
 			var errs []errEntry
+			// 待审批资产(index+说明):已入库但未获授权,渲染进工具结果提醒 agent 不可测。
+			type pendingEntry struct {
+				Index   int    `json:"index"`
+				ID      int64  `json:"id"`
+				Type    string `json:"type"`
+				Target  string `json:"target"`
+				Message string `json:"message"`
+			}
+			var pendings []pendingEntry
 
 			// 资产闸门规则一次性载入；读取失败则跳过判定（不阻断插入）。
 			// 拦截规则 = 全局 ∪ 任务级 block；允许规则 = 任务级 allow。
@@ -237,14 +247,24 @@ func (t *ToolSet) insertAssets() actool.CoreTool {
 					allowRules = ta
 				}
 			}
+			_ = allowRules // 白名单语义并入授权状态:范围外发现入库为 pending,不再拒插
+
+			// 任务归属的项目(资产围栏/授权状态的来源);无任务或任务未挂项目 → 0,
+			// 保持旧行为(authz 留 NULL=视为已授权)。
+			projectID := int64(0)
+			if taskID > 0 {
+				projectID, _ = t.as.DB().TaskProjectID(taskID)
+			}
 
 			for i, item := range a.Assets {
-				// 资产闸门：先拦截后允许，被拒的资产禁止插入（跳过 Upsert 及后续副作用）。
+				// 资产闸门(发现侧):命中拦截规则(全局 ∪ 任务级 block)→ 禁止插入。
+				// 范围外的发现【不再拒插】:入库为 pending 待审批 —— 资产可见但不可测,
+				// 人工批准后放行(项目围栏,见 db/projects.go 与 schema §R)。
 				domains, ips, urls := assetInterceptCandidates(item)
-				if d := db.EvaluateAssetGate(blockRules, allowRules, domains, ips, urls); !d.Allowed {
+				if rule, val, ok := db.MatchAssetInterceptRules(blockRules, domains, ips, urls); ok {
 					errs = append(errs, errEntry{
 						Index: i,
-						Error: fmt.Sprintf("资产 %s %s，已禁止插入", assetInputLabel(item), d.Reason),
+						Error: fmt.Sprintf("资产 %s %s（命中值 %s），已禁止插入", assetInputLabel(item), rule.Reason(), val),
 					})
 					continue
 				}
@@ -338,6 +358,14 @@ func (t *ToolSet) insertAssets() actool.CoreTool {
 					continue
 				}
 				results = append(results, result{Index: i, ID: id, Type: typ})
+				// 授权状态打标:命中项目范围 → approved;范围外 → pending(待审批,
+				// 不可测);无项目上下文 → 不打标(旧行为,视为已授权)。
+				if authz, serr := t.as.StampDiscoveredAsset(id, projectID); serr == nil && authz == "pending" {
+					pendings = append(pendings, pendingEntry{
+						Index: i, ID: id, Type: typ, Target: assetInputLabel(item),
+						Message: "已登记为【待审批】资产：未经人工批准不可测试（绑定它的意图会被拒绝、命令打向它会被资产围栏拦截）。等待平台审批，先继续授权范围内的目标。",
+					})
+				}
 				t.writes.Assets++
 				t.anchorOwner(id)
 				if taskID > 0 {
@@ -365,10 +393,14 @@ func (t *ToolSet) insertAssets() actool.CoreTool {
 				}
 			}
 
-			return jsonResult(map[string]any{
+			out := map[string]any{
 				"results": results,
 				"errors":  errs,
-			})
+			}
+			if len(pendings) > 0 {
+				out["pending"] = pendings
+			}
+			return jsonResult(out)
 		},
 	)
 }

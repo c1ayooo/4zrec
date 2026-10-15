@@ -1523,3 +1523,72 @@ CREATE TABLE IF NOT EXISTS report_templates (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+
+-- =====================================================================
+-- §R. 项目管理与资产围栏(授权边界)
+--
+-- 项目 = 一次渗透委托的授权根:定义"这次授权测什么"(project_scope),是任务/
+-- 对话的组织父级,也是资产围栏的白名单来源。公司(companies)仍是客户主体,
+-- 项目挂在公司下;一个公司可有多个项目,各自范围独立。
+--
+-- 资产授权状态 assets.authz:
+--   NULL      存量/未打标,视为 approved(向后兼容:未启用项目的任务、
+--             纯助手对话不受影响)
+--   approved  已授权可测(命中项目范围自动批,或人工批准)
+--   pending   渗透过程发现、尚未批准 —— 不可测试(意图绑定拒绝、执行侧拦截)
+--   rejected  人工明确拒绝
+-- 状态只升不降:approved/rejected 是终态,范围匹配只能把 pending/NULL 提为
+-- approved,人工拒绝优先于一切范围规则。
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS projects (
+    id          BIGSERIAL PRIMARY KEY,
+    name        TEXT NOT NULL,
+    company_id  BIGINT REFERENCES companies(id) ON DELETE SET NULL,
+    description TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_projects_company ON projects(company_id) WHERE company_id IS NOT NULL;
+DROP TRIGGER IF EXISTS trg_projects_upd ON projects;
+CREATE TRIGGER trg_projects_upd BEFORE UPDATE ON projects
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- 项目授权范围,结构同 company_scope(kind/domain/net/value/raw),随项目级联删除。
+-- 域名规则按后缀匹配(根域及其所有子域),cidr/ip 按 net 包含,icp 精确相等,
+-- keyword 仅作提示不参与围栏判定。创建/解析复用 ParseScopeInput(同款护栏:
+-- 拒绝裸 TLD 与过宽网段)。
+CREATE TABLE IF NOT EXISTS project_scope (
+    id         BIGSERIAL PRIMARY KEY,
+    project_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    kind       TEXT NOT NULL CHECK (kind IN ('domain','ip','cidr','icp','keyword')),
+    domain     TEXT,
+    net        CIDR,
+    value      TEXT,
+    raw        TEXT NOT NULL,
+    reason     TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_project_scope_domain UNIQUE (project_id, domain),
+    CONSTRAINT uq_project_scope_net    UNIQUE (project_id, net),
+    CONSTRAINT ck_project_scope_payload CHECK (
+        (kind = 'domain' AND domain IS NOT NULL AND net IS NULL AND value IS NULL)
+        OR (kind IN ('ip','cidr') AND domain IS NULL AND net IS NOT NULL AND value IS NULL)
+        OR (kind IN ('icp','keyword') AND domain IS NULL AND net IS NULL AND value IS NOT NULL)
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_project_scope_project ON project_scope(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_scope_domain ON project_scope(domain) WHERE domain IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_project_scope_net ON project_scope(net) WHERE net IS NOT NULL;
+
+-- 任务/对话挂到项目;项目的授权围栏自此生效(不挂=沿用旧行为,仅全局黑名单)。
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS project_id BIGINT REFERENCES projects(id) ON DELETE SET NULL;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS project_id BIGINT REFERENCES projects(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id) WHERE project_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_conversations_project ON conversations(project_id) WHERE project_id IS NOT NULL;
+
+-- 资产归属项目 + 授权状态。project_id 是展示归属(UI 按项目筛选),围栏判定
+-- 不依赖它(按 project_scope 规则匹配 + authz 状态)。authz 语义见上,只升不降。
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS project_id BIGINT REFERENCES projects(id) ON DELETE SET NULL;
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS authz TEXT CHECK (authz IN ('approved','pending','rejected'));
+CREATE INDEX IF NOT EXISTS idx_assets_project ON assets(project_id) WHERE project_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_assets_pending ON assets(id) WHERE authz = 'pending';

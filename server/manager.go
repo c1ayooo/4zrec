@@ -56,6 +56,7 @@ type Task struct {
 	LLMFailoverReason  string  `json:"llm_failover_reason,omitempty"`
 	SourceTaskIDs      []int64 `json:"source_task_ids,omitempty"`
 	CompanyIDs         []int64 `json:"company_ids,omitempty"`
+	ProjectID          *int64  `json:"project_id,omitempty"` // 归属项目(授权根);nil=未挂,资产围栏不启用
 	Status             string  `json:"status"` // persisted lifecycle status (done/failed/timeout 为终态；空/其它则由运行态推导)
 	// 任务级超时(见 docs/任务级超时与收尾设计.md)。DeadlineAt/FirstRunAt 为 unix 秒,0=未设/未运行。
 	TimeoutSeconds       int                    `json:"timeout_seconds"`
@@ -93,6 +94,7 @@ type taskLifecycleState struct {
 	DeadlineAt    int64
 	SourceTaskIDs []int64
 	CompanyIDs    []int64
+	ProjectID     *int64
 	CategoryID    *int64
 	CategoryName  string
 }
@@ -120,6 +122,7 @@ func (t *Task) lifecycleSnapshotLocked() taskLifecycleState {
 		DeadlineAt:    t.DeadlineAt,
 		SourceTaskIDs: append([]int64(nil), t.SourceTaskIDs...),
 		CompanyIDs:    append([]int64(nil), t.CompanyIDs...),
+		ProjectID:     cloneInt64Ptr(t.ProjectID),
 		CategoryID:    cloneInt64Ptr(t.CategoryID),
 		CategoryName:  t.CategoryName,
 	}
@@ -850,7 +853,14 @@ func unixNanoOrZero(t *time.Time) int64 {
 	return t.UnixNano()
 }
 
-func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Interceptor) *Task {
+// taskGuard 构造任务侧 guard:拦截规则 + 资产围栏(执行侧授权闸门)。
+func taskGuard(ic *intercept.Interceptor, dbh *pgdb.DB) *guard.Guard {
+	g := guard.NewWithInterceptor(ic)
+	g.EnableAssetFence(dbh)
+	return g
+}
+
+func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Interceptor, dbh *pgdb.DB) *Task {
 	return &Task{
 		ID: strconv.FormatInt(pt.ID, 10), ExpID: pt.ExplorationID,
 		Name:       pt.Name,
@@ -865,10 +875,11 @@ func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Inter
 		LLMFailoverState: pt.LLMFailoverState, LLMFailoverReason: pt.LLMFailoverReason,
 		SourceTaskIDs:  append([]int64(nil), pt.SourceTaskIDs...),
 		CompanyIDs:     append([]int64(nil), pt.CompanyIDs...),
+		ProjectID:      cloneInt64Ptr(pt.ProjectID),
 		TimeoutSeconds: pt.TimeoutSeconds, PlanHeartbeatSeconds: pt.PlanHeartbeatSeconds,
 		CoverageEnabled: pt.CoverageEnabled,
 		FirstRunAt:      unixOrZero(pt.FirstRunAt), DeadlineAt: unixOrZero(pt.DeadlineAt),
-		Store: store, Guard: guard.NewWithInterceptor(ic), notify: make(chan struct{}, 1),
+		Store: store, Guard: taskGuard(ic, dbh), notify: make(chan struct{}, 1),
 	}
 }
 
@@ -919,7 +930,7 @@ func (m *Manager) CreateTaskWithOptions(description, goal string, opts pgdb.Task
 	if err != nil {
 		return nil, err
 	}
-	t := taskFromPG(pt, m.pg.Exploration(pt.ExplorationID), m.interceptor)
+	t := taskFromPG(pt, m.pg.Exploration(pt.ExplorationID), m.interceptor, m.pg)
 	m.mu.Lock()
 	m.tasks[t.ID] = t
 	m.active = t.ID
@@ -1118,7 +1129,7 @@ func (m *Manager) LoadExisting() []*Task {
 		if _, ok := m.tasks[id]; ok {
 			continue
 		}
-		t := taskFromPG(pt, m.pg.Exploration(pt.ExplorationID), m.interceptor)
+		t := taskFromPG(pt, m.pg.Exploration(pt.ExplorationID), m.interceptor, m.pg)
 		m.tasks[id] = t
 		loaded = append(loaded, t)
 	}
