@@ -78,30 +78,12 @@ func TestGraphOverviewExpandsAssociatedCompanyScope(t *testing.T) {
 		t.Fatalf("company asset provenance missing: %+v", linkedAssets[0])
 	}
 	overview := tools.graphOverviewData()
+	// coverage no longer embeds scope rows (company scope takes effect through
+	// asset ownership — asserted above via QueryByTask); the block itself must
+	// still exist and carry the host count.
 	coverage, ok := overview["coverage"].(map[string]any)
 	if !ok {
 		t.Fatalf("coverage missing: %#v", overview["coverage"])
-	}
-	scopeRows, ok := coverage["scope"].([]map[string]any)
-	if !ok || len(scopeRows) != 1 {
-		t.Fatalf("task scope missing: %#v", coverage["scope"])
-	}
-	companyScope, ok := scopeRows[0]["company_scope"].([]map[string]any)
-	if !ok || len(companyScope) != len(inputs) {
-		t.Fatalf("company scope not expanded: %#v", scopeRows[0])
-	}
-	kinds := make(map[string]string, len(companyScope))
-	for _, rule := range companyScope {
-		kinds[fmt.Sprint(rule["kind"])] = fmt.Sprint(rule["value"])
-	}
-	for _, input := range inputs {
-		if kinds[input.Kind] != input.Value {
-			t.Errorf("scope %s=%q want %q", input.Kind, kinds[input.Kind], input.Value)
-		}
-	}
-	keywords, ok := scopeRows[0]["company_keywords"].([]string)
-	if !ok || len(keywords) != 1 || keywords[0] != keyword {
-		t.Fatalf("company keywords missing: %#v", scopeRows[0]["company_keywords"])
 	}
 	if hc, _ := coverage["host_count"].(int); hc < 1 {
 		t.Fatalf("company asset host not counted in agent context: %#v", coverage["host_count"])
