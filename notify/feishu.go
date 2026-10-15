@@ -9,29 +9,56 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 )
 
-// feishuChannel 实现飞书（含 Lark）自定义机器人，走交互式卡片。
+// feishuChannel 实现飞书（含 Lark）通知，两种接入形态共用一套卡片渲染：
 //
-// 平台特性：
-//   - 加签算法与钉钉**不同**，且极易写错，见 feishuSign 注释。
-//   - 与钉钉一样把业务错误塞在 HTTP 200 的 body 里（code != 0）。
-//   - 卡片 header 支持颜色模板，用级别映射配色，让人在消息列表里一眼看出严重程度。
+//   - webhook：群「自定义机器人」，只需 Webhook 地址（+可选签名密钥）；
+//   - app：企业「自建应用」机器人，App ID/Secret 换 tenant_access_token 后走
+//     IM 消息 API，可单聊（open_id/user_id/union_id/email）或发群（chat_id）。
 type feishuChannel struct{}
 
 func (feishuChannel) Kind() string { return KindFeishu }
 
-// 飞书自定义机器人约 5 次/秒，折合 100 次/分钟。
+// 飞书两种形态的官方建议限频均远高于通知场景的实际峰值，沿用 100/min。
 func (feishuChannel) DefaultRatePerMin() int { return 100 }
 
-// Webhook 地址末段即机器人唯一标识，属凭据。
-func (feishuChannel) SecretKeys() []string { return []string{"webhook", "secret"} }
+// Webhook 地址末段、App Secret、签名密钥都属凭据。
+func (feishuChannel) SecretKeys() []string { return []string{"webhook", "secret", "app_secret"} }
 
-// 同理：改 Webhook 地址必须对新地址重新表态签名密钥。
-func (feishuChannel) DestinationKeys() []string { return []string{"webhook"} }
+// 目标地址与凭据是两套独立字段：改投递目标必须对新目标重新表态全部凭据。
+func (feishuChannel) DestinationKeys() []string { return []string{"webhook", "receive_id"} }
 
-func (feishuChannel) Validate(cfg map[string]any) error {
+// feishuAppMode 报告配置是否为应用机器人形态。缺省 mode 视为 webhook，
+// 兼容只有 webhook 字段的存量配置。
+func feishuAppMode(cfg map[string]any) bool { return cfgString(cfg, "mode") == "app" }
+
+var feishuReceiveIDTypes = map[string]bool{
+	"open_id": true, "user_id": true, "union_id": true, "email": true, "chat_id": true,
+}
+
+func (c feishuChannel) Validate(cfg map[string]any) error {
+	if feishuAppMode(cfg) {
+		for key, label := range map[string]string{
+			"app_id":     "App ID",
+			"app_secret": "App Secret",
+			"receive_id": "接收者 ID",
+		} {
+			if cfgString(cfg, key) == "" {
+				return errors.New("应用机器人模式缺少 " + label)
+			}
+		}
+		typ := cfgString(cfg, "receive_id_type")
+		if typ == "" {
+			typ = "open_id"
+		}
+		if !feishuReceiveIDTypes[typ] {
+			return fmt.Errorf("接收者 ID 类型无效: %s（可用 open_id/user_id/union_id/email/chat_id）", typ)
+		}
+		return nil
+	}
 	hook := cfgString(cfg, "webhook")
 	if hook == "" {
 		return errors.New("缺少 Webhook 地址")
@@ -46,6 +73,14 @@ func (c feishuChannel) Send(ctx context.Context, cfg map[string]any, m Message) 
 	if err := c.Validate(cfg); err != nil {
 		return 0, Permanent(err)
 	}
+	if feishuAppMode(cfg) {
+		return c.sendApp(ctx, cfg, m)
+	}
+	return c.sendWebhook(ctx, cfg, m)
+}
+
+// sendWebhook 是群自定义机器人形态：卡片 + 可选签名直投 Webhook。
+func (c feishuChannel) sendWebhook(ctx context.Context, cfg map[string]any, m Message) (int, error) {
 	card, kept := feishuCard(m)
 	payload := map[string]any{
 		"msg_type": "interactive",
@@ -76,6 +111,115 @@ func (c feishuChannel) Send(ctx context.Context, cfg map[string]any, m Message) 
 	}
 	if res.StatusCode != 0 {
 		return 0, Permanent(fmt.Errorf("飞书返回错误 %d: %s", res.StatusCode, res.StatusMessage))
+	}
+	return kept, nil
+}
+
+// ---- 应用机器人形态 ----
+
+// feishuTokenEntry 缓存 tenant_access_token。token 按 app_id 缓存、进程内共享：
+// 通知渠道实现本身无状态（凭据从 cfg 传入），但 token 是派生凭据，逐条消息
+// 重取会把凭据校验接口打成热点，且该接口有频率限制。
+type feishuTokenEntry struct {
+	token    string
+	expireAt time.Time
+}
+
+var (
+	feishuTokenMu    sync.Mutex
+	feishuTokenCache = map[string]feishuTokenEntry{}
+)
+
+// feishuTokenStaleCodes 是「token 失效需重取」的飞书错误码。命中后强制刷新
+// 重试一次——缓存提前 5 分钟过期，正常不会走到，这是双机时钟漂移等的兜底。
+var feishuTokenStaleCodes = map[int]bool{99991663: true, 99991661: true, 99991679: true}
+
+func feishuTenantToken(ctx context.Context, appID, appSecret string, force bool) (string, error) {
+	feishuTokenMu.Lock()
+	defer feishuTokenMu.Unlock()
+	if e, ok := feishuTokenCache[appID]; ok && !force && time.Now().Before(e.expireAt) {
+		return e.token, nil
+	}
+	raw, err := doJSON(ctx, "POST", "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+		nil, map[string]string{"app_id": appID, "app_secret": appSecret})
+	if err != nil {
+		return "", err
+	}
+	var res struct {
+		Code              int    `json:"code"`
+		Msg               string `json:"msg"`
+		TenantAccessToken string `json:"tenant_access_token"`
+		Expire            int64  `json:"expire"` // 秒
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return "", fmt.Errorf("解析飞书 token 响应失败: %w (%s)", err, snippet(raw))
+	}
+	if res.Code != 0 {
+		return "", Permanent(fmt.Errorf("飞书应用凭据无效（%d）: %s", res.Code, res.Msg))
+	}
+	if res.TenantAccessToken == "" {
+		return "", Permanent(errors.New("飞书 token 响应缺少 tenant_access_token"))
+	}
+	// 提前 5 分钟视为过期，避免边界上的在途请求被拒。
+	feishuTokenCache[appID] = feishuTokenEntry{
+		token:    res.TenantAccessToken,
+		expireAt: time.Now().Add(time.Duration(res.Expire)*time.Second - 5*time.Minute),
+	}
+	return res.TenantAccessToken, nil
+}
+
+// sendApp 是自建应用形态：换 token 后走 IM 消息 API，单聊/群发由 receive_id_type 决定。
+func (c feishuChannel) sendApp(ctx context.Context, cfg map[string]any, m Message) (int, error) {
+	card, kept := feishuCard(m)
+	content, err := json.Marshal(card)
+	if err != nil {
+		return 0, Permanent(fmt.Errorf("构造飞书卡片失败: %w", err))
+	}
+	typ := cfgString(cfg, "receive_id_type")
+	if typ == "" {
+		typ = "open_id"
+	}
+	url := "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=" + typ
+	body := map[string]any{
+		"receive_id": cfgString(cfg, "receive_id"),
+		"msg_type":   "interactive",
+		// IM API 的 content 是「卡片 JSON 的字符串」，不是嵌套对象。
+		"content": string(content),
+	}
+	send := func(token string) (int, []byte, error) {
+		raw, serr := doJSON(ctx, "POST", url, map[string]string{"Authorization": "Bearer " + token}, body)
+		if serr != nil {
+			return 0, nil, serr
+		}
+		var res struct {
+			Code int    `json:"code"`
+			Msg  string `json:"msg"`
+		}
+		if uerr := json.Unmarshal(raw, &res); uerr != nil {
+			return 0, raw, fmt.Errorf("解析飞书响应失败: %w (%s)", uerr, snippet(raw))
+		}
+		return res.Code, raw, nil
+	}
+	token, err := feishuTenantToken(ctx, cfgString(cfg, "app_id"), cfgString(cfg, "app_secret"), false)
+	if err != nil {
+		return 0, err
+	}
+	code, raw, err := send(token)
+	if err != nil {
+		return 0, err
+	}
+	if feishuTokenStaleCodes[code] {
+		// token 意外失效：强制刷新后整条重发一次（卡片渲染无副作用）。
+		if token, err = feishuTenantToken(ctx, cfgString(cfg, "app_id"), cfgString(cfg, "app_secret"), true); err != nil {
+			return 0, err
+		}
+		if code, raw, err = send(token); err != nil {
+			return 0, err
+		}
+	}
+	if code != 0 {
+		// 凭据/参数/权限类错误重试无意义；频率限制（9499/230020）交由上层退避。
+		return 0, Permanent(fmt.Errorf("飞书应用消息发送失败（%d）: %s", code, snippet(raw)))
 	}
 	return kept, nil
 }

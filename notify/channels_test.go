@@ -504,3 +504,36 @@ func TestPermanentErrorUnwrap(t *testing.T) {
 type permanentSentinel struct{}
 
 func (*permanentSentinel) Error() string { return "sentinel" }
+
+// 飞书应用机器人模式的校验：必填项、receive_id_type 白名单；webhook 模式存量行为不变。
+func TestFeishuAppModeValidate(t *testing.T) {
+	ch := feishuChannel{}
+	if err := ch.Validate(map[string]any{"mode": "app", "app_id": "cli_x", "app_secret": "s"}); err == nil {
+		t.Fatal("缺 receive_id 应报错")
+	}
+	if err := ch.Validate(map[string]any{"mode": "app", "app_id": "cli_x", "receive_id": "ou_x"}); err == nil {
+		t.Fatal("缺 app_secret 应报错")
+	}
+	if err := ch.Validate(map[string]any{
+		"mode": "app", "app_id": "cli_x", "app_secret": "s",
+		"receive_id": "ou_x", "receive_id_type": "bogus",
+	}); err == nil {
+		t.Fatal("非法 receive_id_type 应报错")
+	}
+	for _, typ := range []string{"", "open_id", "email", "user_id", "union_id", "chat_id"} {
+		cfg := map[string]any{"mode": "app", "app_id": "cli_x", "app_secret": "s", "receive_id": "x"}
+		if typ != "" {
+			cfg["receive_id_type"] = typ
+		}
+		if err := ch.Validate(cfg); err != nil {
+			t.Fatalf("合法形态(%s)不应报错: %v", typ, err)
+		}
+	}
+	// 存量 webhook 配置(无 mode 字段)保持原语义
+	if err := ch.Validate(map[string]any{"webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/x"}); err != nil {
+		t.Fatalf("webhook 模式应通过: %v", err)
+	}
+	if err := ch.Validate(map[string]any{}); err == nil {
+		t.Fatal("无 mode 且无 webhook 应报错")
+	}
+}

@@ -47,12 +47,44 @@ export const CHANNEL_FIELDS: Record<string, FieldDef[]> = {
   ],
   feishu: [
     {
+      key: "mode",
+      label: "机器人类型",
+      kind: "select",
+      options: [
+        { value: "", label: "群自定义机器人（Webhook）" },
+        { value: "app", label: "企业自建应用（App ID/Secret，可单聊）" },
+      ],
+      help: "两种形态二选一；应用机器人可直发个人单聊，无需拉群",
+    },
+    {
       key: "webhook",
-      label: "Webhook 地址",
+      label: "Webhook 地址（群机器人）",
       kind: "text",
       placeholder: "https://open.feishu.cn/open-apis/bot/v2/hook/...",
     },
-    { key: "secret", label: "签名校验密钥", kind: "password", help: "机器人开启「签名校验」时填写，否则留空" },
+    { key: "secret", label: "签名校验密钥（群机器人）", kind: "password", help: "机器人开启「签名校验」时填写，否则留空" },
+    { key: "app_id", label: "App ID（应用机器人）", kind: "text", placeholder: "cli_..." },
+    { key: "app_secret", label: "App Secret（应用机器人）", kind: "password" },
+    {
+      key: "receive_id_type",
+      label: "接收者 ID 类型",
+      kind: "select",
+      options: [
+        { value: "open_id", label: "open_id（个人单聊，推荐）" },
+        { value: "email", label: "email（个人单聊）" },
+        { value: "user_id", label: "user_id（个人单聊）" },
+        { value: "union_id", label: "union_id（个人单聊）" },
+        { value: "chat_id", label: "chat_id（群聊）" },
+      ],
+      help: "应用机器人形态的投递目标类型",
+    },
+    {
+      key: "receive_id",
+      label: "接收者 ID（应用机器人）",
+      kind: "text",
+      placeholder: "ou_xxx / 邮箱 / oc_xxx",
+      help: "open_id 可在开放平台「成员管理」或 API 返回中获取；chat_id 需机器人已入群",
+    },
   ],
   wecom: [
     {
