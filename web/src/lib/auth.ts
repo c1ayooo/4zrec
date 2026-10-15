@@ -37,8 +37,10 @@ export const auth = {
       if (parts.length !== 3) return null;
       // base64url → base64
       const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+      // 展示名固定品牌登录名:改名前签发的旧 token(sub=旧名)依然有效,
+      // 用户名展示不能跟着旧 sub 走。username 仅作解码参考。
       const username: string = payload.sub ?? "4zrec";
-      return { id: "1", name: username, username, email: "", avatar: "", role: "operator" };
+      return { id: "1", name: "4zrec", username, email: "", avatar: "", role: "operator" };
     } catch {
       return null;
     }

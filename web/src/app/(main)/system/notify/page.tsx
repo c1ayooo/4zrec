@@ -312,7 +312,7 @@ export default function NotifyPage() {
             <Label htmlFor="n-base">回链地址</Label>
             <Input
               id="n-base"
-              placeholder="https://4zreco.example.com"
+              placeholder="https://4zrec.example.com"
               value={baseURL}
               onChange={(e) => setBaseURL(e.target.value)}
             />
