@@ -528,7 +528,12 @@ export const api = {
     get<{ assets: IntentAsset[] }>(`/tasks/${taskId}/intent-assets`).then((r) => arr(r.assets)),
 
   // ---- projects (项目=授权根；资产围栏的白名单来源) ----
-  projects: () => get<{ projects: Project[] }>("/projects").then((r) => arr(r.projects)),
+  // 后端 nil 切片序列化为 null(新项目无范围规则时 scope=null),这里归一成 [],
+  // 消费方免做空调护。
+  projects: () =>
+    get<{ projects: Project[] }>("/projects").then((r) =>
+      arr(r.projects).map((p) => ({ ...p, scope: p.scope ?? [] })),
+    ),
   createProject: (name: string, company_id: number | null, description = "") =>
     post<Project>("/projects", { name, company_id, description }),
   updateProject: (id: number, patch: { name: string; company_id: number | null; description: string; status?: string }) =>

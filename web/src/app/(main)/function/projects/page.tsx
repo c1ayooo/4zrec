@@ -396,9 +396,9 @@ export default function ProjectsPage() {
             </div>
           </div>
           <div>
-            <p className="mb-2 text-sm font-medium">已有范围（{edit?.project.scope.length ?? 0}）</p>
+            <p className="mb-2 text-sm font-medium">已有范围（{edit?.project.scope?.length ?? 0}）</p>
             <div className="flex flex-col gap-1">
-              {edit?.project.scope.map((r) => (
+              {edit?.project.scope?.map((r) => (
                 <div key={r.id} className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5">
                   <div className="min-w-0">
                     <span className="font-mono text-sm">{r.raw}</span>
