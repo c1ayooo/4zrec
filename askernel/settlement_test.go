@@ -64,8 +64,7 @@ func (m *settleBlockModel) Stream(ctx context.Context, _ []*schema.Message, _ ..
 // as soon as the wrap-up phase's first text arrives — the settlement runner
 // must then be canceled instead of continuing its turn budget in background.
 func TestKernelSettlementStopsWhenConsumerAbandons(t *testing.T) {
-	ran := 0
-	echo := simpleTool("echo", "echo ran", func() { ran++ })
+	echo := simpleTool("echo", "echo ran", nil)
 	m := newSettleBlockModel(toolCallMsg("c1", "echo", "{}"))
 	s := NewSession(Options{
 		Model:      m,

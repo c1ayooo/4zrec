@@ -412,6 +412,10 @@ func trimErr(err error) string {
 // character, far denser than ASCII — a plain bytes/3.5 count under-estimates it
 // ~1.75x and would route over-long requests to members that then fail with a
 // non-failover 400.
+//
+// All accumulation happens in token units scaled ×14 (see tokenWeight); the
+// single division at the end rounds up, so many small strings cannot each
+// truncate their way to a low total.
 func estimateTokens(input []*schema.Message, tools []*schema.ToolInfo) int {
 	n := 0
 	for _, m := range input {
@@ -431,34 +435,36 @@ func estimateTokens(input []*schema.Message, tools []*schema.ToolInfo) int {
 			continue
 		}
 		// InputSchema is a decoded schema tree, so its serialized size isn't
-		// available cheaply — charge a flat ~120 chars per top-level property
-		// instead (the JSON-schema form is what the adapters send; schema JSON
-		// is ASCII-dominant, so the ASCII rate applies).
+		// available cheaply — charge a flat ~120 ASCII chars per top-level
+		// property instead (the JSON-schema form is what the adapters send;
+		// schema JSON is ASCII-dominant, so the ASCII rate applies: 120 chars
+		// ×4 units = 480).
 		props := 0
 		if t.ParamsOneOf != nil {
 			if js, err := t.ParamsOneOf.ToJSONSchema(); err == nil && js != nil && js.Properties != nil {
 				props = js.Properties.Len()
 			}
 		}
-		n += tokenWeight(t.Name) + tokenWeight(t.Desc) + props*120*2/7
+		n += tokenWeight(t.Name) + tokenWeight(t.Desc) + props*480
 	}
-	return n
+	return (n + 13) / 14
 }
 
-// tokenWeight estimates the tokens in s: ASCII at ~3.5 bytes per token
-// (English + JSON syntax), non-ASCII runes — CJK-dominant here — at ~1.5
-// tokens per character. rune iteration keeps each multibyte character one unit
-// instead of 3 bytes.
+// tokenWeight estimates the tokens in s, scaled ×14 so per-string integer math
+// never truncates to zero: ASCII at ~3.5 bytes per token (English + JSON
+// syntax) → 4 units per byte, non-ASCII runes — CJK-dominant here — at ~1.5
+// tokens per character → 21 units per rune. rune iteration keeps each
+// multibyte character one unit instead of 3 bytes.
 func tokenWeight(s string) int {
-	ascii, wide := 0, 0
+	units := 0
 	for _, r := range s {
 		if r < 128 {
-			ascii++
+			units += 4
 		} else {
-			wide++
+			units += 21
 		}
 	}
-	return ascii*2/7 + wide*3/2
+	return units
 }
 
 // order picks the members to try, in order: skip those in a cooling-off window
