@@ -116,6 +116,8 @@ export default function AssetsPage() {
   const [counts, setCounts] = React.useState<Record<string, number>>({});
   const [tab, setTab] = React.useState("company");
   const [query, setQuery] = React.useState("");
+  // "all" | "-1"(未归属) | String(company.id) — 服务端 company_id 过滤
+  const [companyFilter, setCompanyFilter] = React.useState("all");
   const [loaded, setLoaded] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [page, setPage] = React.useState(0);
@@ -234,6 +236,7 @@ export default function AssetsPage() {
   React.useEffect(() => {
     setQuery("");
     setDslError("");
+    setCompanyFilter("all");
     setSelected(new Set());
     setRows([]);
     setRowsTab("");
@@ -242,7 +245,7 @@ export default function AssetsPage() {
   }, [tab]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: these controls intentionally reset server pagination.
-  React.useEffect(() => setPage(0), [tab, size, query]);
+  React.useEffect(() => setPage(0), [tab, size, query, companyFilter]);
 
   const dslMode = query.trim() !== "";
 
@@ -256,7 +259,10 @@ export default function AssetsPage() {
     const offset = page * size;
     const run = async () => {
       try {
-        const r = dsl ? await api.searchAssets(dsl, tab, size, offset) : await api.assets(tab, size, offset);
+        const companyId = companyFilter === "all" ? "" : companyFilter;
+        const r = dsl
+          ? await api.searchAssets(dsl, tab, size, offset)
+          : await api.assets(tab, size, offset, companyId);
         if (assetsRequestRef.current !== request) return;
         setRows(r.assets);
         setRowsTab(tab);
@@ -280,7 +286,7 @@ export default function AssetsPage() {
       clearTimeout(tid);
       if (assetsRequestRef.current === request) assetsRequestRef.current++;
     };
-  }, [tab, page, size, query, refreshKey]);
+  }, [tab, page, size, query, companyFilter, refreshKey]);
 
   React.useEffect(() => {
     if (tab === "company") return;
@@ -312,6 +318,29 @@ export default function AssetsPage() {
       error={dslError}
       count={dslMode ? total : undefined}
     />
+  );
+
+  // 数据 tab 的工具栏：企业筛选 + DSL 搜索。筛选在非 DSL 模式下生效（DSL 有自己的作用域）。
+  const toolbar = (
+    <div className="flex items-start gap-2">
+      <Select value={companyFilter} onValueChange={setCompanyFilter}>
+        <SelectTrigger className="w-40 shrink-0" aria-label="按企业筛选">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部企业</SelectItem>
+          <SelectItem value="-1">未归属</SelectItem>
+          <SelectGroup>
+            {companies.map((c) => (
+              <SelectItem key={c.id} value={String(c.id)}>
+                {c.name}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+      <div className="min-w-0 flex-1">{searchBox}</div>
+    </div>
   );
 
   return (
@@ -420,7 +449,7 @@ export default function AssetsPage() {
 
         {/* 根域名 */}
         <TabsContent value="root_domain" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
-          {searchBox}
+          {toolbar}
           <AssetCard
             cols={["", "域名", "ICP 备案", "归属企业", ""]}
             loaded={loaded}
@@ -461,9 +490,9 @@ export default function AssetsPage() {
 
         {/* IP */}
         <TabsContent value="ip" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
-          {searchBox}
+          {toolbar}
           <AssetCard
-            cols={["", "IP", "C段", "绑定域名", "开放端口", ""]}
+            cols={["", "IP", "C段", "绑定域名", "开放端口", "归属企业", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -490,6 +519,9 @@ export default function AssetsPage() {
                     mono
                   />
                 </TableCell>
+                <TableCell className="text-xs">
+                  {companyName(a.company_id) || <span className="text-muted-foreground">未归属</span>}
+                </TableCell>
                 <TableCell className="w-8 pl-0">
                   <Button
                     variant="ghost"
@@ -508,9 +540,9 @@ export default function AssetsPage() {
 
         {/* 子域名 */}
         <TabsContent value="subdomain" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
-          {searchBox}
+          {toolbar}
           <AssetCard
-            cols={["", "域名", "根域名", "解析类型", "解析值", ""]}
+            cols={["", "域名", "根域名", "解析类型", "解析值", "归属企业", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -532,6 +564,9 @@ export default function AssetsPage() {
                 <TableCell className="max-w-xs truncate font-mono text-xs">
                   {(Array.isArray(a.record_value) ? a.record_value.join(", ") : a.record_value) || "—"}
                 </TableCell>
+                <TableCell className="text-xs">
+                  {companyName(a.company_id) || <span className="text-muted-foreground">未归属</span>}
+                </TableCell>
                 <TableCell className="w-8 pl-0">
                   <Button
                     variant="ghost"
@@ -550,9 +585,9 @@ export default function AssetsPage() {
 
         {/* 应用 */}
         <TabsContent value="app" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
-          {searchBox}
+          {toolbar}
           <AssetCard
-            cols={["", "应用名", "Bundle ID", "分类", "ICP 备案", ""]}
+            cols={["", "应用名", "Bundle ID", "分类", "ICP 备案", "归属企业", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -572,6 +607,9 @@ export default function AssetsPage() {
                 <TableCell className="font-mono text-xs">{a.bundle_id || "—"}</TableCell>
                 <TableCell className="text-xs">{a.category || "—"}</TableCell>
                 <TableCell className="text-xs">{a.app_icp || "—"}</TableCell>
+                <TableCell className="text-xs">
+                  {companyName(a.company_id) || <span className="text-muted-foreground">未归属</span>}
+                </TableCell>
                 <TableCell className="w-8 pl-0">
                   <Button
                     variant="ghost"
@@ -590,9 +628,9 @@ export default function AssetsPage() {
 
         {/* 服务 */}
         <TabsContent value="service" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
-          {searchBox}
+          {toolbar}
           <AssetCard
-            cols={["", "服务", "域名", "IP", "端口", "状态码", "标题", "指纹", "认证", ""]}
+            cols={["", "服务", "域名", "IP", "端口", "状态码", "标题", "指纹", "认证", "归属企业", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -667,6 +705,9 @@ export default function AssetsPage() {
                       })
                     )}
                   </TableCell>
+                  <TableCell className="text-xs">
+                    {companyName(a.company_id) || <span className="text-muted-foreground">未归属</span>}
+                  </TableCell>
                   <TableCell className="w-8 pl-0">
                     <Button
                       variant="ghost"
@@ -686,9 +727,9 @@ export default function AssetsPage() {
 
         {/* 接口 */}
         <TabsContent value="endpoint" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
-          {searchBox}
+          {toolbar}
           <AssetCard
-            cols={["", "方法", "完整地址", "参数", ""]}
+            cols={["", "方法", "完整地址", "参数", "归属企业", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -718,6 +759,9 @@ export default function AssetsPage() {
                     })}
                     mono
                   />
+                </TableCell>
+                <TableCell className="text-xs">
+                  {companyName(a.company_id) || <span className="text-muted-foreground">未归属</span>}
                 </TableCell>
                 <TableCell className="w-8 pl-0">
                   <Button

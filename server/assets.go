@@ -362,6 +362,12 @@ func (s *Server) listAssets(w http.ResponseWriter, r *http.Request) {
 			if err == nil && offset < total {
 				assets, err = as.QueryByCompany(companyID, typ, limit, offset)
 			}
+		case companyID == -1:
+			// -1 = 「未归属」筛选项：只看没有归属任何企业的资产。
+			total, err = as.CountUnassigned(typ)
+			if err == nil && offset < total {
+				assets, err = as.QueryUnassigned(typ, limit, offset)
+			}
 		case taskID > 0:
 			total, err = as.CountByTask(taskID, typ)
 			if err == nil && offset < total {

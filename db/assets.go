@@ -1145,6 +1145,46 @@ func (s *AssetStore) CountByCompany(companyID int64, typ string) (int, error) {
 	return n, err
 }
 
+// QueryUnassigned / CountUnassigned：未归属企业的资产（company_id IS NULL），
+// 资产页「归属企业 = 未归属」筛选项的后端。
+func (s *AssetStore) QueryUnassigned(typ string, limit, offset int) ([]*Asset, error) {
+	q := `SELECT id, type, company_id, array_to_json(task_ids)::text,
+       COALESCE(domain,''), COALESCE(root_domain,''), COALESCE(ip,''),
+       COALESCE(c_segment::text,''), port,
+       COALESCE(icp,''), array_to_json(bound_domains)::text, array_to_json(open_ports)::text, COALESCE(record_type,''),
+       array_to_json(record_value)::text, COALESCE(bundle_id,''), COALESCE(app_name,''),
+       COALESCE(category,''), COALESCE(app_description,''), COALESCE(app_icp,''),
+       COALESCE(url,''), COALESCE(service_type,''), COALESCE(service_name,''),
+       COALESCE(favicon_mmh3,''), status_code, content_length,
+       COALESCE(page_title,''), array_to_json(technologies)::text, array_to_json(auth)::text,
+       COALESCE(method,''), array_to_json(params)::text, extra, last_seen::text
+FROM assets WHERE company_id IS NULL`
+	args := []any{}
+	if typ != "" {
+		args = append(args, typ)
+		q += fmt.Sprintf(` AND type = $%d`, len(args))
+	}
+	q += pageClause(&args, limit, offset)
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanAssets(rows)
+}
+
+func (s *AssetStore) CountUnassigned(typ string) (int, error) {
+	q := `SELECT count(*) FROM assets WHERE company_id IS NULL`
+	args := []any{}
+	if typ != "" {
+		args = append(args, typ)
+		q += fmt.Sprintf(` AND type = $%d`, len(args))
+	}
+	var n int
+	err := s.db.QueryRow(q, args...).Scan(&n)
+	return n, err
+}
+
 func pageClause(args *[]any, limit, offset int) string {
 	q := ` ORDER BY last_seen DESC, id DESC`
 	if limit > 0 {
