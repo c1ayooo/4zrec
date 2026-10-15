@@ -128,6 +128,7 @@ import type {
   DeleteTaskOptions,
   DeleteTaskResult,
   LLMProfile,
+  Project,
   Task,
   TaskArchive,
   TaskArchiveState,
@@ -3079,6 +3080,9 @@ function CreateTaskSheet({
   const [selectedTemplateID, setSelectedTemplateID] = React.useState<number | null>(null);
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [companies, setCompanies] = React.useState<Company[]>([]);
+  const [projects, setProjects] = React.useState<Project[]>([]);
+  // 归属项目(授权根):undefined=不挂(围栏不启用)
+  const [projectID, setProjectID] = React.useState<number | undefined>(undefined);
   const [sourceTaskIDs, setSourceTaskIDs] = React.useState<string[]>([]);
   const [companyIDs, setCompanyIDs] = React.useState<number[]>([]);
   const [llmProfileIDs, setLLMProfileIDs] = React.useState<string[]>([]);
@@ -3105,6 +3109,10 @@ function CreateTaskSheet({
       .companies()
       .then(setCompanies)
       .catch(() => setCompanies([]));
+    api
+      .projects()
+      .then(setProjects)
+      .catch(() => setProjects([]));
   }, []);
 
   // pickFiles uploads the chosen files into this draft's staging dir and appends their
@@ -3150,6 +3158,7 @@ function CreateTaskSheet({
         llmProfileIds: llmProfileIDs.map(Number),
         sourceTaskIds: sourceTaskIDs,
         companyIds: companyIDs,
+        projectId: projectID,
         timeoutSeconds: timeoutSec,
         seedFirstIntent,
         planHeartbeatSeconds: heartbeatSec,
@@ -3166,6 +3175,7 @@ function CreateTaskSheet({
       setSelectedTemplateID(null);
       setSourceTaskIDs([]);
       setCompanyIDs([]);
+      setProjectID(undefined);
       setLLMProfileIDs([]);
       setTimeoutMin("");
       setHeartbeatMin("10");
@@ -3296,6 +3306,25 @@ function CreateTaskSheet({
               <FieldDescription>
                 最多关联 {MAX_SOURCE_TASKS}{" "}
                 个任务。实时只读继承所选任务的持久化黑板、资产范围及相关流量；新任务写入独立黑板。
+              </FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="task-project">归属项目（授权根，可选）</FieldLabel>
+              <select
+                id="task-project"
+                className="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
+                value={projectID ?? ""}
+                onChange={(e) => setProjectID(e.target.value ? Number(e.target.value) : undefined)}
+              >
+                <option value="">不挂项目（不启用资产围栏）</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              <FieldDescription>
+                挂到项目后启用资产围栏：项目授权范围内资产自动放行，范围外资产进待审批、批准前不可测试；任务及其产出（资产/漏洞）在项目详情页聚合。
               </FieldDescription>
             </Field>
             <Field>

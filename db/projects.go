@@ -191,6 +191,57 @@ func (s *ProjectStore) DeleteProjectScope(projectID, scopeID int64) error {
 	return err
 }
 
+// RecomputeProjectAttribution 把范围命中的未归属资产认领进项目——企业侧
+// recomputeAttributionTx 的项目对应物,但遵循围栏「只升不降」:只认领
+// project_id IS NULL 的资产(不抢别项目的),authz 为空/pending 的提为
+// approved(范围命中=授权),rejected 不动(人工拒绝优先)。域名精确匹配
+// root_domain 优先,其次 IP/CIDR 网段包含;ICP/关键词是提示规则,不参与。
+// 删除范围规则不回收已认领资产(授权只增不减)。返回本轮认领条数。
+// 触发点:项目范围变更(server addProjectScope)与每轮同步收尾(同步入库
+// 只做企业归属,项目侧在这里补)。
+func (s *ProjectStore) RecomputeProjectAttribution() (int64, error) {
+	res, err := s.db.Exec(`
+WITH matched AS (
+    SELECT DISTINCT ON (a.id) a.id AS asset_id, ps.project_id
+    FROM assets a
+    JOIN project_scope ps ON ps.kind = 'domain' AND a.root_domain = ps.domain
+    WHERE a.project_id IS NULL
+      AND a.type IN ('root_domain','subdomain','service','endpoint')
+      AND a.root_domain IS NOT NULL
+    ORDER BY a.id, length(ps.domain) DESC, ps.project_id
+)
+UPDATE assets a
+SET project_id = matched.project_id,
+    authz = CASE WHEN COALESCE(a.authz,'') IN ('','pending') THEN 'approved' ELSE a.authz END
+FROM matched
+WHERE a.id = matched.asset_id`)
+	if err != nil {
+		return 0, err
+	}
+	claimed, _ := res.RowsAffected()
+
+	res, err = s.db.Exec(`
+WITH matched AS (
+    SELECT DISTINCT ON (a.id) a.id AS asset_id, ps.project_id
+    FROM assets a
+    JOIN project_scope ps ON ps.kind IN ('ip','cidr') AND ps.net >>= try_inet(a.ip)
+    WHERE a.project_id IS NULL
+      AND a.type IN ('ip','subdomain','service','endpoint')
+      AND a.ip IS NOT NULL
+    ORDER BY a.id, masklen(ps.net) DESC, ps.project_id
+)
+UPDATE assets a
+SET project_id = matched.project_id,
+    authz = CASE WHEN COALESCE(a.authz,'') IN ('','pending') THEN 'approved' ELSE a.authz END
+FROM matched
+WHERE a.id = matched.asset_id`)
+	if err != nil {
+		return claimed, err
+	}
+	n, _ := res.RowsAffected()
+	return claimed + n, nil
+}
+
 // ProjectScopeRules returns all scope rules of a project.
 func (d *DB) ProjectScopeRules(projectID int64) ([]ProjectScope, error) {
 	rows, err := d.Query(`

@@ -271,6 +271,7 @@ export const api = {
     llmProfileIds?: number[];
     sourceTaskIds?: string[];
     companyIds?: number[];
+    projectId?: number; // 归属项目(授权根);挂上即启用资产围栏
     timeoutSeconds?: number;
     seedFirstIntent?: boolean;
     planHeartbeatSeconds?: number;
@@ -290,6 +291,7 @@ export const api = {
       plan_heartbeat_seconds: input.planHeartbeatSeconds ?? 0, // 0 = 后端归一到默认 600(10min)
       coverage_enabled: input.coverageEnabled ?? true, // 默认开;false=关闭资产覆盖度功能
       intercept_rules: input.interceptRules ?? [], // 任务级资产拦截规则
+      project_id: input.projectId ?? null, // 归属项目(授权根);null=不挂,围栏不启用
     }),
   taskCategories: () => get<{ categories: TaskCategory[] }>("/task-categories").then((r) => arr(r.categories)),
   updateTask: (id: string, input: { name?: string; pinned?: boolean }) => patch<Task>(`/tasks/${id}`, input),
@@ -540,7 +542,7 @@ export const api = {
     http<Project>(`/projects/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteProject: (id: number) => http<{ ok: boolean }>(`/projects/${id}`, { method: "DELETE" }),
   addProjectScope: (id: number, scope: string, reason = "") =>
-    post<{ added: number; skipped: number; invalid: number; errors: string[]; project: Project }>(
+    post<{ added: number; skipped: number; invalid: number; errors: string[]; project: Project; claimed: number }>(
       `/projects/${id}/scope`,
       { scope, reason },
     ),

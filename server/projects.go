@@ -137,10 +137,17 @@ func (s *Server) addProjectScope(w http.ResponseWriter, r *http.Request) {
 	}
 	lines := strings.Split(req.Scope, "\n")
 	added, skipped, invalid, errMsgs := pg.Projects().AddProjectScope(id, lines, req.Reason)
+	// 范围命中即授权:把存量未归属资产认领进项目(只升不降),同步进来的
+	// 资产靠这步进项目。失败不吞——范围已保存,但要让用户知道认领没成。
+	claimed, cerr := pg.Projects().RecomputeProjectAttribution()
+	if cerr != nil {
+		errMsgs = append(errMsgs, "范围已保存,但存量资产认领失败: "+cerr.Error())
+		claimed = 0
+	}
 	p, _ := pg.Projects().GetProject(id)
 	writeJSON(w, 200, map[string]any{
 		"added": added, "skipped": skipped, "invalid": invalid,
-		"errors": errMsgs, "project": p,
+		"errors": errMsgs, "project": p, "claimed": claimed,
 	})
 }
 

@@ -86,3 +86,84 @@ func TestAssetProjectQueries(t *testing.T) {
 		t.Fatalf("CountNoProject = %d err=%v, want >= 1", n, err)
 	}
 }
+
+// TestProjectScopeClaimsAssets 范围命中认领存量资产:域名精确匹配与网段包含
+// 把 project_id IS NULL 的资产认领进项目,authz 空/pending 提为 approved;
+// rejected 不复活(只升不降);不命中的不动。
+func TestProjectScopeClaimsAssets(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v)", err)
+	}
+	defer d.Close()
+
+	suffix := time.Now().UnixNano()
+	root := fmt.Sprintf("claim-%d.example", suffix)
+	p, err := d.Projects().CreateProject(fmt.Sprintf("认领测试-%d", suffix), nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Projects().DeleteProject(p.ID)
+
+	// 先有资产,后录范围——认领要能吃到存量。
+	subID, err := d.Assets().UpsertSubdomain(UpsertSubdomainReq{Domain: fmt.Sprintf("www.%s", root)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer deleteAsset(d, subID)
+	ipID, err := d.Assets().UpsertIP(UpsertIPReq{IP: fmt.Sprintf("10.%d.5.9", suffix%200)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer deleteAsset(d, ipID)
+	missID, err := d.Assets().UpsertSubdomain(UpsertSubdomainReq{Domain: fmt.Sprintf("miss-%d.example", suffix)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer deleteAsset(d, missID)
+	rejID, err := d.Assets().UpsertSubdomain(UpsertSubdomainReq{Domain: fmt.Sprintf("rej.%s", root)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer deleteAsset(d, rejID)
+	if _, err := d.Exec(`UPDATE assets SET authz='rejected' WHERE id=$1`, rejID); err != nil {
+		t.Fatal(err)
+	}
+
+	added, _, invalid, errMsgs := d.Projects().AddProjectScope(p.ID, []string{root, fmt.Sprintf("10.%d.0.0/16", suffix%200)}, "测试")
+	if added != 2 || invalid != 0 {
+		t.Fatalf("scope 录入 added=%d invalid=%d msgs=%v", added, invalid, errMsgs)
+	}
+
+	claimed, err := d.Projects().RecomputeProjectAttribution()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed < 2 {
+		t.Fatalf("claimed = %d, want >= 2(域名+网段)", claimed)
+	}
+
+	got, _ := d.Assets().GetByIDs([]int64{subID, ipID, missID, rejID})
+	byID := map[int64]*Asset{}
+	for _, a := range got {
+		byID[a.ID] = a
+	}
+	// 域名命中:归属项目 + approved(root_domain 由子域推导,同根命中)。
+	if a := byID[subID]; a == nil || a.ProjectID == nil || *a.ProjectID != p.ID || a.AuthzState() != "approved" {
+		t.Fatalf("域名命中资产未被认领: %+v", a)
+	}
+	// 网段命中:归属项目。
+	if a := byID[ipID]; a == nil || a.ProjectID == nil || *a.ProjectID != p.ID {
+		t.Fatalf("网段命中资产未被认领: %+v", a)
+	}
+	// 不命中:保持未归属。
+	if a := byID[missID]; a == nil || a.ProjectID != nil {
+		t.Fatalf("不命中资产不应被认领: %+v", a)
+	}
+	// rejected 终态:范围命中也不复活(只升不降)。
+	if a := byID[rejID]; a == nil {
+		t.Fatal("rejected 夹具资产缺失")
+	} else if a.AuthzState() != "rejected" {
+		t.Fatalf("rejected 资产被范围认领改写为 %s", a.AuthzState())
+	}
+}

@@ -198,6 +198,8 @@ export default function ProjectsPage() {
         toast.warning(`新增 ${r.added} 条，${r.invalid} 条无效被跳过`, {
           description: r.errors?.slice(0, 3).join("\n"),
         });
+      } else if (r.claimed > 0) {
+        toast.success(`范围已更新：新增 ${r.added} 条，已认领 ${r.claimed} 条命中资产归属本项目`);
       } else {
         toast.success(`范围已更新：新增 ${r.added} 条`);
       }

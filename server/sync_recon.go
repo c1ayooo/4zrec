@@ -579,6 +579,8 @@ func (s *Server) syncReconRun(w http.ResponseWriter, r *http.Request) {
 	if madeCompany {
 		_ = cs.RecomputeAttribution()
 	}
+	// 项目侧认领:同步入库只做企业归属,项目范围命中的资产在这里归属项目。
+	s.claimProjectAssets("目标全量")
 
 	// 目标全量只留 last_run 痕迹，不动水位：目标范围的"已同步"推不出全局结论，
 	// 水位只有全局轮次（ticker / mode=inc）才有资格推进。
@@ -730,10 +732,35 @@ func (s *Server) reconIncremental(ctx context.Context) (synced map[string]int, w
 			warnings = append(warnings, fmt.Sprintf("%s 水位落库失败: %v", at, serr))
 		}
 	}
-	if len(warnings) > 0 {
-		s.notifySyncTruncated(ctx, strings.Join(warnings, "; "))
+		if len(warnings) > 0 {
+			s.notifySyncTruncated(ctx, strings.Join(warnings, "; "))
+		}
+		incTotal := 0
+		for _, n := range synced {
+			incTotal += n
+		}
+		if incTotal > 0 {
+			s.claimProjectAssets("增量")
+		}
+		return synced, warnings, errs
+}
+
+// claimProjectAssets 把项目范围命中的未归属资产认领进项目(同步入库只做
+// 企业归属,项目侧在这里补;只升不降,详见 RecomputeProjectAttribution)。
+// 认领是增益操作:失败只记日志,不让同步轮次报错。
+func (s *Server) claimProjectAssets(reason string) {
+	pg := s.m.pg
+	if pg == nil {
+		return
 	}
-	return synced, warnings, errs
+	n, err := pg.Projects().RecomputeProjectAttribution()
+	if err != nil {
+		log.Printf("[sync] 项目资产认领失败(%s): %v", reason, err)
+		return
+	}
+	if n > 0 {
+		log.Printf("[sync] 项目资产认领(%s): %d 条资产按项目范围归属", reason, n)
+	}
 }
 
 // syncTick 是 ticker 的一轮：数据源未配置/未启用即静默跳过（不报错——半配置状态
