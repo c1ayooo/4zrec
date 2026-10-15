@@ -82,3 +82,92 @@ func TestValidatePassword(t *testing.T) {
 		})
 	}
 }
+
+// TestLoginUsernameStoredAndMutable 登录名存库后的完整链路:init 自定义名 →
+// status 回显 → 旧名登录失败/新名成功 → change 改名 → 再改名后旧名失效。
+func TestLoginUsernameStoredAndMutable(t *testing.T) {
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Skipf("postgres unavailable (%v)", err)
+	}
+	defer m.Close()
+	s := New(t.Context(), m, t.TempDir(), t.TempDir(), t.TempDir())
+	// 共享测试库会残留上次运行的 auth 键,先清干净再断言默认回退。
+	if _, err := m.pg.Exec(`DELETE FROM settings WHERE key IN ('auth.username','auth.password_hash')`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = m.pg.Exec(`DELETE FROM settings WHERE key IN ('auth.username','auth.password_hash')`)
+	})
+
+	// 未设置时回退默认名
+	w := httptest.NewRecorder()
+	s.authStatus(w, httptest.NewRequest("GET", "/api/auth/status", nil))
+	var st struct {
+		Username string `json:"username"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &st)
+	if st.Username != "4zrec" {
+		t.Fatalf("未自定义时登录名应为默认 4zrec, got %q", st.Username)
+	}
+
+	// init 带自定义用户名
+	body := `{"password":"init-pass-123","username":"ops"}`
+	w = httptest.NewRecorder()
+	s.authInit(w, httptest.NewRequest("POST", "/api/auth/init", strings.NewReader(body)))
+	if w.Code != 200 {
+		t.Fatalf("init status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	// 旧默认名登录失败,自定义名成功
+	tryLogin := func(user, pass string) int {
+		rec := httptest.NewRecorder()
+		s.authLogin(rec, httptest.NewRequest("POST", "/api/auth/login",
+			strings.NewReader(`{"username":"`+user+`","password":"`+pass+`"}`)))
+		return rec.Code
+	}
+	if code := tryLogin("4zrec", "init-pass-123"); code == 200 {
+		t.Fatal("自定义用户名后旧默认名不应能登录")
+	}
+	if code := tryLogin("ops", "init-pass-123"); code != 200 {
+		t.Fatalf("自定义用户名登录应成功, status=%d", code)
+	}
+
+	// status 回显自定义名;改名需携带 token + 当前密码
+	w = httptest.NewRecorder()
+	s.authStatus(w, httptest.NewRequest("GET", "/api/auth/status", nil))
+	_ = json.Unmarshal(w.Body.Bytes(), &st)
+	if st.Username != "ops" {
+		t.Fatalf("status 应回显 ops, got %q", st.Username)
+	}
+
+	// 用 init 签发的 token 调 change(需先取出 token)
+	w = httptest.NewRecorder()
+	s.authInit(w, httptest.NewRequest("POST", "/api/auth/init", strings.NewReader(`{"password":"x-unused-1"}`)))
+	// 已初始化会 403,改用登录拿 token
+	w = httptest.NewRecorder()
+	s.authLogin(w, httptest.NewRequest("POST", "/api/auth/login",
+		strings.NewReader(`{"username":"ops","password":"init-pass-123"}`)))
+	var lr struct {
+		Token string `json:"token"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &lr)
+	if lr.Token == "" {
+		t.Fatal("登录未返回 token")
+	}
+
+	req := httptest.NewRequest("POST", "/api/auth/change-password",
+		strings.NewReader(`{"old_password":"init-pass-123","new_password":"next-pass-456","new_username":"admin"}`))
+	req.Header.Set("Authorization", "Bearer "+lr.Token)
+	w = httptest.NewRecorder()
+	s.authChangePassword(w, req)
+	if w.Code != 200 {
+		t.Fatalf("change status=%d body=%s", w.Code, w.Body.String())
+	}
+	if code := tryLogin("ops", "next-pass-456"); code == 200 {
+		t.Fatal("改名后旧用户名不应能登录")
+	}
+	if code := tryLogin("admin", "next-pass-456"); code != 200 {
+		t.Fatalf("新用户名登录应成功, status=%d", code)
+	}
+}

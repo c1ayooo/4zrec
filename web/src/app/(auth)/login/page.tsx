@@ -17,6 +17,7 @@ import { APP_CONFIG } from "@/config/app-config";
 
 export default function LoginPage() {
   const router = useRouter();
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -53,8 +54,10 @@ export default function LoginPage() {
     }
     api
       .authStatus()
-      .then(({ initialized }) => {
+      .then(({ initialized, username: name }) => {
         if (!initialized) router.replace("/setup");
+        // 登录名由后端下发(存库、可改),输入框可编辑不再是写死的常量。
+        setUsername(name || APP_CONFIG.loginUsername);
       })
       .catch(() => setError("无法连接到后端服务"))
       .finally(() => setChecking(false));
@@ -69,7 +72,7 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
     try {
-      const { token } = await api.login(APP_CONFIG.loginUsername, password);
+      const { token } = await api.login(username.trim(), password);
       auth.setToken(token);
       window.location.replace("/function/tasks");
     } catch {
@@ -96,7 +99,7 @@ export default function LoginPage() {
           <div className="absolute size-60 rounded-full border border-primary-foreground/15" />
           <div className="absolute size-40 rounded-full border border-primary-foreground/20" />
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="4zrec" width={160} height={160} className="relative rounded-4xl brightness-0 invert" />
+          <img src="/logo.png" alt="4zrec" width={160} height={160} className="relative rounded-4xl brightness-0 invert dark:invert-0" />
         </div>
       </div>
 
@@ -110,7 +113,13 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div className="space-y-1.5">
               <Label htmlFor="username">用户名</Label>
-              <Input id="username" value={APP_CONFIG.loginUsername} readOnly className="bg-muted text-muted-foreground" />
+              <Input
+                id="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="请输入用户名"
+                autoComplete="username"
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="password">密码</Label>
@@ -143,7 +152,7 @@ export default function LoginPage() {
               </Label>
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
-            <Button type="submit" className="w-full" disabled={loading || !password || !agreed}>
+            <Button type="submit" className="w-full" disabled={loading || !username.trim() || !password || !agreed}>
               {loading ? "登录中..." : "登录"}
             </Button>
           </form>

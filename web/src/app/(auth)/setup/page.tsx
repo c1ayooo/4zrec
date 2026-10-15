@@ -8,10 +8,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
+import { APP_CONFIG } from "@/config/app-config";
 import { auth } from "@/lib/auth";
 
 export default function SetupPage() {
   const router = useRouter();
+  const [username, setUsername] = useState(APP_CONFIG.loginUsername);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
@@ -47,7 +49,7 @@ export default function SetupPage() {
     setLoading(true);
     setError("");
     try {
-      const { token } = await api.initPassword(password);
+      const { token } = await api.initPassword(password, username.trim());
       auth.setToken(token);
       router.replace("/function/tasks");
     } catch (err) {
@@ -68,7 +70,7 @@ export default function SetupPage() {
           <div className="absolute size-60 rounded-full border border-primary-foreground/15" />
           <div className="absolute size-40 rounded-full border border-primary-foreground/20" />
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="4zrec" width={160} height={160} className="relative rounded-4xl brightness-0 invert" />
+          <img src="/logo.png" alt="4zrec" width={160} height={160} className="relative rounded-4xl brightness-0 invert dark:invert-0" />
         </div>
       </div>
 
@@ -92,6 +94,16 @@ export default function SetupPage() {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+<div className="space-y-1.5">
+              <Label htmlFor="username">用户名</Label>
+              <Input
+                id="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="登录用户名"
+                autoComplete="username"
+              />
+            </div>
               <div className="space-y-1.5">
                 <Label htmlFor="password">新密码</Label>
                 <Input
@@ -116,7 +128,7 @@ export default function SetupPage() {
                 />
               </div>
               {error && <p className="text-sm text-destructive">{error}</p>}
-              <Button type="submit" className="w-full" disabled={loading || !password || !confirm}>
+              <Button type="submit" className="w-full" disabled={loading || !username.trim() || !password || !confirm}>
                 {loading ? "保存中..." : "设置密码并登录"}
               </Button>
             </form>

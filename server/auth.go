@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Autumn-27/artex/db"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -19,12 +20,15 @@ import (
 const (
 	jwtKeyFilename = "jwt.key"
 	authPassKey    = "auth.password_hash"
+	authUserKey    = "auth.username"
 	jwtTTL         = 7 * 24 * time.Hour
 	keyChars       = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
-	// loginUsername 是单账号系统的固定登录名。改名只需改这里：登录比对与 JWT
-	// sub 都取自它；已有 token 的校验不检查 sub，改名不会踢掉现有登录态。
-	loginUsername = "4zrec"
+	// defaultLoginUsername 是用户名存库(auth.username)之前的默认登录名。存量部署
+	// 未显式改过名时继续用它;改名走 change-password 接口(见 authChangeUsername),
+	// 登录比对实时读库,JWT sub 不参与校验,改名不踢现有登录态。
+	defaultLoginUsername = "4zrec"
+	maxUsernameRunes     = 64
 
 	// 下限与 setup 页的前端校验一致——校验只放在前端等于没放，直接打 API 就能
 	// 绕过。上限是 bcrypt 的硬限制：超过 72 字节 GenerateFromPassword 会返回
@@ -37,6 +41,31 @@ const (
 // 把"读不到"当成"没有设置"：authInit 曾因此在数据库报错时放行，让未认证请求覆盖
 // 掉已有的管理员密码。
 const errDataSourceUnavailable = "数据源暂时不可用，请稍后重试"
+
+// loginUsernameOf 返回当前生效的登录名:库里有 auth.username 用库里的,否则回退默认。
+// 读失败也回退默认(登录页因此拿不到自定义名只是体验问题,不能把登录整个堵死)。
+func loginUsernameOf(pg *db.DB) string {
+	if pg == nil {
+		return defaultLoginUsername
+	}
+	v, ok, err := pg.GetSetting(authUserKey)
+	if err != nil || !ok || strings.TrimSpace(v) == "" {
+		return defaultLoginUsername
+	}
+	return strings.TrimSpace(v)
+}
+
+// validateUsername 返回空串表示通过，否则返回可直接展示给用户的中文原因。
+func validateUsername(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "用户名不能为空"
+	}
+	if utf8.RuneCountInString(name) > maxUsernameRunes {
+		return fmt.Sprintf("用户名最多 %d 个字符", maxUsernameRunes)
+	}
+	return ""
+}
 
 // validatePassword 返回空串表示通过，否则返回可直接展示给用户的中文原因。
 func validatePassword(pw string) string {
@@ -87,10 +116,11 @@ func loadOrCreateJWTKey(keyDir, dataDir string) ([]byte, error) {
 	return buf, nil
 }
 
-// signJWT issues a 7-day HS256 token for the login user.
+// signJWT issues a 7-day HS256 token for the login user. sub 取默认名即可:
+// verifyJWT 不校验 sub,用户名存库后改名不影响已签发 token。
 func signJWT(key []byte) (string, error) {
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
-		Subject:   loginUsername,
+		Subject:   defaultLoginUsername,
 		ExpiresAt: jwt.NewNumericDate(time.Now().Add(jwtTTL)),
 		IssuedAt:  jwt.NewNumericDate(time.Now()),
 	}).SignedString(key)
@@ -155,7 +185,7 @@ func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 503, errDataSourceUnavailable)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"initialized": hash != ""})
+	writeJSON(w, 200, map[string]any{"initialized": hash != "", "username": loginUsernameOf(pg)})
 }
 
 // POST /api/auth/init — sets the password for the first time; rejected if already set.
@@ -175,6 +205,7 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		Password string `json:"password"`
+		Username string `json:"username"` // 首次设置可自定义登录名;空=默认
 	}
 	if err := decode(r, &req); err != nil || req.Password == "" {
 		writeErr(w, 400, "密码不能为空")
@@ -183,6 +214,16 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 	if msg := validatePassword(req.Password); msg != "" {
 		writeErr(w, 400, msg)
 		return
+	}
+	if msg := validateUsername(req.Username); msg != "" {
+		writeErr(w, 400, msg)
+		return
+	}
+	if name := strings.TrimSpace(req.Username); name != "" && name != defaultLoginUsername {
+		if err := pg.SetSetting(authUserKey, name); err != nil {
+			writeErr(w, 500, "保存用户名失败: "+err.Error())
+			return
+		}
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
@@ -224,6 +265,7 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		OldPassword string `json:"old_password"`
 		NewPassword string `json:"new_password"`
+		NewUsername string `json:"new_username"` // 可选;非空且不同时一并改登录名
 	}
 	if err := decode(r, &req); err != nil {
 		writeErr(w, 400, "请求格式错误")
@@ -231,6 +273,10 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.NewPassword == "" {
 		writeErr(w, 400, "新密码不能为空")
+		return
+	}
+	if msg := validateUsername(req.NewUsername); msg != "" {
+		writeErr(w, 400, msg)
 		return
 	}
 	if msg := validatePassword(req.NewPassword); msg != "" {
@@ -259,6 +305,12 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "保存失败: "+err.Error())
 		return
 	}
+	if name := strings.TrimSpace(req.NewUsername); name != "" && name != loginUsernameOf(pg) {
+		if err := pg.SetSetting(authUserKey, name); err != nil {
+			writeErr(w, 500, "保存用户名失败: "+err.Error())
+			return
+		}
+	}
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -276,7 +328,7 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "请求格式错误")
 		return
 	}
-	if req.Username != loginUsername {
+	if strings.TrimSpace(req.Username) != loginUsernameOf(pg) {
 		writeErr(w, 401, "用户名或密码错误")
 		return
 	}

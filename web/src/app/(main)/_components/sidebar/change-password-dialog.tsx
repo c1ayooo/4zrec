@@ -27,15 +27,26 @@ export function ChangePasswordDialog({
   const [oldPassword, setOldPassword] = React.useState("");
   const [newPassword, setNewPassword] = React.useState("");
   const [confirmPassword, setConfirmPassword] = React.useState("");
+  const [username, setUsername] = React.useState("");
+  const [currentUsername, setCurrentUsername] = React.useState("");
   const [saving, setSaving] = React.useState(false);
 
-  // reset fields whenever the dialog closes
+  // 打开时拉当前登录名做预填;关闭清空输入(用户名回填当前值)。
   React.useEffect(() => {
-    if (!open) {
-      setOldPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
+    if (open) {
+      api
+        .authStatus()
+        .then((r) => {
+          setCurrentUsername(r.username);
+          setUsername(r.username);
+        })
+        .catch(() => {});
+      return;
     }
+    setOldPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setUsername("");
   }, [open]);
 
   function submit(e: React.FormEvent) {
@@ -49,10 +60,11 @@ export function ChangePasswordDialog({
       return;
     }
     setSaving(true);
+    const renamed = username.trim() !== currentUsername;
     api
-      .changePassword(oldPassword, newPassword)
+      .changePassword(oldPassword, newPassword, renamed ? username.trim() : undefined)
       .then(() => {
-        toast.success("密码已修改");
+        toast.success(renamed ? "密码与用户名已修改（下次登录用新用户名）" : "密码已修改");
         onOpenChange(false);
       })
       .catch((err) => toast.error(`修改失败：${(err as Error).message}`))
@@ -66,10 +78,20 @@ export function ChangePasswordDialog({
           <DialogHeader>
             <DialogTitle>修改密码</DialogTitle>
             <DialogDescription>
-              用户名固定为 <b>4zrec</b>。需先输入当前密码验证；修改后已签发的登录 token 仍有效直至过期。
+              可同时修改登录用户名。需先输入当前密码验证；修改后已签发的登录 token 仍有效直至过期。
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3 py-4">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="cp-username">用户名</Label>
+              <Input
+                id="cp-username"
+                autoComplete="username"
+                value={username}
+                disabled={saving}
+                onChange={(e) => setUsername(e.target.value)}
+              />
+            </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="cp-old">当前密码</Label>
               <Input
