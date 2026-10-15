@@ -491,9 +491,10 @@ export const api = {
   // ---- assets ----
   // Server-side paginated: pass limit/offset, get back the page + full match total.
   // companyId: 数字字符串=按企业过滤; "-1"=未归属; 缺省=全部
-  assets: (type = "", limit = 50, offset = 0, companyId = "") =>
+  // projectId: 数字字符串=按项目过滤(归属主轴,与 companyId 互斥); "-1"=未归属项目
+  assets: (type = "", limit = 50, offset = 0, companyId = "", projectId = "") =>
     get<{ count: number; total: number; assets: Asset[] }>(
-      `/assets?type=${type}&limit=${limit}&offset=${offset}${companyId ? `&company_id=${companyId}` : ""}`,
+      `/assets?type=${type}&limit=${limit}&offset=${offset}${companyId ? `&company_id=${companyId}` : ""}${projectId ? `&project_id=${projectId}` : ""}`,
     ).then((r) => ({ assets: r?.assets ?? [], total: r?.total ?? r?.count ?? 0 })),
   searchAssets: (dsl: string, type = "", limit = 50, offset = 0) =>
     get<{ count: number; total: number; assets: Asset[] }>(

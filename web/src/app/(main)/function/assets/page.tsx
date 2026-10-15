@@ -62,7 +62,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { parseCompanyScopeText } from "@/lib/company-scope";
-import type { Asset, Company, CompanyScopeRule } from "@/lib/types";
+import type { Asset, Company, CompanyScopeRule, Project } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const METHOD_COLOR: Record<string, string> = {
@@ -113,11 +113,15 @@ export default function AssetsPage() {
   const [rows, setRows] = React.useState<Asset[]>([]);
   const [total, setTotal] = React.useState(0);
   const [companies, setCompanies] = React.useState<Company[]>([]);
+  const [projects, setProjects] = React.useState<Project[]>([]);
   const [counts, setCounts] = React.useState<Record<string, number>>({});
   const [tab, setTab] = React.useState("company");
   const [query, setQuery] = React.useState("");
   // "all" | "-1"(未归属) | String(company.id) — 服务端 company_id 过滤
   const [companyFilter, setCompanyFilter] = React.useState("all");
+  // "all" | "-1"(未归属项目) | String(project.id) — 服务端 project_id 过滤;
+  // 项目=授权根是归属主轴,与企业筛选单轴互斥(后端单轴查询,前端保证只生效一个)
+  const [projectFilter, setProjectFilter] = React.useState("all");
   const [loaded, setLoaded] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [page, setPage] = React.useState(0);
@@ -138,13 +142,19 @@ export default function AssetsPage() {
   const [companyDeleteAssets, setCompanyDeleteAssets] = React.useState(false);
   const [companyDeleting, setCompanyDeleting] = React.useState(false);
 
-  // Companies + per-type counts (tab badges) — loaded on demand, no background polling.
+  // Companies + projects + per-type counts (tab badges) — loaded on demand, no background polling.
   const loadMeta = React.useCallback(() => {
     api
       .companies()
       .then(setCompanies)
       .catch(() => {
         /* Keep the last successful company snapshot on a transient failure. */
+      });
+    api
+      .projects()
+      .then(setProjects)
+      .catch(() => {
+        /* 项目列表加载失败不阻塞资产页(归属项目列退化为 id)。 */
       });
     api
       .assetCounts()
@@ -244,8 +254,18 @@ export default function AssetsPage() {
     setLoaded(false);
   }, [tab]);
 
+  // 归属筛选单轴互斥:切换一侧时把另一侧重置回"全部"。
+  const onCompanyFilter = (v: string) => {
+    setProjectFilter("all");
+    setCompanyFilter(v);
+  };
+  const onProjectFilter = (v: string) => {
+    setCompanyFilter("all");
+    setProjectFilter(v);
+  };
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: these controls intentionally reset server pagination.
-  React.useEffect(() => setPage(0), [tab, size, query, companyFilter]);
+  React.useEffect(() => setPage(0), [tab, size, query, companyFilter, projectFilter]);
 
   const dslMode = query.trim() !== "";
 
@@ -260,9 +280,10 @@ export default function AssetsPage() {
     const run = async () => {
       try {
         const companyId = companyFilter === "all" ? "" : companyFilter;
+        const projectId = projectFilter === "all" ? "" : projectFilter;
         const r = dsl
           ? await api.searchAssets(dsl, tab, size, offset)
-          : await api.assets(tab, size, offset, companyId);
+          : await api.assets(tab, size, offset, companyId, projectId);
         if (assetsRequestRef.current !== request) return;
         setRows(r.assets);
         setRowsTab(tab);
@@ -286,7 +307,7 @@ export default function AssetsPage() {
       clearTimeout(tid);
       if (assetsRequestRef.current === request) assetsRequestRef.current++;
     };
-  }, [tab, page, size, query, companyFilter, refreshKey]);
+  }, [tab, page, size, query, companyFilter, projectFilter, refreshKey]);
 
   React.useEffect(() => {
     if (tab === "company") return;
@@ -301,6 +322,14 @@ export default function AssetsPage() {
   }, [companies]);
 
   const companyName = (id?: number) => (id ? (companyById.get(id) ?? "") : "");
+
+  const projectById = React.useMemo(() => {
+    const m = new Map<number, string>();
+    for (const p of projects) m.set(p.id, p.name);
+    return m;
+  }, [projects]);
+
+  const projectName = (id?: number) => (id ? (projectById.get(id) ?? `#${id}`) : "");
 
   const tabCounts: Record<string, number> = { ...counts, company: companies.length };
   const totalAssets = Object.values(counts).reduce((a, b) => a + b, 0);
@@ -320,10 +349,26 @@ export default function AssetsPage() {
     />
   );
 
-  // 数据 tab 的工具栏：企业筛选 + DSL 搜索。筛选在非 DSL 模式下生效（DSL 有自己的作用域）。
+  // 数据 tab 的工具栏：项目/企业筛选（互斥单轴）+ DSL 搜索。筛选在非 DSL 模式下生效（DSL 有自己的作用域）。
   const toolbar = (
     <div className="flex items-start gap-2">
-      <Select value={companyFilter} onValueChange={setCompanyFilter}>
+      <Select value={projectFilter} onValueChange={onProjectFilter}>
+        <SelectTrigger className="w-40 shrink-0" aria-label="按项目筛选">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部项目</SelectItem>
+          <SelectItem value="-1">未归属项目</SelectItem>
+          <SelectGroup>
+            {projects.map((p) => (
+              <SelectItem key={p.id} value={String(p.id)}>
+                {p.name}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+      <Select value={companyFilter} onValueChange={onCompanyFilter}>
         <SelectTrigger className="w-40 shrink-0" aria-label="按企业筛选">
           <SelectValue />
         </SelectTrigger>
@@ -451,7 +496,7 @@ export default function AssetsPage() {
         <TabsContent value="root_domain" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
           {toolbar}
           <AssetCard
-            cols={["", "域名", "ICP 备案", "归属企业", ""]}
+            cols={["", "域名", "ICP 备案", "归属企业", "归属项目", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -471,6 +516,9 @@ export default function AssetsPage() {
                 <TableCell className="text-xs">{a.icp || "—"}</TableCell>
                 <TableCell className="text-xs">
                   {companyName(a.company_id) || <span className="text-muted-foreground">未归属</span>}
+                </TableCell>
+                <TableCell className="text-xs">
+                  {projectName(a.project_id) || <span className="text-muted-foreground">未归属</span>}
                 </TableCell>
                 <TableCell className="w-8 pl-0">
                   <Button
@@ -492,7 +540,7 @@ export default function AssetsPage() {
         <TabsContent value="ip" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
           {toolbar}
           <AssetCard
-            cols={["", "IP", "C段", "绑定域名", "开放端口", "归属企业", ""]}
+            cols={["", "IP", "C段", "绑定域名", "开放端口", "归属企业", "归属项目", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -522,6 +570,9 @@ export default function AssetsPage() {
                 <TableCell className="text-xs">
                   {companyName(a.company_id) || <span className="text-muted-foreground">未归属</span>}
                 </TableCell>
+                <TableCell className="text-xs">
+                  {projectName(a.project_id) || <span className="text-muted-foreground">未归属</span>}
+                </TableCell>
                 <TableCell className="w-8 pl-0">
                   <Button
                     variant="ghost"
@@ -542,7 +593,7 @@ export default function AssetsPage() {
         <TabsContent value="subdomain" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
           {toolbar}
           <AssetCard
-            cols={["", "域名", "根域名", "解析类型", "解析值", "归属企业", ""]}
+            cols={["", "域名", "根域名", "解析类型", "解析值", "归属企业", "归属项目", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -567,6 +618,9 @@ export default function AssetsPage() {
                 <TableCell className="text-xs">
                   {companyName(a.company_id) || <span className="text-muted-foreground">未归属</span>}
                 </TableCell>
+                <TableCell className="text-xs">
+                  {projectName(a.project_id) || <span className="text-muted-foreground">未归属</span>}
+                </TableCell>
                 <TableCell className="w-8 pl-0">
                   <Button
                     variant="ghost"
@@ -587,7 +641,7 @@ export default function AssetsPage() {
         <TabsContent value="app" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
           {toolbar}
           <AssetCard
-            cols={["", "应用名", "Bundle ID", "分类", "ICP 备案", "归属企业", ""]}
+            cols={["", "应用名", "Bundle ID", "分类", "ICP 备案", "归属企业", "归属项目", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -610,6 +664,9 @@ export default function AssetsPage() {
                 <TableCell className="text-xs">
                   {companyName(a.company_id) || <span className="text-muted-foreground">未归属</span>}
                 </TableCell>
+                <TableCell className="text-xs">
+                  {projectName(a.project_id) || <span className="text-muted-foreground">未归属</span>}
+                </TableCell>
                 <TableCell className="w-8 pl-0">
                   <Button
                     variant="ghost"
@@ -630,7 +687,7 @@ export default function AssetsPage() {
         <TabsContent value="service" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
           {toolbar}
           <AssetCard
-            cols={["", "服务", "域名", "IP", "端口", "状态码", "标题", "指纹", "认证", "归属企业", ""]}
+            cols={["", "服务", "域名", "IP", "端口", "状态码", "标题", "指纹", "认证", "归属企业", "归属项目", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -729,7 +786,7 @@ export default function AssetsPage() {
         <TabsContent value="endpoint" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
           {toolbar}
           <AssetCard
-            cols={["", "方法", "完整地址", "参数", "归属企业", ""]}
+            cols={["", "方法", "完整地址", "参数", "归属企业", "归属项目", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -762,6 +819,9 @@ export default function AssetsPage() {
                 </TableCell>
                 <TableCell className="text-xs">
                   {companyName(a.company_id) || <span className="text-muted-foreground">未归属</span>}
+                </TableCell>
+                <TableCell className="text-xs">
+                  {projectName(a.project_id) || <span className="text-muted-foreground">未归属</span>}
                 </TableCell>
                 <TableCell className="w-8 pl-0">
                   <Button

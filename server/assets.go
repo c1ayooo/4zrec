@@ -355,8 +355,22 @@ func (s *Server) listAssets(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		companyID, _ := strconv.ParseInt(q.Get("company_id"), 10, 64)
+		projectID, _ := strconv.ParseInt(q.Get("project_id"), 10, 64)
 		taskID, _ := strconv.ParseInt(q.Get("task_id"), 10, 64)
+		// project_id 是归属主轴(项目=授权根),与企业筛选单轴互斥:两者同时
+		// 设置时以项目为准(前端两个下拉已做互斥,这里只是兜底)。
 		switch {
+		case projectID > 0:
+			total, err = as.CountByProject(projectID, typ)
+			if err == nil && offset < total {
+				assets, err = as.QueryByProject(projectID, typ, limit, offset)
+			}
+		case projectID == -1:
+			// -1 = 「未归属项目」筛选项:只看没有归属任何项目的资产。
+			total, err = as.CountNoProject(typ)
+			if err == nil && offset < total {
+				assets, err = as.QueryNoProject(typ, limit, offset)
+			}
 		case companyID > 0:
 			total, err = as.CountByCompany(companyID, typ)
 			if err == nil && offset < total {

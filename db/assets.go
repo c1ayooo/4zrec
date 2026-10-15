@@ -1177,6 +1177,66 @@ func (s *AssetStore) CountUnassigned(typ string) (int, error) {
 	return n, err
 }
 
+// QueryByProject / CountByProject：归属某项目的资产——资产页「归属项目」
+// 筛选的后端(项目=授权根,归属主轴)。
+func (s *AssetStore) QueryByProject(projectID int64, typ string, limit, offset int) ([]*Asset, error) {
+	q := ``+assetSelectCols+` WHERE project_id = $1`
+	args := []any{projectID}
+	if typ != "" {
+		args = append(args, typ)
+		q += fmt.Sprintf(` AND type = $%d`, len(args))
+	}
+	q += pageClause(&args, limit, offset)
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanAssets(rows)
+}
+
+func (s *AssetStore) CountByProject(projectID int64, typ string) (int, error) {
+	q := `SELECT count(*) FROM assets WHERE project_id = $1`
+	args := []any{projectID}
+	if typ != "" {
+		args = append(args, typ)
+		q += fmt.Sprintf(` AND type = $%d`, len(args))
+	}
+	var n int
+	err := s.db.QueryRow(q, args...).Scan(&n)
+	return n, err
+}
+
+// QueryNoProject / CountNoProject：未归属任何项目的资产（project_id IS NULL），
+// 资产页「归属项目 = 未归属」筛选项的后端。
+func (s *AssetStore) QueryNoProject(typ string, limit, offset int) ([]*Asset, error) {
+	q := ``+assetSelectCols+` WHERE project_id IS NULL`
+	args := []any{}
+	if typ != "" {
+		args = append(args, typ)
+		q += fmt.Sprintf(` AND type = $%d`, len(args))
+	}
+	q += pageClause(&args, limit, offset)
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanAssets(rows)
+}
+
+func (s *AssetStore) CountNoProject(typ string) (int, error) {
+	q := `SELECT count(*) FROM assets WHERE project_id IS NULL`
+	args := []any{}
+	if typ != "" {
+		args = append(args, typ)
+		q += fmt.Sprintf(` AND type = $%d`, len(args))
+	}
+	var n int
+	err := s.db.QueryRow(q, args...).Scan(&n)
+	return n, err
+}
+
 func pageClause(args *[]any, limit, offset int) string {
 	q := ` ORDER BY last_seen DESC, id DESC`
 	if limit > 0 {
