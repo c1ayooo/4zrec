@@ -70,7 +70,8 @@ export default function SetupPage() {
           <div className="absolute size-60 rounded-full border border-primary-foreground/15" />
           <div className="absolute size-40 rounded-full border border-primary-foreground/20" />
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="4zrec" width={160} height={160} className="relative rounded-4xl brightness-0 invert dark:invert-0" />
+          {/* 方块版 logo 自带黑底白标(见 c93fc63),原样展示;剪影滤镜会把整张图糊成纯色块。 */}
+          <img src="/logo.png" alt="4zrec" width={160} height={160} className="relative rounded-4xl" />
         </div>
       </div>
 
