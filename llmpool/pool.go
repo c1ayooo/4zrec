@@ -406,20 +406,24 @@ func trimErr(err error) string {
 }
 
 // estimateTokens roughly sizes a request so members whose context window clearly
-// can't hold it are skipped. Deliberately crude (~3.5 chars/token) and biased to
-// over-estimate slightly; it only needs to tell "fits" from "nowhere near".
+// can't hold it are skipped. Deliberately crude and biased to over-estimate
+// slightly; it only needs to tell "fits" from "nowhere near". CJK-aware: Chinese
+// text (this product's dominant prompt language) carries ~1.5 tokens per
+// character, far denser than ASCII — a plain bytes/3.5 count under-estimates it
+// ~1.75x and would route over-long requests to members that then fail with a
+// non-failover 400.
 func estimateTokens(input []*schema.Message, tools []*schema.ToolInfo) int {
 	n := 0
 	for _, m := range input {
 		if m == nil {
 			continue
 		}
-		n += len(m.Content) + len(m.ReasoningContent)
+		n += tokenWeight(m.Content) + tokenWeight(m.ReasoningContent)
 		for _, part := range m.MultiContent {
-			n += len(part.Text)
+			n += tokenWeight(part.Text)
 		}
 		for _, tc := range m.ToolCalls {
-			n += len(tc.Function.Name) + len(tc.Function.Arguments)
+			n += tokenWeight(tc.Function.Name) + tokenWeight(tc.Function.Arguments)
 		}
 	}
 	for _, t := range tools {
@@ -428,16 +432,33 @@ func estimateTokens(input []*schema.Message, tools []*schema.ToolInfo) int {
 		}
 		// InputSchema is a decoded schema tree, so its serialized size isn't
 		// available cheaply — charge a flat ~120 chars per top-level property
-		// instead (the JSON-schema form is what the adapters send).
+		// instead (the JSON-schema form is what the adapters send; schema JSON
+		// is ASCII-dominant, so the ASCII rate applies).
 		props := 0
 		if t.ParamsOneOf != nil {
 			if js, err := t.ParamsOneOf.ToJSONSchema(); err == nil && js != nil && js.Properties != nil {
 				props = js.Properties.Len()
 			}
 		}
-		n += len(t.Name) + len(t.Desc) + props*120
+		n += tokenWeight(t.Name) + tokenWeight(t.Desc) + props*120*2/7
 	}
-	return n * 2 / 7 // ≈ len/3.5
+	return n
+}
+
+// tokenWeight estimates the tokens in s: ASCII at ~3.5 bytes per token
+// (English + JSON syntax), non-ASCII runes — CJK-dominant here — at ~1.5
+// tokens per character. rune iteration keeps each multibyte character one unit
+// instead of 3 bytes.
+func tokenWeight(s string) int {
+	ascii, wide := 0, 0
+	for _, r := range s {
+		if r < 128 {
+			ascii++
+		} else {
+			wide++
+		}
+	}
+	return ascii*2/7 + wide*3/2
 }
 
 // order picks the members to try, in order: skip those in a cooling-off window

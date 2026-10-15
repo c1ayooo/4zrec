@@ -546,6 +546,33 @@ func TestSkipsMembersTooSmallForRequest(t *testing.T) {
 	}
 }
 
+// CJK text runs ~1.5 tokens per character — far denser than ASCII's ~3.5
+// bytes per token. A Chinese-heavy request that a plain byte count calls
+// small enough must still be recognized as too big for the small member:
+// routing it there means a guaranteed length-400, which never fails over.
+func TestSkipsMembersTooSmallForCJKRequest(t *testing.T) {
+	small, big := okModel("small", "s"), okModel("big", "b")
+	ms := member(1, "small", 10, small)
+	ms.WindowTokens = 8000
+	mb := member(2, "big", 5, big)
+	mb.WindowTokens = 1_000_000
+	p := New([]*Member{ms, mb}, NewRegistry(nil, nil))
+
+	// 6000 Chinese characters ≈ 9000 real tokens (over the 8000 window), but
+	// only ≈5140 under a bytes/3.5 estimate.
+	req := []*schema.Message{schema.UserMessage(strings.Repeat("资", 6000))}
+	got, err := drain(streamOrFail(t, p, context.Background(), req...))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "b" {
+		t.Fatalf("text=%q, want the large-window member to serve it", got)
+	}
+	if small.callCount() != 0 {
+		t.Fatalf("sent a CJK request to a member that cannot hold it (calls=%d)", small.callCount())
+	}
+}
+
 // Everything tripped: probing the head beats stalling the engine outright.
 func TestAllTrippedStillProbesHead(t *testing.T) {
 	a, b := okModel("a", "a"), okModel("b", "b")
