@@ -89,6 +89,24 @@ function MethodBadge({ method }: { method: string }) {
   );
 }
 
+// 授权状态列:approved 是常态不显示(避免满屏徽标),pending/rejected 才标。
+function AuthzBadge({ authz }: { authz?: string }) {
+  if (!authz || authz === "approved") return <span className="text-muted-foreground text-xs">—</span>;
+  if (authz === "pending")
+    return (
+      <Badge variant="outline" className="text-amber-600">
+        待审批
+      </Badge>
+    );
+  if (authz === "rejected")
+    return (
+      <Badge variant="outline" className="text-red-600">
+        已拒绝
+      </Badge>
+    );
+  return <span className="text-muted-foreground text-xs">—</span>;
+}
+
 function statusTone(code: number) {
   if (code >= 500) return "text-red-500";
   if (code >= 400) return "text-amber-500";
@@ -100,13 +118,14 @@ function statusTone(code: number) {
 const PAGE_SIZES = [25, 50, 100, 200];
 
 const TABS: { key: string; label: string; icon: LucideIcon }[] = [
-  { key: "company", label: "企业", icon: BuildingIcon },
   { key: "root_domain", label: "根域名", icon: GlobeIcon },
   { key: "ip", label: "IP", icon: NetworkIcon },
   { key: "subdomain", label: "子域名", icon: GlobeIcon },
   { key: "app", label: "应用", icon: SmartphoneIcon },
   { key: "service", label: "服务", icon: LayoutTemplateIcon },
   { key: "endpoint", label: "接口", icon: LinkIcon },
+  // 企业(客户主体)是项目的属性,管理入口放末位;项目才是资产归属主轴。
+  { key: "company", label: "企业", icon: BuildingIcon },
 ];
 
 export default function AssetsPage() {
@@ -115,7 +134,7 @@ export default function AssetsPage() {
   const [companies, setCompanies] = React.useState<Company[]>([]);
   const [projects, setProjects] = React.useState<Project[]>([]);
   const [counts, setCounts] = React.useState<Record<string, number>>({});
-  const [tab, setTab] = React.useState("company");
+  const [tab, setTab] = React.useState("root_domain");
   const [query, setQuery] = React.useState("");
   // "all" | "-1"(未归属) | String(company.id) — 服务端 company_id 过滤
   const [companyFilter, setCompanyFilter] = React.useState("all");
@@ -496,7 +515,7 @@ export default function AssetsPage() {
         <TabsContent value="root_domain" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
           {toolbar}
           <AssetCard
-            cols={["", "域名", "ICP 备案", "归属企业", "归属项目", ""]}
+            cols={["", "域名", "ICP 备案", "归属企业", "归属项目", "授权", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -520,6 +539,9 @@ export default function AssetsPage() {
                 <TableCell className="text-xs">
                   {projectName(a.project_id) || <span className="text-muted-foreground">未归属</span>}
                 </TableCell>
+                <TableCell className="text-xs">
+                  <AuthzBadge authz={a.authz} />
+                </TableCell>
                 <TableCell className="w-8 pl-0">
                   <Button
                     variant="ghost"
@@ -540,7 +562,7 @@ export default function AssetsPage() {
         <TabsContent value="ip" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
           {toolbar}
           <AssetCard
-            cols={["", "IP", "C段", "绑定域名", "开放端口", "归属企业", "归属项目", ""]}
+            cols={["", "IP", "C段", "绑定域名", "开放端口", "归属企业", "归属项目", "授权", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -573,6 +595,9 @@ export default function AssetsPage() {
                 <TableCell className="text-xs">
                   {projectName(a.project_id) || <span className="text-muted-foreground">未归属</span>}
                 </TableCell>
+                <TableCell className="text-xs">
+                  <AuthzBadge authz={a.authz} />
+                </TableCell>
                 <TableCell className="w-8 pl-0">
                   <Button
                     variant="ghost"
@@ -593,7 +618,7 @@ export default function AssetsPage() {
         <TabsContent value="subdomain" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
           {toolbar}
           <AssetCard
-            cols={["", "域名", "根域名", "解析类型", "解析值", "归属企业", "归属项目", ""]}
+            cols={["", "域名", "根域名", "解析类型", "解析值", "归属企业", "归属项目", "授权", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -621,6 +646,9 @@ export default function AssetsPage() {
                 <TableCell className="text-xs">
                   {projectName(a.project_id) || <span className="text-muted-foreground">未归属</span>}
                 </TableCell>
+                <TableCell className="text-xs">
+                  <AuthzBadge authz={a.authz} />
+                </TableCell>
                 <TableCell className="w-8 pl-0">
                   <Button
                     variant="ghost"
@@ -641,7 +669,7 @@ export default function AssetsPage() {
         <TabsContent value="app" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
           {toolbar}
           <AssetCard
-            cols={["", "应用名", "Bundle ID", "分类", "ICP 备案", "归属企业", "归属项目", ""]}
+            cols={["", "应用名", "Bundle ID", "分类", "ICP 备案", "归属企业", "归属项目", "授权", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -667,6 +695,9 @@ export default function AssetsPage() {
                 <TableCell className="text-xs">
                   {projectName(a.project_id) || <span className="text-muted-foreground">未归属</span>}
                 </TableCell>
+                <TableCell className="text-xs">
+                  <AuthzBadge authz={a.authz} />
+                </TableCell>
                 <TableCell className="w-8 pl-0">
                   <Button
                     variant="ghost"
@@ -687,7 +718,7 @@ export default function AssetsPage() {
         <TabsContent value="service" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
           {toolbar}
           <AssetCard
-            cols={["", "服务", "域名", "IP", "端口", "状态码", "标题", "指纹", "认证", "归属企业", "归属项目", ""]}
+            cols={["", "服务", "域名", "IP", "端口", "状态码", "标题", "指纹", "认证", "归属企业", "归属项目", "授权", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -786,7 +817,7 @@ export default function AssetsPage() {
         <TabsContent value="endpoint" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
           {toolbar}
           <AssetCard
-            cols={["", "方法", "完整地址", "参数", "归属企业", "归属项目", ""]}
+            cols={["", "方法", "完整地址", "参数", "归属企业", "归属项目", "授权", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -822,6 +853,9 @@ export default function AssetsPage() {
                 </TableCell>
                 <TableCell className="text-xs">
                   {projectName(a.project_id) || <span className="text-muted-foreground">未归属</span>}
+                </TableCell>
+                <TableCell className="text-xs">
+                  <AuthzBadge authz={a.authz} />
                 </TableCell>
                 <TableCell className="w-8 pl-0">
                   <Button

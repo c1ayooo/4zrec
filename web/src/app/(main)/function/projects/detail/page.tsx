@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import {
   ArrowLeftIcon,
   BugIcon,
+  CheckIcon,
   FolderIcon,
   NetworkIcon,
 } from "lucide-react";
@@ -67,6 +68,50 @@ function AuthzBadge({ authz }: { authz?: string }) {
   if (authz === "pending") return <Badge variant="outline" className="text-amber-600">待审批</Badge>;
   if (authz === "rejected") return <Badge variant="outline" className="text-red-600">已拒绝</Badge>;
   return null;
+}
+
+// WizardStep 是向导条的一步:完成态给绿色对勾+计数,待办态给入口链接。
+function WizardStep({
+  index,
+  done,
+  title,
+  doneText,
+  href,
+  linkText,
+  hint,
+}: {
+  index: number;
+  done: boolean;
+  title: string;
+  doneText: string;
+  href: string;
+  linkText: string;
+  hint: string;
+}) {
+  return (
+    <div className="flex flex-col gap-1 rounded-lg border p-3">
+      <div className="flex items-center gap-2">
+        {done ? (
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
+            <CheckIcon className="size-3" />
+          </span>
+        ) : (
+          <span className="bg-muted text-muted-foreground flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold">
+            {index}
+          </span>
+        )}
+        <span className={`text-sm font-medium ${done ? "" : ""}`}>{title}</span>
+        {done ? (
+          <span className="text-muted-foreground ml-auto text-xs">{doneText}</span>
+        ) : (
+          <Link href={href} className="text-primary ml-auto text-xs hover:underline">
+            {linkText} →
+          </Link>
+        )}
+      </div>
+      {!done && <p className="text-muted-foreground pl-7 text-xs leading-relaxed">{hint}</p>}
+    </div>
+  );
 }
 
 // ProjectDetail 以项目为轴聚合它名下的全部信息:任务(经 task.project_id)、
@@ -153,6 +198,43 @@ function ProjectDetail({ id }: { id: number }) {
           </span>
         </div>
       </div>
+
+      {/* 工作流向导:建项目→资产进项目→建任务。三步齐活后整条隐去(引导完成即退场)。 */}
+      {(!project.scope || project.scope.length === 0 || assetsTotal === 0 || tasks.length === 0) && (
+        <Card>
+          <CardContent className="flex flex-col gap-3 pt-4 sm:flex-row sm:items-center">
+            <div className="grid flex-1 gap-2 sm:grid-cols-3">
+              <WizardStep
+                index={1}
+                done={!!project.scope && project.scope.length > 0}
+                title="录入授权范围"
+                doneText={`${project.scope?.length ?? 0} 条规则`}
+                href={`/function/projects?edit=${project.id}`}
+                linkText="去录入"
+                hint="项目 = 授权根。范围(域名/IP/CIDR)决定围栏白名单,命中的存量资产会被自动认领。"
+              />
+              <WizardStep
+                index={2}
+                done={assetsTotal > 0}
+                title="资产进项目"
+                doneText={`${assetsTotal} 条资产`}
+                href="/function/sync"
+                linkText="去同步"
+                hint="同步 4zrecon 资产或让任务发现——范围命中的会自动归属本项目并授权。"
+              />
+              <WizardStep
+                index={3}
+                done={tasks.length > 0}
+                title="创建任务"
+                doneText={`${tasks.length} 个任务`}
+                href={`/function/tasks?create=1&project_id=${project.id}`}
+                linkText="去创建"
+                hint="任务挂到项目即启用资产围栏;产出的资产/漏洞聚合在本页。"
+              />
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Tabs defaultValue="overview" className="flex flex-col gap-4">
         <TabsList>

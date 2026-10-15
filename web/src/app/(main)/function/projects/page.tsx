@@ -28,6 +28,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Sheet,
   SheetContent,
   SheetFooter,
@@ -116,6 +124,20 @@ export default function ProjectsPage() {
   React.useEffect(() => {
     void load();
   }, [load]);
+
+  // 项目详情页向导「录入范围」深链:?edit=<id> 加载完直接打开该项目的编辑面板。
+  // 用掉即清地址栏参数,刷新不会重开。
+  React.useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const eid = Number(q.get("edit"));
+    if (!eid) return;
+    window.history.replaceState(null, "", window.location.pathname);
+    void api.projects().then((ps) => {
+      const p = ps.find((x) => x.id === eid);
+      if (p) openEdit(p);
+    });
+    // biome-ignore lint/correctness/useExhaustiveDependencies: openEdit 是组件内稳定函数,只在深链时跑一次。
+  }, []);
 
   React.useEffect(() => {
     void loadPending(pendingProject);
@@ -264,18 +286,24 @@ export default function ProjectsPage() {
             </div>
             <div className="flex items-center gap-2 text-sm">
               <span className="text-muted-foreground">按项目过滤</span>
-              <select
-                className="border-input bg-background rounded-md border px-2 py-1"
-                value={pendingProject}
-                onChange={(e) => setPendingProject(Number(e.target.value) || 0)}
+              <Select
+                value={pendingProject ? String(pendingProject) : "all"}
+                onValueChange={(v) => setPendingProject(v === "all" ? 0 : Number(v))}
               >
-                <option value={0}>全部项目</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger className="h-8 w-36" aria-label="按项目过滤待审批">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部项目</SelectItem>
+                  <SelectGroup>
+                    {projects.map((p) => (
+                      <SelectItem key={p.id} value={String(p.id)}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </div>
           </div>
           {pending.length === 0 ? (
@@ -408,18 +436,21 @@ export default function ProjectsPage() {
           <div className="flex flex-col gap-3">
             <Input placeholder="项目名称（如：XX单位渗透测试）" value={newName} onChange={(e) => setNewName(e.target.value)} />
             <Input placeholder="描述（可选）" value={newDesc} onChange={(e) => setNewDesc(e.target.value)} />
-            <select
-              className="border-input bg-background rounded-md border px-2 py-2 text-sm"
-              value={newCompany}
-              onChange={(e) => setNewCompany(e.target.value)}
-            >
-              <option value="">不绑定企业</option>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+            <Select value={newCompany || "none"} onValueChange={(v) => setNewCompany(v === "none" ? "" : v)}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">不绑定企业</SelectItem>
+                <SelectGroup>
+                  {companies.map((c) => (
+                    <SelectItem key={c.id} value={String(c.id)}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
             <p className="text-muted-foreground text-xs">
               创建后进入编辑录入授权范围；任务/对话挂到该项目即启用资产围栏。
             </p>
@@ -453,18 +484,24 @@ export default function ProjectsPage() {
               value={edit?.desc ?? ""}
               onChange={(e) => setEdit((v) => (v ? { ...v, desc: e.target.value } : v))}
             />
-            <select
-              className="border-input bg-background rounded-md border px-2 py-2 text-sm"
-              value={edit?.company ?? ""}
-              onChange={(e) => setEdit((v) => (v ? { ...v, company: e.target.value } : v))}
+            <Select
+              value={edit?.company || "none"}
+              onValueChange={(val) => setEdit((cur) => (cur ? { ...cur, company: val === "none" ? "" : val } : cur))}
             >
-              <option value="">不绑定企业</option>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">不绑定企业</SelectItem>
+                <SelectGroup>
+                  {companies.map((c) => (
+                    <SelectItem key={c.id} value={String(c.id)}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
             <p className="text-muted-foreground text-xs">
               项目可挂到客户主体（企业）下，便于按企业归集；不绑定也不影响围栏。
             </p>

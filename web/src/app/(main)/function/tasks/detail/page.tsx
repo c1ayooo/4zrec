@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { StatusBadge } from "@/components/status-badge";
 import { TaskLLMProfileChain } from "@/components/task-llm-profile-chain";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -213,6 +214,20 @@ function TaskDetailInner() {
   const [interceptPendingCount, setInterceptPendingCount] = React.useState(0);
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [archiving, setArchiving] = React.useState(false);
+  // 归属项目名(徽标链接项目详情;一次性加载)
+  const [projectName, setProjectName] = React.useState("");
+
+  React.useEffect(() => {
+    const pid = task?.project_id;
+    if (!pid) {
+      setProjectName("");
+      return;
+    }
+    api
+      .projects()
+      .then((ps) => setProjectName(ps.find((p) => p.id === pid)?.name ?? ""))
+      .catch(() => setProjectName(""));
+  }, [task?.project_id]);
 
   React.useEffect(() => {
     api
@@ -361,6 +376,17 @@ function TaskDetailInner() {
           <h1 className="min-w-0 flex-1 truncate text-sm font-semibold" title={task.name || task.description}>
             {task.name || task.description}
           </h1>
+          {projectName && task.project_id && (
+            <Link
+              href={`/function/projects/detail?id=${task.project_id}`}
+              title={`归属项目：${projectName}`}
+              className="hidden shrink-0 sm:inline-block"
+            >
+              <Badge variant="outline" className="max-w-32 truncate px-1.5 text-[11px] font-normal">
+                {projectName}
+              </Badge>
+            </Link>
+          )}
           <code className="hidden rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground sm:inline">
             {task.id}
           </code>

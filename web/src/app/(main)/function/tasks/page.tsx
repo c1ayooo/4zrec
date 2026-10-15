@@ -469,6 +469,19 @@ export default function TasksPage() {
       });
   }, []);
 
+  // 项目名映射(一次性加载,任务行归属徽标用;项目数量小,无需轮询)。
+  const [projects, setProjects] = React.useState<Project[]>([]);
+  React.useEffect(() => {
+    api
+      .projects()
+      .then(setProjects)
+      .catch(() => setProjects([]));
+  }, []);
+  const projectNameOf = React.useCallback(
+    (id?: number) => (id ? (projects.find((p) => p.id === id)?.name ?? "") : ""),
+    [projects],
+  );
+
   const loadCategories = React.useCallback(() => {
     api
       .taskCategories()
@@ -985,6 +998,7 @@ export default function TasksPage() {
                       // running 任务才吃 nowSec;其余行传 0 —— props 不变,memo 就能拦下每秒 tick
                       // 带来的整表重渲染,只让在跑的那几行走时长。
                       nowSec={task.status === "running" ? nowSec : 0}
+                      projectName={projectNameOf(task.project_id) || undefined}
                       onDelete={deleteTask}
                       onControl={controlTask}
                       onRename={renameTask}
@@ -1160,6 +1174,7 @@ function ConcurrencySettingsDialog() {
 const TaskRow = React.memo(function TaskRow({
   task,
   nowSec,
+  projectName,
   onDelete,
   onControl,
   onRename,
@@ -1170,6 +1185,7 @@ const TaskRow = React.memo(function TaskRow({
 }: {
   task: Task;
   nowSec: number;
+  projectName?: string; // 归属项目名(缺省=未挂项目,不显示徽标)
   onDelete: (id: string, options: DeleteTaskOptions) => Promise<void>;
   onControl: (id: string, action: "pause" | "resume") => Promise<void>;
   onRename: (task: Task, name: string) => Promise<void>;
@@ -1195,6 +1211,17 @@ const TaskRow = React.memo(function TaskRow({
           <TaskNameEditor task={task} onRename={onRename} />
           {task.active && <StarIcon className="size-4 shrink-0 fill-amber-400 text-amber-400" />}
           {taskIsPinned(task) && <PinIcon className="text-primary size-4 shrink-0" aria-label="已置顶" />}
+          {projectName && task.project_id && (
+            <Link
+              href={`/function/projects/detail?id=${task.project_id}`}
+              title={`归属项目：${projectName}`}
+              className="shrink-0"
+            >
+              <Badge variant="outline" className="max-w-28 truncate px-1.5 text-[10px] font-normal">
+                {projectName}
+              </Badge>
+            </Link>
+          )}
         </div>
       </TableCell>
       <TableCell className="text-muted-foreground max-w-40">
@@ -3113,6 +3140,15 @@ function CreateTaskSheet({
       .projects()
       .then(setProjects)
       .catch(() => setProjects([]));
+    // 项目详情页向导「创建任务」深链:?create=1&project_id=N 预选项目并打开面板。
+    // 用掉即清地址栏参数,刷新不会重开。
+    const q = new URLSearchParams(window.location.search);
+    if (q.get("create") === "1") {
+      const pid = Number(q.get("project_id"));
+      if (pid > 0) setProjectID(pid);
+      setOpen(true);
+      window.history.replaceState(null, "", window.location.pathname);
+    }
   }, []);
 
   // pickFiles uploads the chosen files into this draft's staging dir and appends their
@@ -3310,19 +3346,22 @@ function CreateTaskSheet({
             </Field>
             <Field>
               <FieldLabel htmlFor="task-project">归属项目（授权根，可选）</FieldLabel>
-              <select
-                id="task-project"
-                className="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
-                value={projectID ?? ""}
-                onChange={(e) => setProjectID(e.target.value ? Number(e.target.value) : undefined)}
+              <Select
+                value={projectID ? String(projectID) : "none"}
+                onValueChange={(v) => setProjectID(v && v !== "none" ? Number(v) : undefined)}
               >
-                <option value="">不挂项目（不启用资产围栏）</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="task-project" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">不挂项目（不启用资产围栏）</SelectItem>
+                  {projects.map((p) => (
+                    <SelectItem key={p.id} value={String(p.id)}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <FieldDescription>
                 挂到项目后启用资产围栏：项目授权范围内资产自动放行，范围外资产进待审批、批准前不可测试；任务及其产出（资产/漏洞）在项目详情页聚合。
               </FieldDescription>
