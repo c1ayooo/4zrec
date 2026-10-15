@@ -33,7 +33,9 @@ import (
 //
 // 未挂项目的任务/会话不启用围栏(projectID=0),保持旧行为,项目可渐进接入。
 // 已知边界:只拦命令文本中字面可见的目标;变量拼接、IPv6、先解析再打等形态
-// 不在第一版覆盖内(见 docs/asset-fence)。
+// 不在第一版覆盖内(见 docs/asset-fence)。代码标识符(re.findall/os.path 等)
+// 已由 TLD 后缀白名单排除,冷门后缀的真实域名会漏拦(宁漏勿扰,见
+// tldAllowlist 注释)。
 // =====================================================================
 
 // fenceTargets 是一次提取出的字面目标集合。
@@ -121,8 +123,39 @@ func validFenceIPv4(s string) bool {
 	return true
 }
 
-// validFenceDomain 校验裸 token 是否像主机名:≥2 个 label、末 label 为纯字母
-// TLD(≥2 字符)、各 label 合法、后缀不在文件扩展名黑名单。
+// tldAllowlist 是裸 token 域名校验的后缀白名单:常见真实 TLD(渗透目标里
+// 实际会出现的)+ 内网命名伪 TLD + ICANN 保留字。代码标识符的尾缀——
+// re.findall 的 findall、os.path 的 path、json.dumps 的 dumps——不在表内,
+// 一律不当作目标:Python 一行流/脚本里的模块属性引用不再触发围栏审批。
+// URL host 分支不受此表影响(能被 url.Parse 解析出 host 的可信度高)。
+// 未列出的冷门新 TLD 会漏拦(宁漏勿扰:漏拦只是少问一次,误拦是每个脚本
+// 都要审批);发现实际目标命中冷门后缀时往这张表加一行即可。
+var tldAllowlist = map[string]bool{
+	// 通用/主流
+	"com": true, "net": true, "org": true, "edu": true, "gov": true,
+	"mil": true, "int": true, "info": true, "biz": true, "io": true,
+	"co": true, "ai": true, "app": true, "dev": true, "cloud": true,
+	"tech": true, "xyz": true, "top": true, "vip": true, "site": true,
+	"online": true, "shop": true, "club": true, "fun": true, "ltd": true,
+	"group": true, "work": true, "website": true, "space": true, "icu": true,
+	"pro": true, "live": true, "life": true, "me": true, "tv": true, "cc": true,
+	// 常见国家/地区
+	"cn": true, "uk": true, "jp": true, "kr": true, "hk": true, "tw": true,
+	"ru": true, "in": true, "de": true, "fr": true, "it": true, "nl": true,
+	"se": true, "es": true, "br": true, "au": true, "ca": true, "us": true,
+	"sg": true, "my": true, "th": true, "id": true, "vn": true, "ph": true,
+	"nz": true, "za": true, "il": true, "ae": true, "sa": true, "mx": true,
+	"ar": true, "cl": true, "ch": true, "pl": true, "pt": true, "cz": true,
+	"gr": true, "hu": true, "ro": true, "ua": true,
+	// 内网命名伪 TLD(渗透现场常见内部主机名)
+	"local": true, "internal": true, "corp": true, "lan": true,
+	"prod": true, "lab": true, "vpn": true, "staging": true, "intranet": true,
+	// ICANN 保留(文档/测试用,测试夹具大量使用 *.example)
+	"example": true, "invalid": true, "test": true,
+}
+
+// validFenceDomain 校验裸 token 是否像主机名:≥2 个 label、末 label 在
+// TLD 白名单内(见 tldAllowlist)、各 label 合法、后缀不在文件扩展名黑名单。
 func validFenceDomain(s string) bool {
 	s = strings.TrimSuffix(strings.ToLower(s), ".")
 	if len(s) < 4 || len(s) > 253 || strings.Contains(s, "..") {
@@ -136,13 +169,8 @@ func validFenceDomain(s string) bool {
 	if extBlocklist[tld] {
 		return false
 	}
-	if len(tld) < 2 {
+	if !tldAllowlist[tld] {
 		return false
-	}
-	for _, c := range tld {
-		if c < 'a' || c > 'z' {
-			return false
-		}
 	}
 	for _, l := range labels {
 		if l == "" || len(l) > 63 || l[0] == '-' || l[len(l)-1] == '-' {

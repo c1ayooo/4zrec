@@ -66,7 +66,16 @@ func TestExtractFenceTargets(t *testing.T) {
 			name: "管道与重定向中的目标",
 			cmd:  `dig +short sub.example.com | tee out.txt; curl http://10.9.8.7`,
 			domains: []string{"sub.example.com"},
-			ips:     []string{"10.9.8.7"},
+			ips:    []string{"10.9.8.7"},
+		},
+		{
+			name: "Python 代码标识符不当作域名",
+			cmd:  `python3 -c "import re,os,json; print(re.findall(r'[0-9]+', os.popen('echo hi').read())); json.loads('{}')"; pip install requests==2.31.0`,
+		},
+		{
+			name:    "内网伪 TLD 主机名仍识别",
+			cmd:     `nmap -p 22 app.corp.local dc01.prod web.internal`,
+			domains: []string{"app.corp.local", "dc01.prod", "web.internal"},
 		},
 	}
 	for _, tc := range cases {
@@ -104,15 +113,24 @@ func TestFenceCommandTextOnlyKnownTools(t *testing.T) {
 	}
 }
 
-// TestValidFenceDomain 边界:数字 TLD 拒绝、单字符标签拒绝、合法 ID 风格 token 拒绝。
+// TestValidFenceDomain 边界:数字 TLD 拒绝、单字符标签拒绝、合法 ID 风格 token 拒绝、
+// 代码标识符尾缀(不在 TLD 白名单)拒绝。
 func TestValidFenceDomain(t *testing.T) {
-	bad := []string{"python3.11", "a.b", "-bad.com", "example.com-", "host..com", "1.2.3.4", "x"}
+	bad := []string{
+		"python3.11", "a.b", "-bad.com", "example.com-", "host..com", "1.2.3.4", "x",
+		// 代码标识符:尾缀不在 TLD 白名单,全部拒绝(用户实测 re.findall 误报的回归)
+		"re.findall", "os.path", "os.path.join", "json.dumps", "sys.argv", "str.format",
+	}
 	for _, s := range bad {
 		if validFenceDomain(s) {
 			t.Errorf("%q 不应判定为域名", s)
 		}
 	}
-	good := []string{"example.com", "sub.example.com", "a-b.example.co", "xn--fiqs8s.example"}
+	good := []string{
+		"example.com", "sub.example.com", "a-b.example.co", "xn--fiqs8s.example",
+		// 内网伪 TLD 与保留后缀
+		"dc01.prod", "app.corp.local", "xawl.edu.cn",
+	}
 	for _, s := range good {
 		if !validFenceDomain(s) {
 			t.Errorf("%q 应判定为域名", s)
