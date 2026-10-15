@@ -416,10 +416,17 @@ func (s *Session) runOnce(ctx context.Context, ps *promptState, rs *runState, yi
 // runSettlement injects the wrap-up prompt and runs one bounded agent with the
 // disabled tools hidden. The terminal keeps the ORIGINAL budget reason (the
 // settlement is just a checkpoint), so the engine state machine semantics are
-// unchanged. Settlement runs on the live parent ctx: its tools run freely,
-// bounded only by its own turn budget. It reports whether the consumer stopped
-// draining (the Prompt then ends without a KindResult).
+// unchanged. Settlement runs free of the run's wall-clock budget (its tools
+// run freely, bounded only by its own turn budget), but it must die with its
+// Prompt: when runSettlement returns — in particular when the consumer stops
+// draining — the derived context cancels the runner, so an abandoned wrap-up
+// cannot keep spending model calls in the background or interleave its DTO
+// writes with a subsequent Prompt on the same session. It reports whether the
+// consumer stopped draining (the Prompt then ends without a KindResult).
 func (s *Session) runSettlement(ctx context.Context, ps *promptState, rs *runState, reason TerminalReason, yield func(RunEvent, error) bool) bool {
+	sctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	st := s.opts.Settlement
 	prompt := st.promptFor(reason)
 	if prompt == "" {
@@ -441,7 +448,7 @@ func (s *Session) runSettlement(ctx context.Context, ps *promptState, rs *runSta
 	if maxTurns <= 0 {
 		maxTurns = 2 // norma settleMaxTurns default
 	}
-	err := s.driveAgent(ctx, ps, rs, yield, registry.List(), maxTurns, false)
+	err := s.driveAgent(sctx, ps, rs, yield, registry.List(), maxTurns, false)
 	// Settlement errors (including its own max iterations) are absorbed: the
 	// run finishes with the budget reason, never completed/model_error. Only a
 	// consumer stop propagates.
@@ -592,27 +599,19 @@ func drainEvents(iter *adk.AsyncIterator[*adk.AgentEvent], ps *promptState, rs *
 				continue
 			}
 			m := mv.Message
-			isErr := false
+			isErr := true
 			if rec := rs.lookup(m.ToolCallID); rec != nil {
 				isErr = rec.isErr
-				if !rec.written {
-					// Unknown-tool result: the gate never saw this call, so
-					// the pump persists it.
-					s.appendDTO([]acllm.Message{{
-						Role: acllm.RoleUser,
-						Content: []acllm.ContentBlock{
-							acllm.ToolResultText(m.ToolCallID, m.Content, true),
-						},
-					}})
-				}
 			} else {
+				// Unknown-tool result: the gate never saw this call, so the
+				// pump persists it (always an error — the model hallucinated
+				// the tool name).
 				s.appendDTO([]acllm.Message{{
 					Role: acllm.RoleUser,
 					Content: []acllm.ContentBlock{
 						acllm.ToolResultText(m.ToolCallID, m.Content, true),
 					},
 				}})
-				isErr = true
 			}
 			block := acllm.ToolResultText(m.ToolCallID, m.Content, isErr)
 			if !yield(RunEvent{Kind: KindToolResult, ToolResult: &block}, nil) {
@@ -674,7 +673,7 @@ func (s *Session) recordToolResult(rs *runState, callID, text string, isErr bool
 	})
 	msgs = append(msgs, extras...)
 	s.appendDTO(msgs)
-	rs.record(callID, &toolExecRecord{isErr: isErr, written: true})
+	rs.record(callID, &toolExecRecord{isErr: isErr})
 }
 
 // recordBoundaryLocked persists a freshly inserted compaction boundary: the

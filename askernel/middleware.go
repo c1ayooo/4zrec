@@ -35,18 +35,17 @@ import (
 )
 
 // runState is the per-runner-run channel between the gate and the event pump:
-// for every tool call id, whether the result was an error (the kernel sets
-// acllm.ExtraIsError from its own knowledge — the eino ToolsNode message
-// cannot carry it) and whether the gate already wrote the DTO tool_result
-// (unknown-tool results are written by the pump instead).
+// for every tool call id the gate executed, whether the result was an error
+// (the kernel sets acllm.ExtraIsError from its own knowledge — the eino
+// ToolsNode message cannot carry it). Unknown-tool results were never seen by
+// the gate and carry no record; the pump persists them itself.
 type runState struct {
 	mu      sync.Mutex
 	results map[string]*toolExecRecord
 }
 
 type toolExecRecord struct {
-	isErr   bool
-	written bool
+	isErr bool
 }
 
 func newRunState() *runState {
