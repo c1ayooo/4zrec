@@ -176,7 +176,10 @@ func (s *Server) deleteProjectScope(w http.ResponseWriter, r *http.Request) {
 }
 
 // scopeCandidates 从项目资产自动生成授权范围候选(GET /api/projects/{id}/scope/candidates)。
-// 只读预览:前端展示勾选,导入走下面批量接口。
+// 只读预览:前端展示勾选,导入走下面批量接口。两个来源合并——资产实证反推
+// (assets 计数排序)与 LLM 建议(worker 收尾时 suggest_scope 提名,带依据);
+// LLM 建议可能是资产里还没出现的根域,也可能与资产候选重合(取并集,重合的
+// 标注双方来源)。
 func (s *Server) scopeCandidates(w http.ResponseWriter, r *http.Request) {
 	pg := s.pg(w)
 	if pg == nil {
@@ -191,6 +194,24 @@ func (s *Server) scopeCandidates(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
+	}
+	// 合并 LLM 建议:pending 的进入候选(带 reason),已 imported/dismissed 的不重复出现。
+	suggestions, err := pg.ScopeSuggestions(id, "pending")
+	if err == nil {
+		index := map[string]map[string]any{}
+		for _, c := range candidates {
+			index[c["domain"].(string)] = c
+		}
+		for _, sug := range suggestions {
+			dom, _ := sug["domain"].(string)
+			if c, ok := index[dom]; ok {
+				c["llm_reason"] = sug["reason"]
+				continue
+			}
+			entry := map[string]any{"domain": dom, "assets": 0, "llm_reason": sug["reason"]}
+			candidates = append(candidates, entry)
+			index[dom] = entry
+		}
 	}
 	writeJSON(w, 200, map[string]any{"candidates": candidates})
 }
@@ -218,6 +239,10 @@ func (s *Server) importScope(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	added, skipped, invalid, errMsgs := pg.ImportProjectScope(id, req.Domains, req.Reason)
+	// 建议池状态同步:已导入的建议标 imported(下次候选不再重复出现)。
+	if err := pg.ResolveScopeSuggestions(id, req.Domains, "imported"); err != nil {
+		log.Printf("[projects] 建议状态同步失败(项目 %d): %v", id, err)
+	}
 	claimed, cerr := pg.Projects().RecomputeProjectAttribution()
 	if cerr != nil {
 		errMsgs = append(errMsgs, "范围已保存,但存量资产认领失败: "+cerr.Error())

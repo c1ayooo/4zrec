@@ -1580,6 +1580,22 @@ CREATE INDEX IF NOT EXISTS idx_project_scope_project ON project_scope(project_id
 CREATE INDEX IF NOT EXISTS idx_project_scope_domain ON project_scope(domain) WHERE domain IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_project_scope_net ON project_scope(net) WHERE net IS NOT NULL;
 
+-- LLM 范围建议池:worker/planner 收尾(带着会话完整上下文)通过 suggest_scope
+-- 工具落库"本次探索中见过的、应属授权面的关联根域"。与资产生成候选(实证反推)
+-- 互补——LLM 能从目标描述/页面文本里给出资产里还没出现的根域。status:
+-- pending(待人工确认)/ imported(已并入 project_scope)/ dismissed(人工否决)。
+CREATE TABLE IF NOT EXISTS project_scope_suggestions (
+    id         BIGSERIAL PRIMARY KEY,
+    project_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    domain     TEXT NOT NULL,
+    reason     TEXT NOT NULL DEFAULT '',
+    source     TEXT NOT NULL DEFAULT 'llm' CHECK (source IN ('llm')),
+    status     TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','imported','dismissed')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_scope_suggestion UNIQUE (project_id, domain)
+);
+CREATE INDEX IF NOT EXISTS idx_scope_suggestions_project ON project_scope_suggestions(project_id, status);
+
 -- 任务/对话挂到项目;项目的授权围栏自此生效(不挂=沿用旧行为,仅全局黑名单)。
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS project_id BIGINT REFERENCES projects(id) ON DELETE SET NULL;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS project_id BIGINT REFERENCES projects(id) ON DELETE SET NULL;

@@ -95,8 +95,8 @@ export default function ProjectsPage() {
   } | null>(null);
   const [savingInfo, setSavingInfo] = React.useState(false);
   const [savingScope, setSavingScope] = React.useState(false);
-  // 从资产生成的范围候选:勾选集 + 加载态
-  const [candidates, setCandidates] = React.useState<{ domain: string; assets: number }[]>([]);
+  // 从资产生成的范围候选:勾选集 + 加载态。LLM 建议(带依据)由后端合并进同一清单。
+  const [candidates, setCandidates] = React.useState<{ domain: string; assets: number; llm_reason?: string }[]>([]);
   const [picked, setPicked] = React.useState<Set<string>>(new Set());
   const [loadingCandidates, setLoadingCandidates] = React.useState(false);
 
@@ -594,7 +594,7 @@ export default function ProjectsPage() {
                 </div>
                 <div className="grid max-h-40 grid-cols-1 gap-1 overflow-y-auto sm:grid-cols-2">
                   {candidates.map((c) => (
-                    <label key={c.domain} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-muted/60">
+                    <label key={c.domain} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-muted/60" title={c.llm_reason || ""}>
                       <Checkbox
                         checked={picked.has(c.domain)}
                         onCheckedChange={(v) =>
@@ -607,7 +607,14 @@ export default function ProjectsPage() {
                         }
                       />
                       <span className="truncate font-mono text-xs">{c.domain}</span>
-                      <span className="text-muted-foreground ml-auto shrink-0 text-xs">{c.assets}</span>
+                      {c.llm_reason && (
+                        <Badge variant="outline" className="shrink-0 text-[10px] font-normal text-blue-600">
+                          LLM
+                        </Badge>
+                      )}
+                      <span className="text-muted-foreground ml-auto shrink-0 text-xs">
+                        {(c.assets ?? 0) > 0 ? c.assets : ""}
+                      </span>
                     </label>
                   ))}
                 </div>

@@ -324,6 +324,73 @@ func (d *DB) ImportProjectScope(projectID int64, domains []string, reason string
 	return d.Projects().AddProjectScope(projectID, domains, reason)
 }
 
+// SuggestScope 把 LLM 收尾时给的范围建议落进建议池:域名做与围栏一致的形态
+// 校验(TLD 白名单,防代码标识符/乱串入库),同项目同域幂等(重复建议保留
+// 首条的 reason)。不自动生效——导入仍走人工确认,LLM 只提名不签授权。
+func (d *DB) SuggestScope(projectID int64, domains []string, reason string) (accepted, rejected int, errs []string) {
+	for _, raw := range domains {
+		host := registrableRoot(raw)
+		if host == "" {
+			rejected++
+			errs = append(errs, raw+": 不是合法的根域名")
+			continue
+		}
+		if _, err := d.Exec(`
+INSERT INTO project_scope_suggestions(project_id, domain, reason, source)
+VALUES ($1, $2, $3, 'llm')
+ON CONFLICT (project_id, domain) DO NOTHING`, projectID, host, strings.TrimSpace(reason)); err != nil {
+			rejected++
+			errs = append(errs, raw+": "+err.Error())
+			continue
+		}
+		accepted++
+	}
+	return accepted, rejected, errs
+}
+
+// ScopeSuggestions 返回建议池(默认 pending 优先、时间倒序),供候选接口合并
+// 与前端展示。
+func (d *DB) ScopeSuggestions(projectID int64, statuses ...string) ([]map[string]any, error) {
+	q := `SELECT id, domain, reason, source, status, created_at FROM project_scope_suggestions WHERE project_id=$1`
+	args := []any{projectID}
+	if len(statuses) > 0 {
+		q += ` AND status = ANY($2)`
+		args = append(args, statuses)
+	}
+	q += ` ORDER BY created_at DESC`
+	rows, err := d.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var id int64
+		var domain, reason, source, status string
+		var createdAt time.Time
+		if err := rows.Scan(&id, &domain, &reason, &source, &status, &createdAt); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{
+			"id": id, "domain": domain, "reason": reason,
+			"source": source, "status": status, "created_at": createdAt,
+		})
+	}
+	return out, rows.Err()
+}
+
+// ResolveScopeSuggestions 批量改建议状态:并入时把 pending 建议(含本次 LLM
+// 新提的)标为 imported,人工否决标 dismissed。
+func (d *DB) ResolveScopeSuggestions(projectID int64, domains []string, status string) error {
+	if len(domains) == 0 {
+		return nil
+	}
+	_, err := d.Exec(`
+UPDATE project_scope_suggestions SET status=$3 WHERE project_id=$1 AND domain = ANY($2)`,
+		projectID, domains, status)
+	return err
+}
+
 // RecomputeProjectAttribution 把范围命中的未归属资产认领进项目——企业侧
 // recomputeAttributionTx 的项目对应物,但遵循围栏「只升不降」:只认领
 // project_id IS NULL 的资产(不抢别项目的),authz 为空/pending 的提为

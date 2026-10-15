@@ -672,6 +672,63 @@ func splitLines(s string) []string {
 	return out
 }
 
+// suggestScope 把 LLM 提名的授权面根域落进项目范围建议池。LLM 是会话里最
+// 知道目标的地方:它读过任务目标描述、页面文本、扫描报告,能给出"资产里
+// 还没出现、但明显同属授权机构"的根域(如从目标站页脚看到同一集团的其他
+// 域名)。只提名不签授权:建议进入待确认池,由人在项目页勾选导入。
+func (t *ToolSet) suggestScope() actool.CoreTool {
+	return actool.Build(actool.Spec{
+		Name:        "suggest_scope",
+		Description: "把本次探索中见过的、应属当前项目授权范围的关联根域名(如 example.com)提交到项目范围建议池。适合:目标站页脚/跳转/证书里看到的同机构域名、任务描述里点名的关联域。不要提交无依据的猜测。",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"domains": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "根域名列表,每项一个可注册基域(如 bilibili.com,不要带子域/路径)",
+				},
+				"reason": map[string]any{
+					"type":        "string",
+					"description": "一句话依据(在哪个页面/什么证据看到)",
+				},
+			},
+			"required": []string{"domains"},
+		},
+		ReadOnly:   func(json.RawMessage) bool { return false },
+		Concurrent: func(json.RawMessage) bool { return true },
+		Permissions: func(context.Context, json.RawMessage, actool.Context) actool.Decision {
+			return actool.Allowed()
+		},
+		Run: func(ctx context.Context, input json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
+			if t.as == nil || t.taskID <= 0 {
+				return actool.Errorf("suggest_scope 需要任务上下文(资产库未接入)"), nil
+			}
+			projectID, err := t.as.DB().TaskProjectID(t.taskID)
+			if err != nil || projectID <= 0 {
+				return actool.Text("本任务未挂项目,无授权范围可建议。"), nil
+			}
+			var req struct {
+				Domains []string `json:"domains"`
+				Reason  string   `json:"reason"`
+			}
+			if err := json.Unmarshal(input, &req); err != nil || len(req.Domains) == 0 {
+				return actool.Errorf("domains 不能为空"), nil
+			}
+			accepted, rejected, errs := t.as.DB().SuggestScope(projectID, req.Domains, req.Reason)
+			out := map[string]any{
+				"accepted": accepted, "rejected": rejected,
+				"note": "建议已进入待确认池,人工在项目页确认后才生效;生效前相关资产仍按未授权处理。",
+			}
+			if len(errs) > 0 {
+				out["errors"] = errs
+			}
+			b, _ := json.Marshal(out)
+			return actool.Text(string(b)), nil
+		},
+	})
+}
+
 // WorkerTools returns the tool set for a work agent.
 func (t *ToolSet) WorkerTools() []actool.CoreTool {
 	return []actool.CoreTool{
@@ -681,6 +738,10 @@ func (t *ToolSet) WorkerTools() []actool.CoreTool {
 		// asset management (handlers guard nil store internally)。
 		// add_company_scope 不给 worker：定义企业资产范围属规划/主控/Auto 的职责，worker 只执行探索。
 		t.insertAssets(), t.listAssets(),
+		// suggest_scope：收尾时把"本次探索中见过的、应属授权面"的关联根域提名
+		// 给范围建议池(LLM 是最知道目标的地方——它读过任务描述/页面文本/报告,
+		// 能给出资产里还没出现的根域)。不自动生效,导入仍走人工确认。
+		t.suggestScope(),
 		// 跨 work 回看：worker 也可复用其他 work 的观察，避免重复劳动。
 		// search_all_worker_traces：不必先知道 intent_id，按关键字全局捞命中步骤；
 		// get_worker_trace：锁定某条 work 后列步骤/就地搜/取完整内容。
@@ -706,6 +767,7 @@ func (t *ToolSet) MainAgentTools() []actool.CoreTool {
 		t.setConstraints(),
 		// asset management (handlers guard nil store internally)
 		t.insertAssets(), t.addCompanyScope(), t.listAssets(),
+		t.suggestScope(),
 		t.addFinding(), t.recordFact(),
 		t.addTaskScope(),
 		// list_untested_assets：按需查本任务范围内未测资产(类型+分页)，自行决定补测。
