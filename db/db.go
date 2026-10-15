@@ -7,8 +7,10 @@ import (
 	"database/sql"
 	_ "embed"
 	"errors"
+	"flag"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -89,8 +91,28 @@ func coordinateWithSchemaMigration(tx *sql.Tx) error {
 // DSN resolves the PostgreSQL connection string and reports where it came from.
 // Precedence: env ARTEX_PG_DSN > config file (config.json). There is no
 // built-in default — it errors if neither source is configured.
+//
+// 测试护栏:go test 二进制里必须显式设置 ARTEX_PG_DSN,拒绝回落到 config.json。
+// config.json 指向的通常是常驻/生产库——测试夹具会往里灌垃圾(2026-10-14 一次
+// 裸跑 go test 就把 41 个夹具任务写进了生产库)。
 func DSN() (dsn, source string, err error) {
+	if inTestBinary() && strings.TrimSpace(os.Getenv("ARTEX_PG_DSN")) == "" {
+		return "", "", fmt.Errorf("go test 未设置 ARTEX_PG_DSN,拒绝回落到 config.json 的数据库(防测试夹具污染常驻库)。请指向一次性测试库,例如:\n  ARTEX_PG_DSN=\"postgres:///artex_eino_migration?host=/var/run/postgresql&port=5433&sslmode=disable\" go test ./...")
+	}
 	return config.PostgresDSN()
+}
+
+// inTestBinary reports whether this process is a compiled `go test` binary.
+// The generated test main registers the test.* flags on flag.CommandLine
+// (testing.MainStart → Init) before any test or TestMain runs, so their
+// presence is a reliable marker even under TestMain; the executable-name
+// suffix additionally covers a `go test -c` binary probed before that.
+func inTestBinary() bool {
+	if flag.Lookup("test.v") != nil {
+		return true
+	}
+	name := os.Args[0]
+	return strings.HasSuffix(name, ".test") || strings.HasSuffix(name, ".test.exe")
 }
 
 // DB wraps the shared *sql.DB. PG handles its own connection pool + concurrency
