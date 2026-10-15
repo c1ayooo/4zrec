@@ -1,11 +1,13 @@
 package server
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/guard"
 )
 
 // --- 项目管理 API ---
@@ -221,6 +223,11 @@ func (s *Server) setAssetAuthz(w http.ResponseWriter, r *http.Request) {
 		if err := pg.Assets().ApproveAssetsWithProject(req.IDs, req.ProjectID); err != nil {
 			writeErr(w, 500, err.Error())
 			return
+		}
+		// 资产批准联动围栏:因这些目标挂起(等待审批)的围栏调用自动按允许
+		// 放行——用户在待审批队列批了资产,不必再去审批记录页点第二次。
+		if n := s.m.interceptor.ReleaseAsks(guard.NewAssetFence(pg).AskAuthorized); n > 0 {
+			log.Printf("[fence] 资产批准联动放行 %d 条挂起的围栏审批", n)
 		}
 	case "reject", "pending":
 		if err := pg.Assets().SetAssetAuthz(req.IDs, req.Action); err != nil {

@@ -337,6 +337,37 @@ func (f *AssetFence) authorize(projectID int64, targets fenceTargets) {
 	}
 }
 
+// AskAuthorized 报告一条挂起的审批记录是否已因「资产获批」而可以放行——
+// 资产批准联动的谓词(配合 intercept.ReleaseAsks):仅认【资产围栏】消息的
+// 记录;从审批记录的归属(任务→项目,会话→项目)解析项目,对工具输入重提
+// 目标,全部已获授权(项目范围或 approved 资产)即 true。普通拦截规则的
+// ask 不受影响。
+func (f *AssetFence) AskAuthorized(p db.InterceptPending) bool {
+	if f == nil || f.dbh == nil {
+		return false
+	}
+	if !strings.Contains(p.Reason, "【资产围栏】") {
+		return false
+	}
+	projectID := int64(0)
+	if p.TaskID != nil {
+		if tid := parseTaskID(*p.TaskID); tid > 0 {
+			projectID, _ = f.dbh.TaskProjectID(tid)
+		}
+	}
+	if projectID <= 0 && p.ConversationID != nil {
+		projectID, _ = f.dbh.ConvProjectID(*p.ConversationID)
+	}
+	if projectID <= 0 {
+		return false
+	}
+	targets := ExtractFenceTargets(fenceCommandText(p.ToolName, p.ToolInput))
+	if targets.empty() {
+		return false
+	}
+	return f.dbh.AuthorizedTarget(projectID, targets.Domains, targets.IPs)
+}
+
 // applyFence 在工具规则判定之前执行资产围栏。返回值 true 表示已产生终局决定。
 func (g *Guard) applyFence(ctx context.Context, ev askernel.Event) (askernel.Result, bool) {
 	if g.fence == nil || g.interceptor == nil {

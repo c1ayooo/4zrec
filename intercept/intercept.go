@@ -693,3 +693,25 @@ func (i *Interceptor) Decide(pendingID int64, allowed bool) error {
 	i.pending.resolve(pendingID, allowed)
 	return nil
 }
+
+// ReleaseAsks 自动放行满足谓词的挂起审批:pred 为 true 的 pending 记录按
+// 「人工允许」落库并唤醒阻塞中的调用方——与人工在审批页点允许走同一条
+// 路径(Decide)。用于资产批准联动围栏:用户在待审批队列批了资产,因它
+// 挂起的围栏审批不必再去审批页点第二次。只影响仍在等待的记录;已决定
+// 的行 ResolveIntercept 会拒绝二次改写。返回放行条数(0=无满足条件的)。
+func (i *Interceptor) ReleaseAsks(pred func(p db.InterceptPending) bool) int {
+	rows, err := i.db.ListPendingIntercepts()
+	if err != nil || len(rows) == 0 {
+		return 0
+	}
+	n := 0
+	for _, p := range rows {
+		if p.Status != "pending" || !pred(p) {
+			continue
+		}
+		if err := i.Decide(p.ID, true); err == nil {
+			n++
+		}
+	}
+	return n
+}
