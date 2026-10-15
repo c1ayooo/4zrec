@@ -160,6 +160,9 @@ type FindingFilter struct {
 	// AssetScope 是资产树的节点 key(a:<id> / c:<id> / r:<domain> / __none__),
 	// 选中一个节点等于选中它的整棵子树。空 = 不按资产筛选。
 	AssetScope string
+	// ProjectID>0 = 按项目筛选(finding 经 task.project_id 归属项目;两侧查询
+	// 均 LEFT JOIN tasks t,条件直接下推)。0 = 不按项目筛选。
+	ProjectID int64
 
 	// 下面三个由 applyAssetScope 从 AssetScope 解析而来,调用方不用设置。
 	assetIDs  []int64 // 子树里所有资产 id
@@ -194,6 +197,11 @@ func (f FindingFilter) where() (string, []any) {
 	} else if tid, err := strconv.ParseInt(f.TaskID, 10, 64); err == nil && tid > 0 {
 		args = append(args, tid)
 		conds = append(conds, fmt.Sprintf("f.task_id = $%d", len(args)))
+	}
+	// 项目筛选:finding 经任务归属项目(t 已在分页/计数两侧 JOIN)。
+	if f.ProjectID > 0 {
+		args = append(args, f.ProjectID)
+		conds = append(conds, fmt.Sprintf("t.project_id = $%d", len(args)))
 	}
 	// 资产筛选:asset_ids 是 jsonb 数组,@> ANY(...) 能走 idx_findings_asset_ids。
 	switch {

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import {
   CheckIcon,
   FolderIcon,
@@ -291,7 +292,12 @@ export default function ProjectsPage() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <FolderIcon className="text-muted-foreground size-4 shrink-0" />
-                      <span className="truncate font-medium">{p.name}</span>
+                      <Link
+                        href={`/function/projects/detail?id=${p.id}`}
+                        className="truncate font-medium hover:underline"
+                      >
+                        {p.name}
+                      </Link>
                       {p.status === "archived" && <Badge variant="secondary">已归档</Badge>}
                     </div>
                     {p.company_name && (

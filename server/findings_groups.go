@@ -33,9 +33,11 @@ func findingFilterFromQuery(q url.Values) db.FindingFilter {
 		Status:    normFilter(q.Get("status")),
 		VulnClass: normFilter(q.Get("vulnclass")),
 		// task_id(独立于会切到「按任务节点」分支的 task 参数):全局表按任务筛选。
-		TaskID:     normFilter(q.Get("task_id")),
-		Query:      q.Get("q"),
-		Sort:       q.Get("sort"),
+		TaskID: normFilter(q.Get("task_id")),
+		Query:  q.Get("q"),
+		Sort:   q.Get("sort"),
+		// project_id: 项目详情页按项目看漏洞(finding 经 task 归属)。0/非法=不筛。
+		ProjectID:  int64(atoiDefault(q.Get("project_id"), 0)),
 		AssetScope: strings.TrimSpace(q.Get("asset_scope")),
 	}
 }

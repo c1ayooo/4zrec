@@ -9,6 +9,7 @@ export interface Task {
   name?: string; // 可选任务名称;空/缺省=未命名,展示时回退到描述
   category_id?: number;
   category_name?: string;
+  project_id?: number; // 归属项目(授权根);缺省=未挂项目
   pinned?: boolean;
   pinned_at?: string | null;
   description: string;
@@ -625,6 +626,8 @@ export interface FindingQuery {
   sort?: "severity" | "time";
   // 资产树节点 key;选中一个节点 = 选中它的整棵子树。空 = 不按资产筛选。
   assetScope?: string;
+  // 项目 id;>0 = 按项目筛选(finding 经任务归属项目)。项目详情页用。
+  projectId?: number;
 }
 
 // ---- Findings by asset (资产视图) ----
