@@ -4,11 +4,13 @@ import * as React from "react";
 
 import Link from "next/link";
 
-import { ArrowDownIcon, ArrowUpIcon, ArrowUpRightIcon, ChevronRightIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, ArrowUpRightIcon, ChevronRightIcon, DownloadIcon } from "lucide-react";
 import { toast } from "sonner";
 
+import { EvidenceViewer } from "@/components/evidence-viewer";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { api } from "@/lib/api";
@@ -50,6 +52,26 @@ function Row({
   onStatus: (f: Finding, next: FindingStatus) => void;
 }) {
   const [open, setOpen] = React.useState(false);
+  // 列表行的 evidence 是 payload 全文,但结构化 reproduction 只在 findings 表——
+  // 展开时按需拉一次详情补齐(继承漏洞带 context_task 保持任务上下文只读语义)。
+  const [detail, setDetail] = React.useState<Finding | null>(null);
+  const [detailLoaded, setDetailLoaded] = React.useState(false);
+  React.useEffect(() => {
+    if (!open || detailLoaded || !f.finding_id) return;
+    let active = true;
+    api
+      .getFinding(f.finding_id, f.inherited ? contextTaskId : undefined)
+      .then((full) => {
+        if (active) setDetail(full);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setDetailLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [open, detailLoaded, f.finding_id, f.inherited, contextTaskId]);
   return (
     <div className="border-b last:border-b-0">
       <div className="flex w-full items-center gap-3 px-4 py-3 text-sm hover:bg-accent/40">
@@ -127,10 +149,32 @@ function Row({
       </div>
       {open && (
         <div className="bg-muted/30 px-4 pb-4 pl-11">
-          <div className="mb-1 text-xs font-medium text-muted-foreground">证据 / PoC</div>
-          <pre className="overflow-auto rounded-md border bg-background p-3 font-mono text-xs whitespace-pre-wrap">
-            {f.evidence}
-          </pre>
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <span className="text-xs font-medium text-muted-foreground">证据 / PoC</span>
+            {f.finding_id && (
+              <div className="flex items-center gap-1.5">
+                <Button asChild variant="outline" size="sm">
+                  <a href={api.findingExportUrl(f.finding_id, "md")}>
+                    <DownloadIcon data-icon="inline-start" /> MD
+                  </a>
+                </Button>
+                <Button asChild variant="outline" size="sm">
+                  <a href={api.findingExportUrl(f.finding_id, "docx")}>
+                    <DownloadIcon data-icon="inline-start" /> DOCX
+                  </a>
+                </Button>
+              </div>
+            )}
+          </div>
+          {(detail?.evidence ?? f.evidence) ? (
+            <EvidenceViewer
+              text={detail?.evidence ?? f.evidence}
+              reproduction={detail?.reproduction}
+              compact
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">（无证据）</p>
+          )}
         </div>
       )}
     </div>

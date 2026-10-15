@@ -99,4 +99,3 @@ LIMIT ` + strconv.Itoa(size) + " OFFSET " + strconv.Itoa(page*size)
 	}
 	return out, total, rows.Err()
 }
-

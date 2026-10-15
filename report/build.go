@@ -113,6 +113,10 @@ type GenInput struct {
 	AssetCounts   map[string]int
 	SkillDir      string // platform skill root; enables editable report-generation skill
 	DataDir       string // platform data dir; used to redact internal scratch paths from client reports
+	// NoAI 跳过全部 LLM 叙述(单漏洞即时导出等场景):漏洞正文只用预载的持久化
+	// 富化,报告级综述走模板兜底,复现过程优先结构化 reproduction——秒级出稿,
+	// 不依赖 LLM 配置。
+	NoAI bool
 }
 
 // BuildDoc assembles the report JSON: skeleton defaults + AI-written narrative
@@ -148,7 +152,14 @@ func BuildDoc(ctx context.Context, pg *db.DB, in *GenInput) *reportDoc {
 	// --- concurrent AI: report-level + per-finding narrative ---
 	var rl reportLevelOut
 	narr := make([]Enrichment, len(in.Findings))
-	{
+	if in.NoAI {
+		// 确定性导出:只用预载的持久化富化,其余由 fallback 与结构化复现兜底。
+		for i := range in.Findings {
+			if e := in.Findings[i].Enrichment; e != nil {
+				narr[i] = *e
+			}
+		}
+	} else {
 		var wg sync.WaitGroup
 		sem := make(chan struct{}, 4)
 		wg.Add(1)

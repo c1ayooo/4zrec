@@ -1219,7 +1219,7 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 	return writeTool("report_finding", "记录确认的漏洞，用 evidence 提供命令输出、日志等可验证证据。任务上下文传当前 intent_id。返回的 finding_id 是独立漏洞记录 ID，finding_node_id 是探索节点 ID（第一行保留该节点编号）。", obj(map[string]any{
 		"vulnclass": str("漏洞类别"), "name": str("漏洞名称"), "severity": str("critical|high|medium|low"), "summary": str("发现摘要"),
 		"intent_id": idp("当前任务的意图 id"), "asset_ids": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "受影响资产 id"},
-		"evidence":         str("证据/PoC 文本"),
+		"evidence":         str("证据/PoC。Markdown 固定规范(详情页按此渲染,必须遵守):按复现步骤组织,每步以单独一行「## N. 标题」开始(N=1,2,…);命令放 ```bash 围栏、响应/输出放 ```json(纯文本输出用无语言围栏);命令与响应不得和说明文字混写在一行,禁止用「→」连接命令与响应;结尾的对照/影响面/合规说明写成引用行,如「> **对照**: …」。复现过程同时填写 reproduction 结构化字段(权威渠道),evidence 保留同内容的步骤化呈现"),
 		"evidence_hint_id": idp("可选：本任务中对应此漏洞的提示节点 ID，自动携带其结构化 traffic_refs；不能引用继承提示或其他漏洞的提示"),
 		"reproduction": map[string]any{
 			"type":        "object",

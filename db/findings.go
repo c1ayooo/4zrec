@@ -630,22 +630,27 @@ func (d *DB) FindingStats() (*FindingStats, error) {
 
 // GetFinding returns a single finding row (with task_description joined and the
 // full Markdown report), or nil when no row has that id. Unlike the list queries
-// it also selects `report` — that column is only needed on the detail page.
+// it also selects `report` and `reproduction` — those columns are only needed on
+// the detail page.
 func (d *DB) GetFinding(id int64) (*DBFinding, error) {
 	f := &DBFinding{}
 	var aidsJSON string
-	err := d.QueryRow(`SELECT `+findingSelectCols+`, COALESCE(f.report, '')
+	var repro []byte
+	err := d.QueryRow(`SELECT `+findingSelectCols+`, COALESCE(f.report, ''), f.reproduction
 		FROM findings f
 		LEFT JOIN tasks t ON f.task_id = t.id
 		WHERE f.id = $1`, id).Scan(
 		&f.ID, &f.TaskID, &f.NodeID, &f.VulnClass, &f.Name, &f.Severity,
 		&f.Summary, &f.Evidence, &f.Worker, &aidsJSON, &f.Status, &f.CreatedAt,
-		&f.TaskDescription, &f.EvidenceVersion, &f.ReportEvidenceVersion, &f.TrafficCount, &f.Report)
+		&f.TaskDescription, &f.EvidenceVersion, &f.ReportEvidenceVersion, &f.TrafficCount, &f.Report, &repro)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
+	}
+	if repro != nil {
+		f.Reproduction = json.RawMessage(repro)
 	}
 	_ = json.Unmarshal([]byte(aidsJSON), &f.AssetIDs)
 	return f, nil
@@ -821,7 +826,6 @@ func (d *DB) GetFindingByNodeID(nodeID int64) (*DBFinding, error) {
 	}
 	return &f, nil
 }
-
 
 // SetFindingReproduction stores the agent-captured structured reproduction recipe
 // for the finding at nodeID (report_finding writes it inline). No-op on empty.

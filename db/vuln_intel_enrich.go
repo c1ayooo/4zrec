@@ -6,17 +6,17 @@ import (
 
 // VulnIntelEnrich 一次富化的写回载荷。零值字段不覆盖(只补缺语义)。
 type VulnIntelEnrich struct {
-	ID          int64
-	GithubPoc   string  // JSON 数组文本
-	CvssScore   float64 // >0 才写
-	CvssVector  string
-	Cwes        string // JSON 数组文本
-	Affected    string // JSON 数组文本
-	LabOnly     bool
-	HasLabOnly  bool // lab_only 显式置位才写
+	ID              int64
+	GithubPoc       string  // JSON 数组文本
+	CvssScore       float64 // >0 才写
+	CvssVector      string
+	Cwes            string // JSON 数组文本
+	Affected        string // JSON 数组文本
+	LabOnly         bool
+	HasLabOnly      bool // lab_only 显式置位才写
 	SupplementTitle string
-	HasTitle    bool
-	Enriched    bool // true = 写 enriched_at(本次富化完成)
+	HasTitle        bool
+	Enriched        bool // true = 写 enriched_at(本次富化完成)
 }
 
 // PendingVulnIntel 挑待富化条目:带 CVE 且(未富化或超 7 天)。

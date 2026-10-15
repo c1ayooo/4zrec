@@ -117,6 +117,10 @@ func findingRowFromDB(f *db.DBFinding) FindingDTO {
 		Status:    f.Status,
 		TS:        f.CreatedAt.Format(time.RFC3339),
 	}
+	// agent 未填时是 SQL NULL(空 slice)或字面 "null",都不下发。
+	if len(f.Reproduction) > 0 && string(f.Reproduction) != "null" {
+		d.Reproduction = f.Reproduction
+	}
 	if f.TaskID != nil {
 		d.TaskID = strconv.FormatInt(*f.TaskID, 10)
 		d.TaskDescription = f.TaskDescription

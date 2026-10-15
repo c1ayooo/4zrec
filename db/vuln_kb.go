@@ -35,12 +35,12 @@ type VulnKBTypeCount struct {
 
 // VulnKBStats 是漏洞库的概览统计。
 type VulnKBStats struct {
-	Total          int               `json:"total"`
-	Products       int               `json:"products"`
-	WithCVE        int               `json:"with_cve"`
-	WithPayload    int               `json:"with_payload"`
-	WithFingerprint int              `json:"with_fingerprint"`
-	Types          []VulnKBTypeCount `json:"types"`
+	Total           int               `json:"total"`
+	Products        int               `json:"products"`
+	WithCVE         int               `json:"with_cve"`
+	WithPayload     int               `json:"with_payload"`
+	WithFingerprint int               `json:"with_fingerprint"`
+	Types           []VulnKBTypeCount `json:"types"`
 }
 
 // UpsertVulnKB 按 content_hash 幂等插入,返回是否为新记录。

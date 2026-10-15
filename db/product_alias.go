@@ -2,7 +2,7 @@ package db
 
 // 变更4（施工单-4zrec待办变更总表-20261014）：指纹 technologies 归一化。
 //
-// 问题：ScopeSentry 同步带入的 products（Wappalyzer/sas_ 命名）与本地 enrich 识别
+// 问题：4zrecon 同步带入的 products（Wappalyzer/sas_ 命名）与本地 enrich 识别
 // （dddd/wappalyzergo 命名）在 assets.technologies 里按 DISTINCT 并集累积，同一产品
 // 以多套名字混存（"nginx"/"Nginx"/"nginx / 1.24"）。归一化 = 归命名空间，不归规则库。
 //

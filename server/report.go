@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -237,16 +238,16 @@ func (s *Server) buildReportInput(t *Task, q map[string][]string) *report.GenInp
 		ProjectName:   defaultStrSrv(get("project"), project),
 		Scope:         strings.TrimSpace(t.Description), // 完整目标系统清单/范围→喂 AI 叙述,不上封面
 
-		ReportTitle:   get("title"), // empty → BuildDoc applies locale-aware "<project> <报告词>"
-		Version:       defaultStrSrv(get("version"), "V1.0"),
-		Locale:        defaultStrSrv(locale, "zh-CN"),
-		CVSSVersion:   cvss,
-		LogoPath:      logoPath,
-		Personnel:     personnel,
-		Findings:      findings,
-		AssetCounts:   counts,
-		SkillDir:      s.skillDir,
-		DataDir:       s.dataDir, // 用于客户报告脱敏内部 scratch 路径
+		ReportTitle: get("title"), // empty → BuildDoc applies locale-aware "<project> <报告词>"
+		Version:     defaultStrSrv(get("version"), "V1.0"),
+		Locale:      defaultStrSrv(locale, "zh-CN"),
+		CVSSVersion: cvss,
+		LogoPath:    logoPath,
+		Personnel:   personnel,
+		Findings:    findings,
+		AssetCounts: counts,
+		SkillDir:    s.skillDir,
+		DataDir:     s.dataDir, // 用于客户报告脱敏内部 scratch 路径
 	}
 }
 
@@ -274,4 +275,139 @@ func parseInt64Set(csv string) map[int64]bool {
 		return nil
 	}
 	return set
+}
+
+// exportFindingName sanitizes a finding name into a download-friendly file stem.
+func exportFindingName(name, vulnclass string) string {
+	s := strings.TrimSpace(name)
+	if s == "" {
+		s = strings.TrimSpace(vulnclass)
+	}
+	if s == "" {
+		s = "finding"
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if strings.ContainsRune(`/\:*?"<>|`, r) || r < 0x20 {
+			r = '-'
+		}
+		b.WriteRune(r)
+	}
+	s = strings.Trim(strings.TrimSpace(b.String()), "-. ")
+	if s == "" {
+		s = "finding"
+	}
+	if runes := []rune(s); len(runes) > 60 {
+		s = string(runes[:60])
+	}
+	return s
+}
+
+// GET /api/exploration/findings/{id}/export?format=md|docx — 发现页单条漏洞导出
+// (id 与详情接口 /api/exploration/findings/{id} 同语义:findings 表行 id)。
+// md 复用列表导出的渲染;docx 走任务报告同一套 python-docx 管线但 NoAI:正文
+// 只用已持久化的 AI 富化(若有),复现过程优先结构化 reproduction,其余确定性
+// 兜底——同步秒级返回,不调 LLM,也不写入报告管理列表。
+func (s *Server) exportFinding(w http.ResponseWriter, r *http.Request) {
+	id := int64(atoiDefault(r.PathValue("id"), 0))
+	if id <= 0 {
+		writeErr(w, 400, "无效的 finding id")
+		return
+	}
+	f, err := s.m.pg.GetFinding(id)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if f == nil {
+		writeErr(w, 404, "未找到漏洞")
+		return
+	}
+	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+	if format == "" {
+		format = "md"
+	}
+	stem := exportFindingName(f.Name, f.VulnClass)
+	disposition := func(ext, ctype string) {
+		w.Header().Set("Content-Type", ctype)
+		w.Header().Set(
+			"Content-Disposition",
+			fmt.Sprintf("attachment; filename=%q; filename*=UTF-8''%s", fmt.Sprintf("finding-%d%s", id, ext), url.PathEscape(stem+ext)),
+		)
+	}
+	switch format {
+	case "md":
+		disposition(".md", "text/markdown; charset=utf-8")
+		_, _ = w.Write([]byte(report.FindingsMarkdown([]*db.DBFinding{f}, time.Now())))
+	case "docx":
+		fi := report.FindingInput{
+			VulnClass: f.VulnClass, Severity: f.Severity, Summary: f.Summary,
+			PoC: f.Evidence, CreatedAt: f.CreatedAt, Reproduction: f.Reproduction,
+		}
+		// Target 用第一个绑定资产的展示 label(富化里 AI 提取的目标在 Enrichment 中优先)。
+		if assets := s.resolveAssetIDs(f.AssetIDs); assets != nil && len(f.AssetIDs) > 0 {
+			if a := assets[f.AssetIDs[0]]; a != nil {
+				fi.Target = assetLabel(a)
+			}
+		}
+		// 复用持久化富化(发现页「AI 分析」的成果),并尊重人工等级覆盖。
+		if f.NodeID != nil {
+			if enr, _ := s.m.pg.GetFindingEnrichment(*f.NodeID); enr != nil {
+				fi.Enrichment = reportEnrichmentFromDB(enr)
+				if strings.TrimSpace(enr.Severity) != "" {
+					fi.Severity = enr.Severity
+				}
+			}
+		}
+		// 封面元数据沿用报告设置,与任务级报告一致。
+		rs, _ := s.m.pg.GetReportSettings()
+		var personnel []report.PersonInput
+		companyName, cvss, logoRel := "", "", "3.1"
+		if rs != nil {
+			_ = json.Unmarshal(rs.Personnel, &personnel)
+			companyName, cvss, logoRel = rs.CompanyName, defaultStrSrv(rs.CVSSVersion, "3.1"), rs.LogoPath
+		}
+		logoPath := ""
+		if strings.TrimSpace(logoRel) != "" {
+			logoPath = filepath.Join(s.dataDir, logoRel) // stored relative → absolute for python
+		}
+		title := strings.TrimSpace(f.Name)
+		if title == "" {
+			title = strings.TrimSpace(f.VulnClass)
+		}
+		in := &report.GenInput{
+			CompanyName: companyName, // empty → BuildDoc applies locale default
+			ProjectName: title,
+			ReportTitle: title + " 漏洞报告",
+			Locale:      "zh-CN",
+			CVSSVersion: cvss,
+			LogoPath:    logoPath,
+			Personnel:   personnel,
+			Findings:    []report.FindingInput{fi},
+			SkillDir:    s.skillDir,
+			DataDir:     s.dataDir,
+			NoAI:        true,
+		}
+		stage, err := os.MkdirTemp("", "artex-finding-docx-")
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		defer os.RemoveAll(stage)
+		path, err := report.GenerateDocx(r.Context(), s.m.pg, in, stage, strconv.FormatInt(id, 10))
+		if err != nil {
+			writeErr(w, 500, "docx 生成失败:"+err.Error())
+			return
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		defer file.Close()
+		disposition(".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+		http.ServeContent(w, r, filepath.Base(path), time.Now(), file)
+	default:
+		writeErr(w, 400, "不支持的格式:"+format)
+	}
 }
