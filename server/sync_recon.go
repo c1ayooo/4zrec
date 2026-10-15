@@ -42,6 +42,11 @@ const (
 	syncReconcileEvery     = 24 * time.Hour
 	syncReconcileGrowth    = 200 // 上游 24h 净增长超过此值而增量入库停滞才判失明
 
+	// settingSyncProjects 增量同步的项目范围（JSON 字符串数组，元素为上游项目
+	// ObjectID）。上游实例常混杂多项目数据，无范围的全局增量会把未选择项目的
+	// 资产灌进来；空/未设置 = 不同步（增量是显式 opt-in，手动目标全量不受影响）。
+	settingSyncProjects = "sync.selected_projects"
+
 	// 上游原生时间格式（"2006-01-02 15:04:05"，节点时区、无 tz 标记）。水位一律
 	// 取响应体同源 time 做字符串比较，禁用本地时钟生成水位。
 	syncTimeLayout = "2006-01-02 15:04:05"
@@ -281,6 +286,121 @@ func (s *Server) syncReconProjects(w http.ResponseWriter, r *http.Request) {
 		projects = raw
 	}
 	writeJSON(w, 200, map[string]any{"projects": projects, "tag": env.Tag})
+}
+
+// ---------- GET /api/sync/4zrecon/selection ----------
+
+// parseSyncProjects 解析持久化的同步范围。空串→nil（未设置）；坏 JSON→错误。
+func parseSyncProjects(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	var ids []string
+	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+// reconSelectedProjects 读取增量同步的项目范围（空 = 未设置/不同步）。
+func (s *Server) reconSelectedProjects() ([]string, error) {
+	if s.m == nil || s.m.pg == nil {
+		return nil, fmt.Errorf("database unavailable")
+	}
+	raw, _, err := s.m.pg.GetSetting(settingSyncProjects)
+	if err != nil {
+		return nil, err
+	}
+	return parseSyncProjects(raw)
+}
+
+func (s *Server) syncReconGetSelection(w http.ResponseWriter, r *http.Request) {
+	if s.pg(w) == nil {
+		return
+	}
+	ids, err := s.reconSelectedProjects()
+	if err != nil {
+		writeErr(w, 500, "同步范围读取失败: "+err.Error())
+		return
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	writeJSON(w, 200, map[string]any{"projects": ids})
+}
+
+// syncReconSetSelection 保存同步范围。范围发生变化时清空全部类型水位——新勾选
+// 项目的历史资产落在旧水位之前，不清水位它们永远不会被增量带进来；下一轮 ticker
+// 会以新范围做一次首刷全量（幂等 upsert 吸收重复）。数据源未配置时只存范围不清水位。
+func (s *Server) syncReconSetSelection(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	var body struct {
+		Projects []string `json:"projects"`
+	}
+	if err := decode(r, &body); err != nil {
+		writeErr(w, 400, "invalid JSON: "+err.Error())
+		return
+	}
+	projects, changed := normalizeSyncProjects(body.Projects), false
+	prev, err := s.reconSelectedProjects()
+	if err == nil && !sameStringSet(prev, projects) {
+		changed = true
+	}
+	raw, merr := json.Marshal(projects)
+	if merr != nil {
+		writeErr(w, 500, merr.Error())
+		return
+	}
+	if err := pg.SetSetting(settingSyncProjects, string(raw)); err != nil {
+		writeErr(w, 500, "保存失败: "+err.Error())
+		return
+	}
+	resetWatermarks := 0
+	if changed {
+		if m, merr := s.findMCPByName(reconMCPName); merr == nil && m != nil {
+			for _, ssType := range reconTypeMap {
+				if err := pg.ResetSyncWatermark(r.Context(), m.ID, ssType); err == nil {
+					resetWatermarks++
+				}
+			}
+		}
+	}
+	writeJSON(w, 200, map[string]any{"projects": projects, "watermarks_reset": resetWatermarks})
+}
+
+// normalizeSyncProjects 去空、去重（保持首次出现顺序）。
+func normalizeSyncProjects(ids []string) []string {
+	seen := make(map[string]bool, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
+}
+
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	set := make(map[string]bool, len(a))
+	for _, v := range a {
+		set[v] = true
+	}
+	for _, v := range b {
+		if !set[v] {
+			return false
+		}
+	}
+	return true
 }
 
 // ---------- GET /api/sync/4zrecon/tasks ----------
@@ -536,6 +656,21 @@ func (s *Server) reconIncremental(ctx context.Context) (synced map[string]int, w
 	}
 	defer cl.Close()
 
+	// 增量只拉用户勾选的项目。无范围时跳过本轮：上游多项目混杂，无过滤的全局
+	// 增量会把未选择项目的资产灌进来（增量是显式 opt-in；手动目标全量不受影响）。
+	sel, selErr := s.reconSelectedProjects()
+	if selErr != nil {
+		errs = append(errs, "同步范围读取失败: "+selErr.Error())
+		return synced, warnings, errs
+	}
+	if len(sel) == 0 {
+		msg := "未设置同步项目范围（数据同步页 → 增量范围），本轮跳过"
+		log.Printf("[sync] %s", msg)
+		warnings = append(warnings, msg)
+		return synced, warnings, errs
+	}
+	filter := map[string]any{"project": sel}
+
 	for _, at := range reconDefaultTypes {
 		ssType := reconTypeMap[at]
 		st, serr := pg.SyncStateFor(ctx, m.ID, at)
@@ -551,15 +686,15 @@ func (s *Server) reconIncremental(ctx context.Context) (synced map[string]int, w
 			ferr      error
 		)
 		if bootstrap {
-			// 首刷：全局全量 + 总量保护上限。
-			items, truncated, ferr = s.reconPageAll(ctx, cl, ssType, nil, syncDefaultPage)
+			// 首刷：范围内全量 + 总量保护上限。
+			items, truncated, ferr = s.reconPageAll(ctx, cl, ssType, filter, syncDefaultPage)
 			for _, raw := range items {
 				if t := reconItemTime(raw); t > maxTime {
 					maxTime = t
 				}
 			}
 		} else {
-			items, maxTime, truncated, ferr = s.reconPageSince(ctx, cl, ssType, nil, syncDefaultPage, st.Watermark)
+			items, maxTime, truncated, ferr = s.reconPageSince(ctx, cl, ssType, filter, syncDefaultPage, st.Watermark)
 		}
 		if ferr != nil {
 			// 本轮失败不推进水位：已入库部分下轮重拉，幂等 upsert 吸收。
@@ -624,7 +759,14 @@ func (s *Server) syncTick(ctx context.Context) {
 		log.Printf("[sync] 增量同步完成: %v（warnings=%d errors=%d）", synced, len(warnings), len(errs))
 	}
 	// 每日对账兜底：增量跑完再对（count_assets 反映的是本轮之后的上游总量）。
+	// 设了同步范围就对不上账——count_assets 只报全局总量，无项目过滤，与范围内
+	// 入库的计数永远失配，天天重置水位触发（过滤后的）全量重刷。跳过对账即可，
+	// 失明风险由范围变更时的主动清水位兜底。
 	if s.syncReconcileDue() {
+		if sel, err := s.reconSelectedProjects(); err == nil && len(sel) > 0 {
+			log.Printf("[sync] 已设置同步范围（%d 个项目），跳过全局对账", len(sel))
+			return
+		}
 		if rc, rerr := s.reconClient(ctx); rerr == nil {
 			s.ssReconcile(ctx, m, rc)
 			rc.Close()

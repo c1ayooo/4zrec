@@ -93,7 +93,10 @@ function ReconPanel() {
     <div className="space-y-4">
       <DataSourceCard status={status} loading={loadingStatus} onChanged={loadStatus} />
       {ready ? (
-        <SyncWorkbench />
+        <>
+          <SyncScopeCard />
+          <SyncWorkbench />
+        </>
       ) : (
         <Card>
           <CardContent className="py-8 text-center text-muted-foreground text-sm">
@@ -102,6 +105,86 @@ function ReconPanel() {
         </Card>
       )}
     </div>
+  );
+}
+
+// ── 增量同步范围卡：定时/手动增量只拉勾选项目，未勾选 = 不同步 ────────────────
+
+function SyncScopeCard() {
+  const [projects, setProjects] = React.useState<ReconProject[]>([]);
+  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    Promise.all([api.reconProjects(1, 100), api.reconSelection()])
+      .then(([p, sel]) => {
+        setProjects(p.projects);
+        setSelected(new Set(sel));
+      })
+      .catch((e) => toast.error(`加载同步范围失败：${e.message}`))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const r = await api.reconSetSelection([...selected]);
+      toast.success(
+        r.watermarks_reset > 0
+          ? `已保存 ${selected.size} 个项目的同步范围；范围有变化，下一轮增量将全量补齐勾选项目`
+          : `已保存 ${selected.size} 个项目的同步范围`,
+      );
+    } catch (e) {
+      toast.error(`保存同步范围失败：${(e as Error).message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center justify-between space-y-0">
+        <div className="space-y-1.5">
+          <CardTitle className="text-base">增量同步范围</CardTitle>
+          <p className="text-muted-foreground text-sm">
+            定时增量与「增量同步」只拉取勾选项目的新资产，未勾选任何项目时增量不同步；手动目标全量不受此范围影响。
+            更改范围并保存后，下一轮增量会全量补齐勾选项目。
+          </p>
+        </div>
+        <Button size="sm" disabled={saving || loading} onClick={save}>
+          {saving ? "保存中…" : "保存范围"}
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <div className="text-muted-foreground text-sm">加载中…</div>
+        ) : projects.length === 0 ? (
+          <div className="text-muted-foreground text-sm">上游没有项目。</div>
+        ) : (
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {projects.map((p) => (
+              <label
+                key={p.id}
+                className="flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-accent"
+              >
+                <Checkbox checked={selected.has(p.id)} onCheckedChange={() => toggle(p.id)} />
+                <span className="truncate">{p.name}</span>
+                <span className="text-muted-foreground ml-auto pl-2 text-xs tabular-nums">{p.AssetCount ?? 0}</span>
+              </label>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

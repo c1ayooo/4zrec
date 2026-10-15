@@ -917,6 +917,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/sync/4zrecon/status", s.syncReconStatus)
 	mux.HandleFunc("POST /api/sync/4zrecon/datasource", s.syncReconDatasource)
 	mux.HandleFunc("GET /api/sync/4zrecon/projects", s.syncReconProjects)
+	mux.HandleFunc("GET /api/sync/4zrecon/selection", s.syncReconGetSelection)
+	mux.HandleFunc("PUT /api/sync/4zrecon/selection", s.syncReconSetSelection)
 	mux.HandleFunc("GET /api/sync/4zrecon/tasks", s.syncReconTasks)
 	mux.HandleFunc("POST /api/sync/4zrecon/sync", s.syncReconRun)
 	// Skill CRUD (文件系统)

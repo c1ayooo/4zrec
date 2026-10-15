@@ -1146,6 +1146,10 @@ export const api = {
       warnings: string[] | null;
       errors: string[] | null;
     }>("/sync/4zrecon/sync", body),
+  // 增量同步的项目范围:定时/手动增量只拉勾选项目,空=不同步
+  reconSelection: () => get<{ projects: string[] }>("/sync/4zrecon/selection").then((r) => arr(r.projects)),
+  reconSetSelection: (projects: string[]) =>
+    put<{ projects: string[]; watermarks_reset: number }>("/sync/4zrecon/selection", { projects }),
 
   // ---- skills (文件系统) ----
   skills: () => get<{ skills: SkillItem[] }>("/skills").then((r) => arr(r.skills)),

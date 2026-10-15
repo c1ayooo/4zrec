@@ -213,3 +213,47 @@ func TestSyncReconcileDue(t *testing.T) {
 		t.Errorf("25h 前对过账应到期")
 	}
 }
+
+// 同步范围解析：空串=未设置(nil)；坏 JSON 报错；数组原样返回。
+func TestParseSyncProjects(t *testing.T) {
+	if ids, err := parseSyncProjects(""); err != nil || ids != nil {
+		t.Fatalf("空串应返回 (nil,nil)，got (%v,%v)", ids, err)
+	}
+	if ids, err := parseSyncProjects("  "); err != nil || ids != nil {
+		t.Fatalf("空白串应返回 (nil,nil)，got (%v,%v)", ids, err)
+	}
+	if ids, err := parseSyncProjects(`["a","b"]`); err != nil || len(ids) != 2 || ids[0] != "a" || ids[1] != "b" {
+		t.Fatalf("数组应原样返回，got (%v,%v)", ids, err)
+	}
+	if _, err := parseSyncProjects(`{"x":1}`); err == nil {
+		t.Fatal("非数组 JSON 应报错")
+	}
+}
+
+// 范围归一：去空白项、去重、保持首次出现顺序。
+func TestNormalizeSyncProjects(t *testing.T) {
+	got := normalizeSyncProjects([]string{" a ", "", "b", "a", " ", ""})
+	want := []string{"a", "b"}
+	if len(got) != len(want) || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("normalize = %v, want %v", got, want)
+	}
+	if got := normalizeSyncProjects(nil); len(got) != 0 {
+		t.Fatalf("nil 输入应返回空切片，got %v", got)
+	}
+}
+
+// 集合相等：顺序无关；长度不同必不等。
+func TestSameStringSet(t *testing.T) {
+	if !sameStringSet([]string{"a", "b"}, []string{"b", "a"}) {
+		t.Fatal("同集合不同顺序应相等")
+	}
+	if sameStringSet([]string{"a", "b"}, []string{"a"}) {
+		t.Fatal("长度不同应不等")
+	}
+	if sameStringSet([]string{"a", "b"}, []string{"a", "c"}) {
+		t.Fatal("元素不同应不等")
+	}
+	if !sameStringSet(nil, []string{}) {
+		t.Fatal("nil 与空切片应相等")
+	}
+}
