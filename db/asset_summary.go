@@ -120,3 +120,85 @@ func (s *AssetStore) CompanyAssetSummary(ctx context.Context, companyIDs []int64
 	b.WriteString(line)
 	return b.String()
 }
+
+// ProjectAssetSummary 按项目聚合的"开局态势"摘要(项目为主轴后的替代口径):
+// 盘子=归属本项目的资产 ∪ 命中项目授权范围的资产(与读侧围栏同语义);
+// 口径/新鲜度语义与 CompanyAssetSummary 一致。
+func (s *AssetStore) ProjectAssetSummary(ctx context.Context, projectID int64) string {
+	if s == nil || s.DB() == nil || projectID <= 0 {
+		return ""
+	}
+	d := s.DB()
+	var b strings.Builder
+	inscope := `a.project_id = $1
+     OR EXISTS (SELECT 1 FROM project_scope ps WHERE ps.project_id=$1
+        AND ((ps.kind='domain' AND a.root_domain = ps.domain)
+          OR (ps.kind IN ('ip','cidr') AND ps.net >>= try_inet(a.ip))))`
+	var n int
+	if err := d.QueryRowContext(ctx, `SELECT count(*) FROM project_scope WHERE project_id=$1`, projectID).Scan(&n); err == nil && n > 0 {
+		fmt.Fprintf(&b, "授权范围: %d 条规则\n", n)
+	}
+	rows, err := d.QueryContext(ctx, `SELECT a.type, count(*) FROM assets a WHERE `+inscope+` GROUP BY a.type ORDER BY count(*) DESC`, projectID)
+	if err != nil {
+		return ""
+	}
+	var counts []string
+	total := 0
+	for rows.Next() {
+		var typ string
+		var cnt int
+		if rows.Scan(&typ, &cnt) != nil {
+			continue
+		}
+		counts = append(counts, fmt.Sprintf("%s:%d", typ, cnt))
+		total += cnt
+	}
+	rows.Close()
+	if total == 0 {
+		return ""
+	}
+	fmt.Fprintf(&b, "资产: %s\n", strings.Join(counts, " "))
+	srows, err := d.QueryContext(ctx, `SELECT url, COALESCE(page_title,''), COALESCE(status_code,0) FROM assets
+		WHERE project_id=$1 AND type='service' AND service_type='http' AND url <> '' AND status_code < 500
+		ORDER BY last_seen DESC LIMIT 10`, projectID)
+	if err == nil {
+		var sites []string
+		for srows.Next() {
+			var u, title string
+			var code int
+			if srows.Scan(&u, &title, &code) != nil {
+				continue
+			}
+			if title != "" {
+				sites = append(sites, fmt.Sprintf("- %s [%d] %s", u, code, title))
+			} else {
+				sites = append(sites, fmt.Sprintf("- %s [%d]", u, code))
+			}
+		}
+		srows.Close()
+		if len(sites) > 0 {
+			fmt.Fprintf(&b, "存活站点(top10):\n  %s\n", strings.Join(sites, "\n  "))
+		}
+	}
+	var roots []string
+	if rrows, rerr := d.QueryContext(ctx, `SELECT domain FROM assets
+		WHERE project_id=$1 AND type='root_domain' AND domain IS NOT NULL AND domain <> ''
+		ORDER BY domain LIMIT 20`, projectID); rerr == nil {
+		for rrows.Next() {
+			var dm string
+			if rrows.Scan(&dm) != nil {
+				continue
+			}
+			roots = append(roots, dm)
+		}
+		rrows.Close()
+	}
+	if len(roots) > 0 {
+		fmt.Fprintf(&b, "根域名: %s\n", strings.Join(roots, ", "))
+	}
+	var lastSeen *time.Time
+	if err := d.QueryRowContext(ctx, `SELECT max(last_seen) FROM assets WHERE project_id=$1`, projectID).Scan(&lastSeen); err == nil && lastSeen != nil {
+		fmt.Fprintf(&b, "数据来源: 平台资产库原生采集(项目维度),最近更新 %s——以此为起点验证,不要当作已验证结论", lastSeen.Local().Format("2006-01-02 15:04"))
+	}
+	return b.String()
+}

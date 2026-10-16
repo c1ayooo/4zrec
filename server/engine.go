@@ -387,15 +387,22 @@ func (e *Engine) ActiveLLMCalls(taskID string) int64 {
 
 func (e *Engine) touch(taskID string) { e.lastAct.Store(taskID, time.Now().Unix()) }
 
-// taskAssetSummary 生成任务公司的开局资产态势（AssetSummary 提示词变量，施工单
-// 变更3）。无 company_ids / 无资产 / 查询失败返回空串——模板条件块吞掉，行为与
-// 接线前一致。每次规划/会话现算而非建任务时缓存：查询只打 company 索引（毫秒级），
-// 换来新鲜度标注（最近同步时间）始终准确。
-func taskAssetSummary(ctx context.Context, m *Manager, companyIDs []int64) string {
-	if m == nil || len(companyIDs) == 0 || m.Assets() == nil {
+// taskAssetSummary 生成任务的开局资产态势（AssetSummary 提示词变量）。
+// 项目为主轴:挂了项目的任务按项目范围聚合(原生采集口径);未挂项目回退
+// 企业口径(存量任务兼容)。无数据/查询失败返回空串——模板条件块吞掉。
+func taskAssetSummary(ctx context.Context, m *Manager, t *Task) string {
+	if m == nil || m.Assets() == nil {
 		return ""
 	}
-	return m.Assets().CompanyAssetSummary(ctx, companyIDs)
+	if t.ProjectID != nil && *t.ProjectID > 0 {
+		if s := m.Assets().ProjectAssetSummary(ctx, *t.ProjectID); s != "" {
+			return s
+		}
+	}
+	if len(t.CompanyIDs) == 0 {
+		return ""
+	}
+	return m.Assets().CompanyAssetSummary(ctx, t.CompanyIDs)
 }
 
 func NewEngine(m *Manager) *Engine {
@@ -889,7 +896,7 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 		triggers := t.drainTriggers()
 		taskIDInt, _ := strconv.ParseInt(t.ID, 10, 64)
 		e.BeginLLMCall(t.ID)
-		met, reason, err := planner.Plan(ectx, taskIDInt, e.m.assets, t.Store, t.Goal, taskAssetSummary(ectx, e.m, t.CompanyIDs), triggers, emit)
+		met, reason, err := planner.Plan(ectx, taskIDInt, e.m.assets, t.Store, t.Goal, taskAssetSummary(ectx, e.m, t), triggers, emit)
 		e.EndLLMCall(t.ID)
 		switch {
 		case err != nil && ectx.Err() == nil:

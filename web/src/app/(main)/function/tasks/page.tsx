@@ -3111,7 +3111,6 @@ function CreateTaskSheet({
   // 归属项目(授权根):undefined=不挂(围栏不启用)
   const [projectID, setProjectID] = React.useState<number | undefined>(undefined);
   const [sourceTaskIDs, setSourceTaskIDs] = React.useState<string[]>([]);
-  const [companyIDs, setCompanyIDs] = React.useState<number[]>([]);
   const [llmProfileIDs, setLLMProfileIDs] = React.useState<string[]>([]);
   const [creating, setCreating] = React.useState(false);
   const [timeoutMin, setTimeoutMin] = React.useState(""); // 任务级超时(分钟);空/0 = 不限时
@@ -3193,7 +3192,6 @@ function CreateTaskSheet({
         goal: goal.trim(),
         llmProfileIds: llmProfileIDs.map(Number),
         sourceTaskIds: sourceTaskIDs,
-        companyIds: companyIDs,
         projectId: projectID,
         timeoutSeconds: timeoutSec,
         seedFirstIntent,
@@ -3210,7 +3208,6 @@ function CreateTaskSheet({
       setGoal("");
       setSelectedTemplateID(null);
       setSourceTaskIDs([]);
-      setCompanyIDs([]);
       setProjectID(undefined);
       setLLMProfileIDs([]);
       setTimeoutMin("");
@@ -3366,19 +3363,7 @@ function CreateTaskSheet({
                 挂到项目后启用资产围栏：项目授权范围内资产自动放行，范围外资产进待审批、批准前不可测试；任务及其产出（资产/漏洞）在项目详情页聚合。
               </FieldDescription>
             </Field>
-            <Field>
-              <FieldLabel htmlFor="task-companies">关联企业资产范围</FieldLabel>
-              <CompanyPicker
-                companies={companies}
-                value={companyIDs}
-                onValueChange={setCompanyIDs}
-                portalContainer={sheetContentRef}
-              />
-              <FieldDescription>
-                创建任务时会将所选企业当前已有资产加入“测试资产”，并将域名、IP、CIDR、ICP 和企业关键词提供给 Agent
-                作为范围上下文；不会自动生成意图或强制改变执行目标。
-              </FieldDescription>
-            </Field>
+
             <Field>
               <FieldLabel htmlFor="task-intercept-rules">任务级资产拦截 / 允许规则（可选）</FieldLabel>
               <AssetInterceptRulesEditor value={interceptRules} onChange={setInterceptRules} />

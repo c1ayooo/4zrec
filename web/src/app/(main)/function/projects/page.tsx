@@ -77,8 +77,6 @@ export default function ProjectsPage() {
   const [createOpen, setCreateOpen] = React.useState(() => searchParams.get("create") === "1");
   const [newName, setNewName] = React.useState("");
   const [newDesc, setNewDesc] = React.useState("");
-  // "" = 不绑定企业;String(company.id) = 创建时挂到该企业
-  const [newCompany, setNewCompany] = React.useState("");
   const [creating, setCreating] = React.useState(false);
 
   // 编辑态含基本信息(名称/描述/归属企业)+ 范围追加;company ""=解绑(发 0)
@@ -151,12 +149,11 @@ export default function ProjectsPage() {
     if (!name) return;
     setCreating(true);
     try {
-      await api.createProject(name, newCompany ? Number(newCompany) : null, newDesc.trim());
+      await api.createProject(name, null, newDesc.trim());
       toast.success(`项目「${name}」已创建`);
       setCreateOpen(false);
       setNewName("");
       setNewDesc("");
-      setNewCompany("");
       await load();
     } catch (e) {
       toast.error(`创建失败: ${e instanceof Error ? e.message : String(e)}`);
@@ -429,9 +426,6 @@ export default function ProjectsPage() {
                       </Link>
                       {p.status === "archived" && <Badge variant="secondary">已归档</Badge>}
                     </div>
-                    {p.company_name && (
-                      <p className="text-muted-foreground mt-1 text-xs">客户：{p.company_name}</p>
-                    )}
                     {p.description && (
                       <p className="text-muted-foreground mt-1 line-clamp-2 text-xs">{p.description}</p>
                     )}
@@ -483,21 +477,6 @@ export default function ProjectsPage() {
           <div className="flex flex-col gap-3">
             <Input placeholder="项目名称（如：XX单位渗透测试）" value={newName} onChange={(e) => setNewName(e.target.value)} />
             <Input placeholder="描述（可选）" value={newDesc} onChange={(e) => setNewDesc(e.target.value)} />
-            <Select value={newCompany || "none"} onValueChange={(v) => setNewCompany(v === "none" ? "" : v)}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">不绑定企业</SelectItem>
-                <SelectGroup>
-                  {companies.map((c) => (
-                    <SelectItem key={c.id} value={String(c.id)}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
             <p className="text-muted-foreground text-xs">
               创建后进入编辑录入授权范围；任务/对话挂到该项目即启用资产围栏。
             </p>
@@ -531,26 +510,7 @@ export default function ProjectsPage() {
               value={edit?.desc ?? ""}
               onChange={(e) => setEdit((v) => (v ? { ...v, desc: e.target.value } : v))}
             />
-            <Select
-              value={edit?.company || "none"}
-              onValueChange={(val) => setEdit((cur) => (cur ? { ...cur, company: val === "none" ? "" : val } : cur))}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">不绑定企业</SelectItem>
-                <SelectGroup>
-                  {companies.map((c) => (
-                    <SelectItem key={c.id} value={String(c.id)}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
             <p className="text-muted-foreground text-xs">
-              项目可挂到客户主体（企业）下，便于按企业归集；不绑定也不影响围栏。
             </p>
             <div className="flex justify-end">
               <Button size="sm" onClick={() => void saveInfo()} disabled={!edit?.name.trim() || savingInfo}>
