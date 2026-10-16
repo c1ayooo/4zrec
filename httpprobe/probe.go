@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"math/rand"
 	"mime/multipart"
@@ -149,7 +150,10 @@ func DoRequest(ctx context.Context, req Request) (*Result, error) {
 			r.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
 		}
 		if r.Header.Get("Accept-Language") == "" {
-			r.Header.Set("Accept-Language", randAcceptLanguage())
+			// 粘性 Accept-Language:与 UA 同理按 host 确定性取值——同一业务
+			// 整套浏览器指纹恒定,跨 host 才不同(2026-10-17 用户口径:
+			// 同一业务不得逐请求换头)。
+			r.Header.Set("Accept-Language", stickyAcceptLanguageForURL(req.URL))
 		}
 	}
 
@@ -369,14 +373,31 @@ func stickyUserAgentForURL(rawURL string) string {
 }
 
 // randAcceptLanguage 常见地区权重随机（配合 UA 的地区特征，避免全站同值）
-func randAcceptLanguage() string {
-	langs := []string{
+// stickyAcceptLanguageForURL 按 host 确定性取 Accept-Language(fnv 散列;
+// 无 host 时退化为随机,与 stickyUserAgentForURL 同构)。
+func stickyAcceptLanguageForURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Hostname() == "" {
+		return randAcceptLanguage()
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(strings.ToLower(u.Hostname())))
+	langs := acceptLanguagePool()
+	return langs[int(h.Sum32())%len(langs)]
+}
+
+func acceptLanguagePool() []string {
+	return []string{
 		"zh-CN,zh;q=0.9,en;q=0.8",
 		"zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
 		"en-US,en;q=0.9,zh-CN;q=0.8",
 		"en-US,en;q=0.5",
 		"zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2",
 	}
+}
+
+func randAcceptLanguage() string {
+	langs := acceptLanguagePool()
 	return langs[rand.Intn(len(langs))]
 }
 

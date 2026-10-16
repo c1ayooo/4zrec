@@ -184,6 +184,7 @@
 
 - **角色内置化 + recon 工具补绑**：planner/worker/mainagent/goals/auto/reporter/recon **全部为内置角色（不可删除，提示词仍可编辑）**——reporter/recon 由自定义提升为内置（存量库 flag 守卫一次性迁移，后端 DeleteAgent 拒删 + 前端隐藏删除按钮双向守卫）。信息收集 agent 的工具绑定改为**动态枚举全部收集工具族**（新加工具不再手抄绑定清单），存量库一次性补绑——`fingerprint_scan`/`http_probe`/`cdn_origin`/`edge_classify`/`legacy_hunter`/`takeover_check`/`dnslog`/`vt_subdomains`/`ai_protocol_scan`/`project_coverage`/`connections_list`/`credential_register` 等 31 个收集工具现对 recon 可见；worker 一直可见（工具默认绑 auto+worker）。
 
+- **同一业务指纹恒定（修复）**：httpprobe 的 Accept-Language 原为逐请求随机——同一目标站每次请求头不一致（UA 已是按 host 粘性）。改为按 host 确定性取值（fnv 散列入池），与 UA 构成**每业务一套恒定浏览器指纹**、跨业务才不同；显式传头仍优先。批量/矩阵差分模式下同一业务的多包现在头完全一致，A/B 对比干净且不留"同 IP 高频换头"的扫描器特征。
 - **http_probe 参数面补全（对齐 4zreco）**：新增便捷头字段（`cookie`/`user_agent`/`content_type`，headers 显式优先）、`random_fingerprint` 开关、multipart 上传三件套（`upload_file`/`upload_field`/`form_fields`）、**批量差分三模式**——`requests` 完整请求数组 / `template`+`matrix`（逐行代入 zip 语义，A/B 差分放两行）/ `template`+`range`（数值遍历），一次发多包逐包摘要（30x 链/状态码/首行），**上限 50 防轰炸**（对齐 4zreco「越权/遍历/差分禁止手写脚本逐发」的口径）。证据板字段（title/group/vulnerability_id/proof）因本仓无证据板未迁。
 
 #### 修复的问题
