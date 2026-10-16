@@ -933,6 +933,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/recon-schedules/{id}", s.reconSchedDelete)
 	mux.HandleFunc("POST /api/recon-schedules/{id}/toggle", s.reconSchedToggle)
 	mux.HandleFunc("POST /api/recon-schedules/{id}/run", s.reconSchedRunNow)
+	mux.HandleFunc("GET /api/recon-runs", s.reconRunsList)
 	// 企业数据源会话配置(凭据只进加密 vault,回显仅元数据)
 	mux.HandleFunc("GET /api/enterprise/providers", s.entProvidersGet)
 	mux.HandleFunc("GET /api/enterprise/sessions", s.entSessionsList)

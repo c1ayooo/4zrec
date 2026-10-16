@@ -152,8 +152,32 @@ func (s *Server) executeEngineSchedule(sched *db.ReconSchedule) (string, int, bo
 // 需在 config 显式开启)。
 func (s *Server) executePipelineSchedule(sched *db.ReconSchedule) (string, int, bool) {
 	opts := pipeline.Options{EnableSubdomain: true, EnableDNS: true}
-	if err := json.Unmarshal(sched.Config, &opts); err != nil {
+	// config 用小写键(前端/工具入参形态);pipeline.Options 无 json tag,先解到
+	// 影子结构再映射,避免大小写不匹配落回默认值(全阶段误开)。
+	var cfgShadow struct {
+		Domains   []string `json:"domains"`
+		Subdomain *bool    `json:"subdomain"`
+		Permute   *bool    `json:"permute"`
+		Brute     *bool    `json:"brute"`
+		DNS       *bool    `json:"dns"`
+		Portscan  *bool    `json:"portscan"`
+		HTTP      *bool    `json:"http"`
+		Ports     string   `json:"ports"`
+	}
+	if err := json.Unmarshal(sched.Config, &cfgShadow); err != nil {
 		return "config 解析失败: " + err.Error(), 0, false
+	}
+	opts.Domains = cfgShadow.Domains
+	opts.PortsSet = cfgShadow.Ports
+	for _, kv := range []struct {
+		p *bool
+		d *bool
+	}{{cfgShadow.Subdomain, &opts.EnableSubdomain}, {cfgShadow.Permute, &opts.EnablePermute},
+		{cfgShadow.Brute, &opts.EnableBrute}, {cfgShadow.DNS, &opts.EnableDNS},
+		{cfgShadow.Portscan, &opts.EnablePortscan}, {cfgShadow.HTTP, &opts.EnableHTTP}} {
+		if kv.p != nil {
+			*kv.d = *kv.p
+		}
 	}
 	if len(opts.Domains) == 0 {
 		return "config.domains 为空,跳过", 0, false
@@ -175,11 +199,33 @@ func (s *Server) executePipelineSchedule(sched *db.ReconSchedule) (string, int, 
 			}
 		}
 	}
-	stats, runErr := pipeline.Run(context.Background(), opts, s.m.pg, nil)
+	// 每轮落一行运行记录(schedule_id 关联,前端展开运行历史)。
+	cfgRaw, _ := json.Marshal(map[string]any{"subdomain": opts.EnableSubdomain, "dns": opts.EnableDNS,
+		"portscan": opts.EnablePortscan, "http": opts.EnableHTTP})
+	runID, rerr := s.m.pg.CreateReconRunForSchedule(context.Background(), projectID, sched.ID, opts.Domains, cfgRaw)
+	if rerr != nil {
+		log.Printf("[recon-sched] 任务 #%d 运行记录创建失败(继续执行): %v", sched.ID, rerr)
+	}
+	stats, runErr := pipeline.Run(context.Background(), opts, s.m.pg, func(stage string, st pipeline.Stats) {
+		if runID > 0 {
+			_ = s.m.pg.UpdateReconRunProgress(context.Background(), runID, stage, pipeline.MarshalStats(st))
+		}
+	})
+	if runID > 0 {
+		var finalStats json.RawMessage
+		if stats != nil {
+			finalStats = pipeline.MarshalStats(*stats)
+		}
+		stage := "dns"
+		if runErr != nil {
+			stage = "interrupted"
+		}
+		_ = s.m.pg.FinishReconRun(context.Background(), runID, stage, finalStats, errStr(runErr))
+	}
 	if runErr != nil {
 		return fmt.Sprintf("流水线中断: %v", runErr), 0, false
 	}
-	return fmt.Sprintf("候选 %d/活 %d/新 %d/端口 %d/http %d", stats.Candidates, stats.Live, stats.NewAssets, stats.OpenPorts, stats.HTTPAlive),
+	return fmt.Sprintf("候选 %d/活 %d/新 %d/端口 %d/http %d(run #%d)", stats.Candidates, stats.Live, stats.NewAssets, stats.OpenPorts, stats.HTTPAlive, runID),
 		stats.NewAssets, false
 }
 
@@ -312,6 +358,26 @@ func (s *Server) reconSchedToggle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// reconRunsList 运行历史(schedule_id 过滤,倒序)。
+func (s *Server) reconRunsList(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	sid, _ := strconv.ParseInt(r.URL.Query().Get("schedule_id"), 10, 64)
+	if sid <= 0 {
+		writeErr(w, 400, "schedule_id 必填")
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	runs, err := pg.ListReconRunsForSchedule(r.Context(), sid, limit)
+	if err != nil {
+		writeErr(w, 500, "db: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"runs": runs})
 }
 
 func (s *Server) reconSchedRunNow(w http.ResponseWriter, r *http.Request) {

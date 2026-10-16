@@ -66,6 +66,7 @@ import type {
   MCPServer,
   EntProvider,
   IntelKey,
+  ReconRun,
   ReconSchedule,
   SpacemapEngine,
   MCPTool,
@@ -1185,6 +1186,8 @@ export const api = {
   toggleReconSchedule: (id: number, enabled: boolean) =>
     post<{ ok: boolean }>(`/recon-schedules/${id}/toggle`, { enabled }),
   runReconScheduleNow: (id: number) => post<{ ok: boolean }>(`/recon-schedules/${id}/run`, {}),
+  reconRuns: (scheduleId: number, limit = 5) =>
+    get<{ runs: ReconRun[] }>(`/recon-runs?schedule_id=${scheduleId}&limit=${limit}`).then((r) => arr(r.runs)),
 
   // ---- 企业数据源会话 ----
   entProviders: () =>

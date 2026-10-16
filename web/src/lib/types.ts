@@ -1249,6 +1249,29 @@ export interface EntProvider {
   configured: boolean;
 }
 
+// ---- 测绘流水线运行记录 ----
+export interface ReconRun {
+  id: number;
+  project_id?: number | null;
+  schedule_id?: number | null;
+  domains: string[];
+  config: Record<string, unknown> | null;
+  status: "running" | "done" | "failed";
+  stage: string;
+  stats: {
+    candidates?: number;
+    live?: number;
+    new_assets?: number;
+    open_ports?: number;
+    http_alive?: number;
+    levels?: Record<string, number>;
+    errors?: string[];
+  } | null;
+  error: string;
+  created_at: string;
+  finished_at?: string | null;
+}
+
 // ---- 周期采集任务 ----
 export interface ReconSchedule {
   id: number;

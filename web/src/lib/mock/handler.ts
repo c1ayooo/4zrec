@@ -2395,6 +2395,22 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     };
   if (path === "/spacemap/intelkeys" && m === "POST") return { keys: [] };
 
+  // ── 流水线运行历史（demo）──
+  if (path === "/recon-runs")
+    return {
+      runs: [
+        {
+          id: 21, schedule_id: 1, domains: ["example.com"], config: null, status: "done", stage: "http",
+          stats: { candidates: 42, live: 31, new_assets: 2, open_ports: 57, http_alive: 23 },
+          error: "", created_at: "2026-10-16T12:00:00Z", finished_at: "2026-10-16T12:03:41Z",
+        },
+        {
+          id: 20, schedule_id: 1, domains: ["example.com"], config: null, status: "failed", stage: "interrupted",
+          stats: null, error: "context canceled", created_at: "2026-10-16T11:30:00Z", finished_at: "2026-10-16T11:31:02Z",
+        },
+      ],
+    };
+
   // ── 周期采集任务（demo）──
   if (path === "/recon-schedules" && m === "GET")
     return {

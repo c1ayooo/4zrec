@@ -129,3 +129,39 @@ func TestReconScheduleBackoff(t *testing.T) {
 		t.Fatalf("熔断解除后应可正常调度: %v", due)
 	}
 }
+
+// TestSchedulePipelineCreatesRun 周期 pipeline 执行落运行历史行(schedule_id 关联)。
+func TestSchedulePipelineCreatesRun(t *testing.T) {
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Skipf("postgres unavailable (%v)", err)
+	}
+	defer m.Close()
+	s := &Server{m: m}
+
+	cfg, _ := json.Marshal(map[string]any{
+		"domains": []string{"no-run.example"}, "subdomain": false, "dns": false,
+		"portscan": false, "http": false, "permute": false, "brute": false,
+	})
+	id, err := m.pg.CreateReconSchedule(context.Background(), &db.ReconSchedule{
+		Name: "运行历史测试", Kind: "pipeline", Config: cfg, IntervalSec: 3600,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = m.pg.Exec(`DELETE FROM recon_schedules`) }()
+
+	result, _, _ := s.executePipelineSchedule(&db.ReconSchedule{
+		ID: id, Kind: "pipeline", Config: cfg, IntervalSec: 3600,
+	})
+	if !strings.Contains(result, "run #") {
+		t.Fatalf("结果应引用 run id: %s", result)
+	}
+	runs, err := m.pg.ListReconRunsForSchedule(context.Background(), id, 5)
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("运行历史应有一行: %v %v", runs, err)
+	}
+	if runs[0].ScheduleID == nil || *runs[0].ScheduleID != id || runs[0].Status != "done" {
+		t.Fatalf("运行行关联/状态不符: %+v", runs[0])
+	}
+}

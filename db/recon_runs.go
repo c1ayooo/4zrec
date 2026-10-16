@@ -25,6 +25,7 @@ func splitDomains(joined string) []string {
 type ReconRun struct {
 	ID         int64           `json:"id"`
 	ProjectID  *int64          `json:"project_id,omitempty"`
+	ScheduleID *int64          `json:"schedule_id,omitempty"`
 	Domains    []string        `json:"domains"`
 	Config     json.RawMessage `json:"config"`
 	Status     string          `json:"status"` // running|done|failed
@@ -35,15 +36,45 @@ type ReconRun struct {
 	FinishedAt *time.Time      `json:"finished_at,omitempty"`
 }
 
-const reconRunCols = `id, project_id, domains, config, status, stage, stats, error, created_at, finished_at`
+const reconRunCols = `id, project_id, schedule_id, domains, config, status, stage, stats, error, created_at, finished_at`
 
 // CreateReconRun 建一行 running 记录并返回 id。
 func (d *DB) CreateReconRun(ctx context.Context, projectID int64, domains []string, config json.RawMessage) (int64, error) {
+	return d.CreateReconRunForSchedule(ctx, projectID, 0, domains, config)
+}
+
+// CreateReconRunForSchedule 周期任务发起的运行(schedule_id>0 时关联)。
+func (d *DB) CreateReconRunForSchedule(ctx context.Context, projectID, scheduleID int64, domains []string, config json.RawMessage) (int64, error) {
 	var id int64
 	err := d.QueryRowContext(ctx, `
-INSERT INTO recon_runs(project_id, domains, config) VALUES (NULLIF($1,0), $2, COALESCE($3,'{}'::jsonb))
-RETURNING id`, projectID, strings.Join(domains, ","), config).Scan(&id)
+INSERT INTO recon_runs(project_id, schedule_id, domains, config)
+VALUES (NULLIF($1,0), NULLIF($2,0), $3, COALESCE($4,'{}'::jsonb))
+RETURNING id`, projectID, scheduleID, strings.Join(domains, ","), config).Scan(&id)
 	return id, err
+}
+
+// ListReconRunsForSchedule 某周期任务的运行历史(倒序)。
+func (d *DB) ListReconRunsForSchedule(ctx context.Context, scheduleID int64, limit int) ([]*ReconRun, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	rows, err := d.QueryContext(ctx, `SELECT `+reconRunCols+` FROM recon_runs
+		WHERE schedule_id=$1 ORDER BY id DESC LIMIT $2`, scheduleID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*ReconRun
+	for rows.Next() {
+		r := &ReconRun{}
+		var domains string
+		if err := rows.Scan(&r.ID, &r.ProjectID, &r.ScheduleID, &domains, &r.Config, &r.Status, &r.Stage, &r.Stats, &r.Error, &r.CreatedAt, &r.FinishedAt); err != nil {
+			return nil, err
+		}
+		r.Domains = splitDomains(domains)
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // UpdateReconRunProgress 回写进度(阶段名 + 统计;status 保持 running)。
@@ -70,7 +101,7 @@ func (d *DB) GetReconRun(ctx context.Context, id int64) (*ReconRun, error) {
 	r := &ReconRun{}
 	var domains string
 	err := d.QueryRowContext(ctx, `SELECT `+reconRunCols+` FROM recon_runs WHERE id=$1`, id).
-		Scan(&r.ID, &r.ProjectID, &domains, &r.Config, &r.Status, &r.Stage, &r.Stats, &r.Error, &r.CreatedAt, &r.FinishedAt)
+		Scan(&r.ID, &r.ProjectID, &r.ScheduleID, &domains, &r.Config, &r.Status, &r.Stage, &r.Stats, &r.Error, &r.CreatedAt, &r.FinishedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +131,7 @@ func (d *DB) ListReconRuns(ctx context.Context, projectID int64, limit, offset i
 	for rows.Next() {
 		r := &ReconRun{}
 		var domains string
-		if err := rows.Scan(&r.ID, &r.ProjectID, &domains, &r.Config, &r.Status, &r.Stage, &r.Stats, &r.Error, &r.CreatedAt, &r.FinishedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.ProjectID, &r.ScheduleID, &domains, &r.Config, &r.Status, &r.Stage, &r.Stats, &r.Error, &r.CreatedAt, &r.FinishedAt); err != nil {
 			return nil, err
 		}
 		r.Domains = splitDomains(domains)

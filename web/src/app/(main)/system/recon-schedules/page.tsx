@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { CalendarClockIcon, Loader2Icon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { CalendarClockIcon, ChevronDownIcon, ChevronRightIcon, HistoryIcon, Loader2Icon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -13,13 +13,15 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
-import type { ReconSchedule } from "@/lib/types";
+import type { ReconRun, ReconSchedule } from "@/lib/types";
 
 // 周期采集任务管理:engine=五引擎按域采集,pipeline=主动测绘流水线(周期版默认
 // 只跑被动+解析)。与 LLM/空间测绘设置页同风格;鉴权失败自动退避,新资产走通知。
 export default function ReconSchedulesPage() {
   const [list, setList] = React.useState<ReconSchedule[] | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
+  const [openRuns, setOpenRuns] = React.useState<number | null>(null);
+  const [runs, setRuns] = React.useState<Record<number, ReconRun[]>>({});
   // 新建表单
   const [name, setName] = React.useState("");
   const [kind, setKind] = React.useState<"engine" | "pipeline">("engine");
@@ -60,6 +62,20 @@ export default function ReconSchedulesPage() {
       setName("");
       setDomains("");
       await load();
+    } catch (err) {
+      toast.error(String(err instanceof Error ? err.message : err));
+    }
+  };
+
+  const toggleRuns = async (id: number) => {
+    if (openRuns === id) {
+      setOpenRuns(null);
+      return;
+    }
+    setOpenRuns(id);
+    try {
+      const rs = await api.reconRuns(id, 5);
+      setRuns((prev) => ({ ...prev, [id]: rs }));
     } catch (err) {
       toast.error(String(err instanceof Error ? err.message : err));
     }
@@ -143,6 +159,23 @@ export default function ReconSchedulesPage() {
           {list.map((sc) => (
             <Card key={sc.id}>
               <CardContent className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex w-full items-center gap-1">
+                  {sc.kind === "pipeline" ? (
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs"
+                      onClick={() => void toggleRuns(sc.id)}
+                    >
+                      {openRuns === sc.id ? (
+                        <ChevronDownIcon className="size-3.5" />
+                      ) : (
+                        <ChevronRightIcon className="size-3.5" />
+                      )}
+                      <HistoryIcon className="size-3.5" />
+                      运行历史
+                    </button>
+                  ) : null}
+                </div>
                 <div className="min-w-0 flex-1 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <CalendarClockIcon className="text-muted-foreground size-4" />
@@ -172,6 +205,32 @@ export default function ReconSchedulesPage() {
                   </Button>
                 </div>
               </CardContent>
+              {openRuns === sc.id ? (
+                <CardContent className="border-t pt-3">
+                  {(runs[sc.id] ?? []).length === 0 ? (
+                    <p className="text-muted-foreground text-xs">暂无运行记录(每轮流水线执行落一行)。</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {(runs[sc.id] ?? []).map((run) => (
+                        <div key={run.id} className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
+                          <span className="font-mono">#{run.id}</span>
+                          <Badge variant={run.status === "done" ? "default" : run.status === "failed" ? "destructive" : "outline"}>
+                            {run.status}
+                          </Badge>
+                          <span>{new Date(run.created_at).toLocaleString()}</span>
+                          {run.stats ? (
+                            <span>
+                              候选 {run.stats.candidates ?? 0} · 活 {run.stats.live ?? 0} · 新 {run.stats.new_assets ?? 0} · 端口{" "}
+                              {run.stats.open_ports ?? 0} · http {run.stats.http_alive ?? 0}
+                            </span>
+                          ) : null}
+                          {run.error ? <span className="text-destructive">{run.error}</span> : null}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              ) : null}
             </Card>
           ))}
         </div>
