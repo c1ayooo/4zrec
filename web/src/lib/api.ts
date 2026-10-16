@@ -71,6 +71,7 @@ import type {
   FingerprintSource,
   IntelKey,
   SpacemapResultRow,
+  SpacemapSearchRow,
   ReconRun,
   ReconSchedule,
   SpacemapEngine,
@@ -1188,6 +1189,15 @@ export const api = {
       `/fingerprint/rules?${q.toString()}`,
     );
   },
+  spacemapSearch: (body: { engine: string; query: string; size?: number; project_id?: number; auto_import?: boolean }) =>
+    post<{
+      engine: string;
+      query: string;
+      total: number;
+      count: number;
+      rows: SpacemapSearchRow[];
+      imported?: { domains: number; ips: number; services: number; project_id: number };
+    }>("/spacemap/search", body),
   spacemapResults: (params: { engine?: string; type?: string; projectId?: number; page?: number; size?: number }) => {
     const q = new URLSearchParams();
     if (params.engine) q.set("engine", params.engine);

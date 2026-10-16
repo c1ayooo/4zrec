@@ -944,6 +944,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/enterprise/import", s.entImport)
 	// 空间测绘结果页
 	mux.HandleFunc("GET /api/spacemap/results", s.spacemapResultsList)
+	mux.HandleFunc("POST /api/spacemap/search", s.spacemapSearch)
 	// 指纹规则库(只读展示,规则由 24h 上游自动同步维护)
 	mux.HandleFunc("GET /api/fingerprint/rules", s.fingerprintRulesList)
 	// Skill CRUD (文件系统)

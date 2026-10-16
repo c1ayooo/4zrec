@@ -1229,6 +1229,19 @@ export interface MCPServer {
   tools?: string[]; // mcp_tools_cache (names only, for the count)
 }
 
+// ---- 空间测绘搜索行(引擎原始返回归一化,不落库) ----
+export interface SpacemapSearchRow {
+  host: string;
+  domain: string;
+  ip: string;
+  port: number;
+  title: string;
+  protocol: string;
+  server: string;
+  country: string;
+  city: string;
+}
+
 // ---- 空间测绘结果 ----
 export interface SpacemapResultRow {
   id: number;

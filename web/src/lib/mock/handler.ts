@@ -2426,6 +2426,16 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       ],
     };
 
+  // ── 空间测绘搜索台（demo）──
+  if (path === "/spacemap/search" && m === "POST")
+    return {
+      engine: "FOFA", query: String(b.query ?? ""), total: 2, count: 2,
+      rows: [
+        { host: "www.example.com", domain: "www.example.com", ip: "1.2.3.4", port: 443, title: "官网", protocol: "https", server: "nginx", country: "中国", city: "北京" },
+        { host: "api.example.com", domain: "api.example.com", ip: "1.2.3.5", port: 8443, title: "API", protocol: "https", server: "gateway", country: "中国", city: "上海" },
+      ],
+    };
+
   // ── 空间测绘结果（demo）──
   if (path === "/spacemap/results")
     return {

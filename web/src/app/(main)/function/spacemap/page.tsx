@@ -2,40 +2,37 @@
 
 import * as React from "react";
 
-import { Loader2Icon, RadarIcon } from "lucide-react";
+import { Loader2Icon, RadarIcon, SearchIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api";
-import type { Project, SpacemapResultRow } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import type { Project, SpacemapSearchRow } from "@/lib/types";
 
-// 空间测绘结果页:五引擎采集入库的资产,按引擎筛选(来源标注写在资产上,
-// 配置面在 系统管理 → 空间测绘配置)。
-const typeLabels: Record<string, string> = {
-  root_domain: "根域名",
-  subdomain: "子域名",
-  ip: "IP",
-  service: "服务",
-  app: "App",
-  endpoint: "端点",
+// 空间测绘搜索台:手工调用五引擎查询,直接看引擎返回(不自动入库);
+// 需要沉淀进资产库时选项目「查询并入库」。历史资产在资产页按项目看,不在本页。
+const ENGINE_SYNTAX: Record<string, { display: string; hint: string; sample: string }> = {
+  fofa: { display: "FOFA", hint: 'domain="example.com"', sample: 'domain="example.com" && status_code="200"' },
+  zoomeye: { display: "ZoomEye", hint: 'domain="example.com"', sample: 'hostname:"example.com"' },
+  quake: { display: "Quake", hint: 'domain:"example.com"', sample: 'domain:"example.com"' },
+  shodan: { display: "Shodan", hint: "hostname:example.com", sample: "org:Example Inc" },
+  hunter: { display: "Hunter", hint: 'domain.suffix="example.com"', sample: 'icp.number="京ICP备xxxx号"' },
 };
 
-export default function SpacemapResultsPage() {
-  const [rows, setRows] = React.useState<SpacemapResultRow[] | null>(null);
-  const [total, setTotal] = React.useState(0);
-  const [engines, setEngines] = React.useState<{ provider: string; display: string }[]>([]);
-  const [projects, setProjects] = React.useState<Project[]>([]);
-  const [engine, setEngine] = React.useState("");
-  const [typ, setTyp] = React.useState("");
-  // 项目为主轴:按项目拆开看,信息收集结果自动归属对话挂载的项目。
+export default function SpacemapSearchPage() {
+  const [engine, setEngine] = React.useState("fofa");
+  const [query, setQuery] = React.useState("");
+  const [size, setSize] = React.useState("100");
   const [projectID, setProjectID] = React.useState("");
-  const [page, setPage] = React.useState(1);
+  const [projects, setProjects] = React.useState<Project[]>([]);
+  const [rows, setRows] = React.useState<SpacemapSearchRow[] | null>(null);
+  const [total, setTotal] = React.useState(0);
+  const [importedNote, setImportedNote] = React.useState("");
   const [loading, setLoading] = React.useState(false);
-  const pageSize = 50;
 
   React.useEffect(() => {
     api
@@ -44,34 +41,34 @@ export default function SpacemapResultsPage() {
       .catch(() => {});
   }, []);
 
-  const load = React.useCallback(async () => {
+  const run = async (autoImport: boolean) => {
+    if (!query.trim()) {
+      toast.error("输入查询语句");
+      return;
+    }
     setLoading(true);
+    setImportedNote("");
     try {
-      const res = await api.spacemapResults({
+      const res = await api.spacemapSearch({
         engine,
-        type: typ,
-        projectId: projectID ? Number(projectID) : undefined,
-        page,
-        size: pageSize,
+        query: query.trim(),
+        size: Math.max(1, Number(size) || 100),
+        project_id: projectID ? Number(projectID) : undefined,
+        auto_import: autoImport,
       });
-      setRows(res.results);
+      setRows(res.rows);
       setTotal(res.total);
-      if (res.engines.length) setEngines(res.engines);
+      if (res.imported) {
+        setImportedNote(
+          `已入库:域名 ${res.imported.domains} / IP ${res.imported.ips} / 服务 ${res.imported.services}` +
+            (res.imported.project_id > 0 ? ` → 项目 ${res.imported.project_id}` : " → 未挂项目(仅入库)"),
+        );
+      }
     } catch (err) {
       toast.error(String(err instanceof Error ? err.message : err));
     } finally {
       setLoading(false);
     }
-  }, [engine, typ, projectID, page]);
-
-  React.useEffect(() => {
-    void load();
-  }, [load]);
-
-  const authzBadge = (authz?: string | null) => {
-    if (authz === "pending") return <Badge variant="outline">待审批</Badge>;
-    if (authz === "rejected") return <Badge variant="destructive">已拒绝</Badge>;
-    return <Badge variant="default">已授权</Badge>;
   };
 
   return (
@@ -79,153 +76,122 @@ export default function SpacemapResultsPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">空间测绘</h1>
         <p className="text-muted-foreground mt-1 text-sm">
-          五引擎（FOFA / ZoomEye / Quake / Shodan / Hunter）采集入库的资产，按引擎筛选。引擎 Key 在{" "}
-          <span className="text-foreground">系统管理 → 空间测绘配置</span> 维护；agent 的 space_search /
-          space_search_batch 采集结果实时落在这里。
+          手工调用空间测绘引擎,直接看引擎返回结果(不自动入库)。需要沉淀进资产库时选项目「查询并入库」;
+          历史采集内容在资产页按项目看。引擎 Key 在 系统管理 → 空间测绘配置 维护。
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          variant={engine === "" ? "default" : "outline"}
-          size="sm"
-          onClick={() => {
-            setEngine("");
-            setPage(1);
-          }}
-        >
-          全部引擎
-        </Button>
-        {engines.map((e) => (
-          <Button
-            key={e.provider}
-            variant={engine === e.display ? "default" : "outline"}
-            size="sm"
-            onClick={() => {
-              setEngine(e.display);
-              setPage(1);
-            }}
-          >
-            {e.display}
-          </Button>
-        ))}
-        <div className="ml-auto flex items-center gap-2">
-          <Select
-            value={projectID || "all"}
-            onValueChange={(v) => {
-              setProjectID(v === "all" ? "" : v);
-              setPage(1);
-            }}
-          >
-            <SelectTrigger className="w-44">
-              <SelectValue placeholder="项目" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">全部项目</SelectItem>
-              {projects.map((p) => (
-                <SelectItem key={p.id} value={String(p.id)}>
-                  {p.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select
-            value={typ || "all"}
-            onValueChange={(v) => {
-              setTyp(v === "all" ? "" : v);
-              setPage(1);
-            }}
-          >
-            <SelectTrigger className="w-32">
-              <SelectValue placeholder="资产类型" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">全部类型</SelectItem>
-              {Object.entries(typeLabels).map(([k, v]) => (
-                <SelectItem key={k} value={k}>
-                  {v}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
       <Card>
-        <CardContent className="px-0">
-          {rows === null || loading ? (
-            <div className="text-muted-foreground flex items-center justify-center gap-2 py-10 text-sm">
-              <Loader2Icon className="size-4 animate-spin" /> 加载中…
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            {Object.entries(ENGINE_SYNTAX).map(([key, meta]) => (
+              <Button
+                key={key}
+                variant={engine === key ? "default" : "outline"}
+                size="sm"
+                onClick={() => setEngine(key)}
+              >
+                {meta.display}
+              </Button>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-72 flex-1">
+              <SearchIcon className="text-muted-foreground absolute top-2.5 left-2.5 size-4" />
+              <Input
+                className="pl-8 font-mono"
+                placeholder={ENGINE_SYNTAX[engine]?.sample}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void run(false);
+                }}
+              />
             </div>
-          ) : rows.length === 0 ? (
-            <div className="text-muted-foreground flex flex-col items-center gap-2 py-12 text-sm">
-              <RadarIcon className="size-6 opacity-40" />
-              暂无测绘结果——在对话里让 agent 跑 space_search / space_search_batch，或等周期采集任务执行。
+            <Input
+              className="w-24"
+              type="number"
+              title="返回条数"
+              value={size}
+              onChange={(e) => setSize(e.target.value)}
+            />
+            <Select value={projectID || "none"} onValueChange={setProjectID}>
+              <SelectTrigger className="w-44">
+                <SelectValue placeholder="入库项目(可选)" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">不入库</SelectItem>
+                {projects.map((p) => (
+                  <SelectItem key={p.id} value={String(p.id)}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="outline" disabled={loading} onClick={() => void run(false)}>
+              {loading ? <Loader2Icon className="size-4 animate-spin" /> : <SearchIcon className="size-4" />}
+              查询
+            </Button>
+            <Button disabled={loading || !projectID} onClick={() => void run(true)}>
+              查询并入库
+            </Button>
+          </div>
+          <p className="text-muted-foreground text-xs">
+            {engine.toUpperCase()} 语法示例:<code>{ENGINE_SYNTAX[engine]?.hint}</code>
+            {projectID ? " · 已选入库项目,「查询并入库」结果自动归属该项目(范围内自动授权)" : ""}
+          </p>
+        </CardContent>
+      </Card>
+
+      {rows === null ? (
+        <div className="text-muted-foreground flex flex-col items-center gap-2 py-12 text-sm">
+          <RadarIcon className="size-6 opacity-40" />
+          输入查询语句开始搜索
+        </div>
+      ) : (
+        <Card>
+          <CardContent className="px-0">
+            <div className="flex flex-wrap items-center gap-2 px-4 pb-2">
+              <Badge variant="outline">{ENGINE_SYNTAX[engine]?.display}</Badge>
+              <span className="text-muted-foreground text-xs">
+                引擎命中 {total} 条,本次返回 {rows.length} 条
+              </span>
+              {importedNote ? <Badge variant="default">{importedNote}</Badge> : null}
             </div>
-          ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-muted-foreground border-b text-left">
-                    <th className="px-4 py-2 font-medium">类型</th>
-                    <th className="px-4 py-2 font-medium">目标</th>
+                    <th className="px-4 py-2 font-medium">主机</th>
+                    <th className="px-4 py-2 font-medium">域名</th>
+                    <th className="px-4 py-2 font-medium">IP</th>
                     <th className="px-4 py-2 font-medium">端口</th>
                     <th className="px-4 py-2 font-medium">标题</th>
-                    <th className="px-4 py-2 font-medium">授权</th>
-                    <th className="px-4 py-2 font-medium">引擎</th>
-                    <th className="px-4 py-2 font-medium">指纹</th>
-                    <th className="px-4 py-2 font-medium">最近更新</th>
+                    <th className="px-4 py-2 font-medium">协议</th>
+                    <th className="px-4 py-2 font-medium">Server</th>
+                    <th className="px-4 py-2 font-medium">位置</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r) => (
-                    <tr key={r.id} className="border-b last:border-0">
-                      <td className="px-4 py-2 whitespace-nowrap">{typeLabels[r.type] ?? r.type}</td>
-                      <td className="max-w-72 truncate px-4 py-2 font-mono">{r.label}</td>
+                  {rows.map((r, i) => (
+                    <tr key={i} className="border-b last:border-0">
+                      <td className="px-4 py-2 font-mono">{r.host || "-"}</td>
+                      <td className="px-4 py-2 font-mono">{r.domain || "-"}</td>
+                      <td className="px-4 py-2 font-mono">{r.ip || "-"}</td>
                       <td className="px-4 py-2">{r.port || "-"}</td>
                       <td className="max-w-60 truncate px-4 py-2">{r.title || "-"}</td>
-                      <td className="px-4 py-2">{authzBadge(r.authz)}</td>
-                      <td className="px-4 py-2">
-                        <Badge variant="outline" className={cn("font-mono")}>
-                          {r.source}
-                        </Badge>
-                      </td>
-                      <td className="max-w-48 truncate px-4 py-2 text-muted-foreground">
-                        {(r.technologies ?? []).length ? r.technologies.slice(0, 3).join(", ") : "-"}
-                      </td>
+                      <td className="px-4 py-2">{r.protocol || "-"}</td>
+                      <td className="max-w-40 truncate px-4 py-2">{r.server || "-"}</td>
                       <td className="text-muted-foreground px-4 py-2 whitespace-nowrap">
-                        {new Date(r.last_seen).toLocaleString()}
+                        {[r.country, r.city].filter(Boolean).join(" ") || "-"}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {total > pageSize ? (
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">
-            共 {total} 条 · 第 {page} / {Math.ceil(total / pageSize)} 页
-          </span>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={page <= 1 || loading} onClick={() => setPage((p) => p - 1)}>
-              上一页
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= Math.ceil(total / pageSize) || loading}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              下一页
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <p className="text-muted-foreground text-right text-xs">共 {total} 条</p>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

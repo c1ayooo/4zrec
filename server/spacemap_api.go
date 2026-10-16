@@ -483,3 +483,63 @@ func strconvAtoiDefault(s string, def int) int {
 	}
 	return n
 }
+
+// ---------- HTTP: POST /api/spacemap/search(手工搜索台) ----------
+
+// spacemapSearch 手动执行一次引擎查询并返回归一化结果(不落资产库);
+// auto_import=true 时连同入库(项目缺省取会话挂载)。前端搜索台与 agent 的
+// space_search 同一后端通道。
+func (s *Server) spacemapSearch(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	var in struct {
+		Engine     string `json:"engine"`
+		Query      string `json:"query"`
+		Size       int    `json:"size"`
+		ProjectID  int64  `json:"project_id"`
+		AutoImport bool   `json:"auto_import"`
+	}
+	if err := decode(r, &in); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	results, _, total, err := s.spacemapClient().SearchEngineAssets(r.Context(), in.Engine, in.Query, in.Size, 1)
+	if err != nil {
+		writeErr(w, 502, err.Error())
+		return
+	}
+	type searchRow struct {
+		Host     string `json:"host"`
+		Domain   string `json:"domain"`
+		IP       string `json:"ip"`
+		Port     int    `json:"port"`
+		Title    string `json:"title"`
+		Protocol string `json:"protocol"`
+		Server   string `json:"server"`
+		Country  string `json:"country"`
+		City     string `json:"city"`
+	}
+	out := make([]searchRow, 0, len(results))
+	for _, r2 := range results {
+		out = append(out, searchRow{
+			Host: r2.Host, Domain: r2.Domain, IP: r2.IP, Port: r2.Port,
+			Title: r2.Title, Protocol: r2.Protocol, Server: r2.Server,
+			Country: r2.Country, City: r2.City,
+		})
+	}
+	resp := map[string]any{
+		"engine": spacemap.ProviderDisplayName(in.Engine),
+		"query":  in.Query,
+		"total":  total,
+		"count":  len(out),
+		"rows":   out,
+	}
+	if in.AutoImport {
+		projectID := s.roeProjectID(r.Context(), in.ProjectID)
+		d, i, sv := s.spacemapImport(r.Context(), projectID, 0, results)
+		resp["imported"] = map[string]any{"domains": d, "ips": i, "services": sv, "project_id": projectID}
+	}
+	writeJSON(w, 200, resp)
+}

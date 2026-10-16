@@ -10,13 +10,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
-import type { FingerprintRule, FingerprintSource } from "@/lib/types";
+import type { FingerprintRule } from "@/lib/types";
 
 // 指纹规则库(只读展示):规则由 24h 上游自动同步维护(wappalyzergo/webanalyze/dddd
 // 三源 + 快照兜底),本页提供搜索、来源分布与同步状态;fingerprint_scan 工具读这里。
 export default function FingerprintPage() {
   const [rules, setRules] = React.useState<FingerprintRule[] | null>(null);
-  const [sources, setSources] = React.useState<FingerprintSource[]>([]);
   const [enabled, setEnabled] = React.useState(0);
   const [total, setTotal] = React.useState(0);
   const [page, setPage] = React.useState(1);
@@ -31,7 +30,6 @@ export default function FingerprintPage() {
       setRules(res.rules);
       setTotal(res.total);
       setEnabled(res.enabled);
-      setSources(res.sources);
     } catch (err) {
       toast.error(String(err instanceof Error ? err.message : err));
     } finally {
@@ -48,31 +46,11 @@ export default function FingerprintPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">指纹规则库</h1>
         <p className="text-muted-foreground mt-1 text-sm">
-          Web 指纹规则(启用 {enabled} 条)。规则由上游自动同步(24h 周期,失败走内置快照兜底),无需手工维护;
-          fingerprint_scan 工具与 enrich 指纹链路读这里。
+          统一指纹规则库(启用 {enabled} 条,多源归一存储)。规则由上游自动同步(24h 周期,失败走内置快照兜底),
+          无需手工维护;fingerprint_scan 工具与 enrich 指纹链路读这里。
         </p>
       </div>
 
-      {sources.length > 0 ? (
-        <div className="grid gap-4 md:grid-cols-3">
-          {sources.map((s) => (
-            <Card key={s.name}>
-              <CardContent className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <FingerprintIcon className="text-muted-foreground size-4" />
-                    <span className="font-medium">{s.name}</span>
-                  </div>
-                  <Badge variant="outline">{s.rule_count} 条</Badge>
-                </div>
-                <p className="text-muted-foreground truncate text-xs">
-                  {s.fetched_at ? `最近同步 ${new Date(s.fetched_at).toLocaleString()}` : "尚未同步"}
-                </p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      ) : null}
 
       <Card>
         <CardContent className="px-0">
@@ -116,7 +94,6 @@ export default function FingerprintPage() {
                     <th className="px-4 py-2 font-medium">产品</th>
                     <th className="px-4 py-2 font-medium">类别</th>
                     <th className="px-4 py-2 font-medium">匹配表达式</th>
-                    <th className="px-4 py-2 font-medium">来源</th>
                     <th className="px-4 py-2 font-medium">状态</th>
                   </tr>
                 </thead>
@@ -126,9 +103,6 @@ export default function FingerprintPage() {
                       <td className="px-4 py-2 font-medium">{r.name}</td>
                       <td className="text-muted-foreground px-4 py-2">{r.category || "-"}</td>
                       <td className="max-w-96 truncate px-4 py-2 font-mono text-xs">{r.expression}</td>
-                      <td className="px-4 py-2">
-                        <Badge variant="outline">{r.source}</Badge>
-                      </td>
                       <td className="px-4 py-2">
                         {r.enabled ? <Badge variant="default">启用</Badge> : <Badge variant="outline">停用</Badge>}
                       </td>
