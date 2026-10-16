@@ -61,8 +61,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import { parseCompanyScopeText } from "@/lib/company-scope";
-import type { Asset, Company, CompanyScopeRule, Project } from "@/lib/types";
+import type { Asset, Project } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const METHOD_COLOR: Record<string, string> = {
@@ -124,22 +123,16 @@ const TABS: { key: string; label: string; icon: LucideIcon }[] = [
   { key: "app", label: "应用", icon: SmartphoneIcon },
   { key: "service", label: "服务", icon: LayoutTemplateIcon },
   { key: "endpoint", label: "接口", icon: LinkIcon },
-  // 企业(客户主体)是项目的属性,管理入口放末位;项目才是资产归属主轴。
-  { key: "company", label: "企业", icon: BuildingIcon },
 ];
 
 export default function AssetsPage() {
   const [rows, setRows] = React.useState<Asset[]>([]);
   const [total, setTotal] = React.useState(0);
-  const [companies, setCompanies] = React.useState<Company[]>([]);
   const [projects, setProjects] = React.useState<Project[]>([]);
   const [counts, setCounts] = React.useState<Record<string, number>>({});
   const [tab, setTab] = React.useState("root_domain");
   const [query, setQuery] = React.useState("");
-  // "all" | "-1"(未归属) | String(company.id) — 服务端 company_id 过滤
-  const [companyFilter, setCompanyFilter] = React.useState("all");
-  // "all" | "-1"(未归属项目) | String(project.id) — 服务端 project_id 过滤;
-  // 项目=授权根是归属主轴,与企业筛选单轴互斥(后端单轴查询,前端保证只生效一个)
+  // "all" | "-1"(未归属项目) | String(project.id) — 服务端 project_id 过滤;项目=授权根是唯一归属主轴
   const [projectFilter, setProjectFilter] = React.useState("all");
   const [loaded, setLoaded] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
@@ -156,19 +149,9 @@ export default function AssetsPage() {
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
 
-  // company delete
-  const [companyDeleteTarget, setCompanyDeleteTarget] = React.useState<Company | null>(null);
-  const [companyDeleteAssets, setCompanyDeleteAssets] = React.useState(false);
-  const [companyDeleting, setCompanyDeleting] = React.useState(false);
 
-  // Companies + projects + per-type counts (tab badges) — loaded on demand, no background polling.
+  // Projects + per-type counts (tab badges) — loaded on demand, no background polling.
   const loadMeta = React.useCallback(() => {
-    api
-      .companies()
-      .then(setCompanies)
-      .catch(() => {
-        /* Keep the last successful company snapshot on a transient failure. */
-      });
     api
       .projects()
       .then(setProjects)
@@ -236,25 +219,6 @@ export default function AssetsPage() {
     }
   };
 
-  const confirmDeleteCompany = async () => {
-    if (!companyDeleteTarget) return;
-    setCompanyDeleting(true);
-    try {
-      const res = await api.deleteCompany(companyDeleteTarget.id, companyDeleteAssets);
-      const msg =
-        companyDeleteAssets && res.assets_deleted > 0
-          ? `已删除企业，同时删除 ${res.assets_deleted} 条资产`
-          : "已删除企业";
-      toast.success(msg);
-      refresh();
-    } catch (e) {
-      toast.error("删除失败：" + String((e as Error)?.message ?? e));
-    } finally {
-      setCompanyDeleting(false);
-      setCompanyDeleteTarget(null);
-      setCompanyDeleteAssets(false);
-    }
-  };
 
   React.useEffect(() => {
     loadMeta();
@@ -265,7 +229,6 @@ export default function AssetsPage() {
   React.useEffect(() => {
     setQuery("");
     setDslError("");
-    setCompanyFilter("all");
     setSelected(new Set());
     setRows([]);
     setRowsTab("");
@@ -273,36 +236,28 @@ export default function AssetsPage() {
     setLoaded(false);
   }, [tab]);
 
-  // 归属筛选单轴互斥:切换一侧时把另一侧重置回"全部"。
-  const onCompanyFilter = (v: string) => {
-    setProjectFilter("all");
-    setCompanyFilter(v);
-  };
   const onProjectFilter = (v: string) => {
-    setCompanyFilter("all");
     setProjectFilter(v);
   };
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: these controls intentionally reset server pagination.
-  React.useEffect(() => setPage(0), [tab, size, query, companyFilter, projectFilter]);
+  React.useEffect(() => setPage(0), [tab, size, query, projectFilter]);
 
   const dslMode = query.trim() !== "";
 
-  // Server-side paginated page loader for the active data tab (company tab excluded).
+  // Server-side paginated page loader for the active data tab.
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is an explicit manual-reload trigger.
   React.useEffect(() => {
-    if (tab === "company") return;
     const request = ++assetsRequestRef.current;
     const dsl = query.trim();
     setLoading(true);
     const offset = page * size;
     const run = async () => {
       try {
-        const companyId = companyFilter === "all" ? "" : companyFilter;
         const projectId = projectFilter === "all" ? "" : projectFilter;
         const r = dsl
           ? await api.searchAssets(dsl, tab, size, offset)
-          : await api.assets(tab, size, offset, companyId, projectId);
+          : await api.assets(tab, size, offset, "", projectId);
         if (assetsRequestRef.current !== request) return;
         setRows(r.assets);
         setRowsTab(tab);
@@ -326,21 +281,12 @@ export default function AssetsPage() {
       clearTimeout(tid);
       if (assetsRequestRef.current === request) assetsRequestRef.current++;
     };
-  }, [tab, page, size, query, companyFilter, projectFilter, refreshKey]);
+  }, [tab, page, size, query, projectFilter, refreshKey]);
 
   React.useEffect(() => {
-    if (tab === "company") return;
     const lastPage = Math.max(0, Math.ceil(total / size) - 1);
     if (page > lastPage) setPage(lastPage);
-  }, [page, size, tab, total]);
-
-  const companyById = React.useMemo(() => {
-    const m = new Map<number, string>();
-    for (const c of companies) m.set(c.id, c.name);
-    return m;
-  }, [companies]);
-
-  const companyName = (id?: number) => (id ? (companyById.get(id) ?? "") : "");
+  }, [page, size, total]);
 
   const projectById = React.useMemo(() => {
     const m = new Map<number, string>();
@@ -350,7 +296,7 @@ export default function AssetsPage() {
 
   const projectName = (id?: number) => (id ? (projectById.get(id) ?? `#${id}`) : "");
 
-  const tabCounts: Record<string, number> = { ...counts, company: companies.length };
+  const tabCounts: Record<string, number> = { ...counts };
   const totalAssets = Object.values(counts).reduce((a, b) => a + b, 0);
 
   // rows are already the current server-side page.
@@ -368,7 +314,7 @@ export default function AssetsPage() {
     />
   );
 
-  // 数据 tab 的工具栏：项目/企业筛选（互斥单轴）+ DSL 搜索。筛选在非 DSL 模式下生效（DSL 有自己的作用域）。
+  // 数据 tab 的工具栏:项目筛选 + DSL 搜索。筛选在非 DSL 模式下生效(DSL 有自己的作用域)。
   const toolbar = (
     <div className="flex items-start gap-2">
       <Select value={projectFilter} onValueChange={onProjectFilter}>
@@ -382,22 +328,6 @@ export default function AssetsPage() {
             {projects.map((p) => (
               <SelectItem key={p.id} value={String(p.id)}>
                 {p.name}
-              </SelectItem>
-            ))}
-          </SelectGroup>
-        </SelectContent>
-      </Select>
-      <Select value={companyFilter} onValueChange={onCompanyFilter}>
-        <SelectTrigger className="w-40 shrink-0" aria-label="按企业筛选">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">全部企业</SelectItem>
-          <SelectItem value="-1">未归属</SelectItem>
-          <SelectGroup>
-            {companies.map((c) => (
-              <SelectItem key={c.id} value={String(c.id)}>
-                {c.name}
               </SelectItem>
             ))}
           </SelectGroup>
@@ -425,7 +355,6 @@ export default function AssetsPage() {
           <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
             <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} /> 刷新
           </Button>
-          <CompanyDialog onSaved={refresh} />
         </div>
       </div>
 
@@ -442,80 +371,12 @@ export default function AssetsPage() {
           </TabsList>
         </div>
 
-        {/* 企业 */}
-        <TabsContent value="company" className="mt-0 flex min-h-0 flex-1 flex-col">
-          <Card className="flex min-h-0 flex-1 flex-col overflow-hidden py-0">
-            <div className="min-h-0 flex-1 overflow-auto">
-              <Table>
-                <TableHeader className="sticky top-0 z-10 bg-card">
-                  <TableRow>
-                    <TableHead>企业</TableHead>
-                    <TableHead className="w-24 text-right">资产数</TableHead>
-                    <TableHead>资产范围</TableHead>
-                    <TableHead className="w-36 text-right">操作</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {companies.map((c) => (
-                    <TableRow key={c.id}>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <CompanyAvatar name={c.name} logo={c.logo} />
-                          <span className="font-medium">{c.name}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums text-sm">{c.asset_count}</TableCell>
-                      <TableCell>
-                        {c.scope?.length ? (
-                          <div className="flex flex-wrap gap-1">
-                            {c.scope.map((s, i) => (
-                              <Badge key={i} variant="secondary" className="font-mono text-[11px]">
-                                {s.raw}
-                              </Badge>
-                            ))}
-                          </div>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">未设置范围</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <EditScopeDialog company={c} onSaved={refresh} />
-                          <AppendScopeDialog company={c} onSaved={refresh} />
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-7 text-muted-foreground hover:text-destructive"
-                            onClick={() => {
-                              setCompanyDeleteTarget(c);
-                              setCompanyDeleteAssets(false);
-                            }}
-                            aria-label={`删除企业 ${c.name}`}
-                          >
-                            <Trash2Icon className="size-3.5" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {companies.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={4} className="py-10 text-center text-sm text-muted-foreground">
-                        还没有企业。点击右上角「新增企业」并填写资产范围，系统会自动认领命中的资产。
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </Card>
-        </TabsContent>
 
         {/* 根域名 */}
         <TabsContent value="root_domain" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
           {toolbar}
           <AssetCard
-            cols={["", "域名", "ICP 备案", "归属企业", "归属项目", "授权", ""]}
+            cols={["", "域名", "ICP 备案", "归属项目", "授权", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -533,9 +394,6 @@ export default function AssetsPage() {
                 </TableCell>
                 <TableCell className="font-mono text-xs font-medium">{a.domain}</TableCell>
                 <TableCell className="text-xs">{a.icp || "—"}</TableCell>
-                <TableCell className="text-xs">
-                  {companyName(a.company_id) || <span className="text-muted-foreground">未归属</span>}
-                </TableCell>
                 <TableCell className="text-xs">
                   {projectName(a.project_id) || <span className="text-muted-foreground">未归属</span>}
                 </TableCell>
@@ -562,7 +420,7 @@ export default function AssetsPage() {
         <TabsContent value="ip" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
           {toolbar}
           <AssetCard
-            cols={["", "IP", "C段", "绑定域名", "开放端口", "归属企业", "归属项目", "授权", ""]}
+            cols={["", "IP", "C段", "绑定域名", "开放端口", "归属项目", "授权", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -590,9 +448,6 @@ export default function AssetsPage() {
                   />
                 </TableCell>
                 <TableCell className="text-xs">
-                  {companyName(a.company_id) || <span className="text-muted-foreground">未归属</span>}
-                </TableCell>
-                <TableCell className="text-xs">
                   {projectName(a.project_id) || <span className="text-muted-foreground">未归属</span>}
                 </TableCell>
                 <TableCell className="text-xs">
@@ -618,7 +473,7 @@ export default function AssetsPage() {
         <TabsContent value="subdomain" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
           {toolbar}
           <AssetCard
-            cols={["", "域名", "根域名", "解析类型", "解析值", "归属企业", "归属项目", "授权", ""]}
+            cols={["", "域名", "根域名", "解析类型", "解析值", "归属项目", "授权", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -639,9 +494,6 @@ export default function AssetsPage() {
                 <TableCell className="text-xs">{a.record_type || "—"}</TableCell>
                 <TableCell className="max-w-xs truncate font-mono text-xs">
                   {(Array.isArray(a.record_value) ? a.record_value.join(", ") : a.record_value) || "—"}
-                </TableCell>
-                <TableCell className="text-xs">
-                  {companyName(a.company_id) || <span className="text-muted-foreground">未归属</span>}
                 </TableCell>
                 <TableCell className="text-xs">
                   {projectName(a.project_id) || <span className="text-muted-foreground">未归属</span>}
@@ -669,7 +521,7 @@ export default function AssetsPage() {
         <TabsContent value="app" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
           {toolbar}
           <AssetCard
-            cols={["", "应用名", "Bundle ID", "分类", "ICP 备案", "归属企业", "归属项目", "授权", ""]}
+            cols={["", "应用名", "Bundle ID", "分类", "ICP 备案", "归属项目", "授权", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -689,9 +541,6 @@ export default function AssetsPage() {
                 <TableCell className="font-mono text-xs">{a.bundle_id || "—"}</TableCell>
                 <TableCell className="text-xs">{a.category || "—"}</TableCell>
                 <TableCell className="text-xs">{a.app_icp || "—"}</TableCell>
-                <TableCell className="text-xs">
-                  {companyName(a.company_id) || <span className="text-muted-foreground">未归属</span>}
-                </TableCell>
                 <TableCell className="text-xs">
                   {projectName(a.project_id) || <span className="text-muted-foreground">未归属</span>}
                 </TableCell>
@@ -718,7 +567,7 @@ export default function AssetsPage() {
         <TabsContent value="service" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
           {toolbar}
           <AssetCard
-            cols={["", "服务", "域名", "IP", "端口", "状态码", "标题", "指纹", "认证", "归属企业", "归属项目", "授权", ""]}
+            cols={["", "服务", "域名", "IP", "端口", "状态码", "标题", "指纹", "认证", "归属项目", "授权", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -793,9 +642,6 @@ export default function AssetsPage() {
                       })
                     )}
                   </TableCell>
-                  <TableCell className="text-xs">
-                    {companyName(a.company_id) || <span className="text-muted-foreground">未归属</span>}
-                  </TableCell>
                   <TableCell className="w-8 pl-0">
                     <Button
                       variant="ghost"
@@ -817,7 +663,7 @@ export default function AssetsPage() {
         <TabsContent value="endpoint" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
           {toolbar}
           <AssetCard
-            cols={["", "方法", "完整地址", "参数", "归属企业", "归属项目", "授权", ""]}
+            cols={["", "方法", "完整地址", "参数", "归属项目", "授权", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -847,9 +693,6 @@ export default function AssetsPage() {
                     })}
                     mono
                   />
-                </TableCell>
-                <TableCell className="text-xs">
-                  {companyName(a.company_id) || <span className="text-muted-foreground">未归属</span>}
                 </TableCell>
                 <TableCell className="text-xs">
                   {projectName(a.project_id) || <span className="text-muted-foreground">未归属</span>}
@@ -899,53 +742,6 @@ export default function AssetsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog
-        open={!!companyDeleteTarget}
-        onOpenChange={(o) => {
-          if (!o) {
-            setCompanyDeleteTarget(null);
-            setCompanyDeleteAssets(false);
-          }
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除企业 · {companyDeleteTarget?.name}</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-3">
-                <p>此操作将永久删除该企业及其资产范围配置，不可撤销。</p>
-                <label
-                  htmlFor="delete-assets-opt"
-                  className="flex cursor-pointer items-center gap-2.5 rounded-md border p-3 hover:bg-muted/50"
-                >
-                  <Checkbox
-                    id="delete-assets-opt"
-                    checked={companyDeleteAssets}
-                    onCheckedChange={(v) => setCompanyDeleteAssets(!!v)}
-                  />
-                  <span className="text-sm leading-snug">
-                    同时删除该企业下的所有资产
-                    <span className="block text-xs text-muted-foreground">不勾选则保留资产，仅取消归属关系</span>
-                  </span>
-                </label>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={companyDeleting}>取消</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                void confirmDeleteCompany();
-              }}
-              disabled={companyDeleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {companyDeleting ? "删除中…" : "确认删除"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
@@ -1089,276 +885,5 @@ function Chips({ items, mono, vulnKb }: { items: string[]; mono?: boolean; vulnK
   );
 }
 
-function CompanyAvatar({ name, logo }: { name: string; logo?: string }) {
-  const initial = (name.trim()[0] ?? "?").toUpperCase();
-  return (
-    <Avatar className="size-7 shrink-0">
-      {logo ? <AvatarImage src={logo} alt={name} /> : null}
-      <AvatarFallback className="text-xs">{initial}</AvatarFallback>
-    </Avatar>
-  );
-}
 
 // 后端返回的 warnings 说的是既有数据问题（不是本次提交的行有错），保存本身已经
-// 成功。给更长的停留时间，因为它需要用户去处理具体的资产，扫一眼标题不够。
-function showScopeWarnings(warnings?: string[]) {
-  for (const warning of warnings ?? []) {
-    toast.warning(warning, { duration: 15000 });
-  }
-}
-
-function savedScopeRules(company: Company): CompanyScopeRule[] {
-  return (company.scope ?? [])
-    .map((scope) => ({ kind: scope.kind, value: scope.raw.trim() }))
-    .filter((scope) => scope.value);
-}
-
-function savedScopeText(company: Company): string {
-  return savedScopeRules(company)
-    .map((scope) => scope.value)
-    .join("\n");
-}
-
-// 新增企业使用与任务、LLM 编辑一致的右侧抽屉。
-function CompanyDialog({ onSaved }: { onSaved: () => void }) {
-  const [open, setOpen] = React.useState(false);
-  const [name, setName] = React.useState("");
-  const [scopeText, setScopeText] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
-  const parsedScope = React.useMemo(() => parseCompanyScopeText(scopeText), [scopeText]);
-
-  React.useEffect(() => {
-    if (!open) return;
-    setName("");
-    setScopeText("");
-  }, [open]);
-
-  const submit = async () => {
-    if (!name.trim()) {
-      toast.error("请填写企业名称");
-      return;
-    }
-    if (parsedScope.errors.length > 0) {
-      toast.error("请修正无效的资产范围");
-      return;
-    }
-    setBusy(true);
-    try {
-      const res = await api.createCompany(name.trim(), parsedScope.rules);
-      const added = res.scope_added ?? 0;
-      const invalid = res.scope_invalid ?? 0;
-      if (invalid > 0) toast.warning(`已创建企业，添加 ${added} 条范围；${invalid} 行无效`);
-      else toast.success(`已创建企业，添加 ${added} 条范围`);
-      setOpen(false);
-      onSaved();
-    } catch (e) {
-      const msg = String((e as Error)?.message ?? e);
-      if (/:\s*409$/.test(msg)) toast.error("企业已存在，请换个名称");
-      else toast.error(`保存失败：${msg}`);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>
-        <Button size="sm">
-          <BuildingIcon data-icon="inline-start" /> 新增企业
-        </Button>
-      </SheetTrigger>
-      <SheetContent className="w-full! max-w-none! gap-0 p-0 sm:w-[520px]! sm:max-w-[520px]!">
-        <SheetHeader className="border-b p-6">
-          <SheetTitle>新增企业</SheetTitle>
-          <SheetDescription>配置企业及其资产范围。关键词只作为 Agent 提示，不会自动归属资产。</SheetDescription>
-        </SheetHeader>
-        <div className="flex-1 overflow-y-auto p-6">
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="cn-name">企业名称</FieldLabel>
-              <Input
-                id="cn-name"
-                placeholder="如 Acme Corp（名称唯一）"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </Field>
-            <ScopeTextEditor id="cn-scope" value={scopeText} onValueChange={setScopeText} parsed={parsedScope} />
-          </FieldGroup>
-        </div>
-        <SheetFooter className="flex-row justify-end gap-2 border-t p-4">
-          <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
-            取消
-          </Button>
-          <Button onClick={submit} disabled={busy || !name.trim() || parsedScope.errors.length > 0}>
-            {busy ? "保存中…" : "保存"}
-          </Button>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
-  );
-}
-
-// 编辑（覆盖）资产范围弹窗
-function EditScopeDialog({ company, onSaved }: { company: Company; onSaved: () => void }) {
-  const [open, setOpen] = React.useState(false);
-  const [scopeText, setScopeText] = React.useState("");
-  const [reason, setReason] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
-  const preservedScopeRules = React.useMemo(() => savedScopeRules(company), [company]);
-  const parsedScope = React.useMemo(
-    () => parseCompanyScopeText(scopeText, { preservedRules: preservedScopeRules }),
-    [preservedScopeRules, scopeText],
-  );
-
-  React.useEffect(() => {
-    if (!open) return;
-    setScopeText(savedScopeText(company));
-    setReason("");
-  }, [open, company]);
-
-  const submit = async () => {
-    if (parsedScope.errors.length > 0) {
-      toast.error("请修正无效的资产范围");
-      return;
-    }
-    setBusy(true);
-    try {
-      const res = await api.updateCompanyScope(company.id, parsedScope.rules, reason);
-      const errCount = res.invalid ?? 0;
-      if (errCount > 0) toast.warning(`已保存；${errCount} 行无效`);
-      else toast.success(`范围已更新，共 ${res.added} 条`);
-      showScopeWarnings(res.warnings);
-      setOpen(false);
-      onSaved();
-    } catch (e) {
-      toast.error(`保存失败：${String((e as Error)?.message ?? e)}`);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7">
-          编辑
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>编辑资产范围 · {company.name}</DialogTitle>
-          <DialogDescription>
-            编辑后将替换全部现有范围。ICP 精确匹配资产，企业关键词仅作为 Agent 提示。
-          </DialogDescription>
-        </DialogHeader>
-        <FieldGroup className="py-2">
-          <ScopeTextEditor
-            id={`edit-company-scope-${company.id}`}
-            value={scopeText}
-            onValueChange={setScopeText}
-            parsed={parsedScope}
-          />
-          <Field>
-            <FieldLabel htmlFor="es-reason">归属依据（可选）</FieldLabel>
-            <Input
-              id="es-reason"
-              placeholder="如 证书 / whois / ASN 佐证"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-          </Field>
-        </FieldGroup>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
-            取消
-          </Button>
-          <Button onClick={submit} disabled={busy || parsedScope.errors.length > 0}>
-            {busy ? "保存中…" : "覆盖保存"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// 追加资产范围弹窗
-function AppendScopeDialog({ company, onSaved }: { company: Company; onSaved: () => void }) {
-  const [open, setOpen] = React.useState(false);
-  const [scopeText, setScopeText] = React.useState("");
-  const [reason, setReason] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
-  const parsedScope = React.useMemo(() => parseCompanyScopeText(scopeText), [scopeText]);
-
-  React.useEffect(() => {
-    if (!open) return;
-    setScopeText("");
-    setReason("");
-  }, [open]);
-
-  const submit = async () => {
-    if (parsedScope.rules.length === 0) {
-      toast.error("请填写要追加的范围");
-      return;
-    }
-    if (parsedScope.errors.length > 0) {
-      toast.error("请修正无效的资产范围");
-      return;
-    }
-    setBusy(true);
-    try {
-      const res = await api.addCompanyScope(company.id, parsedScope.rules, reason);
-      const errCount = res.invalid ?? 0;
-      if (errCount > 0) toast.warning(`已保存；${errCount} 行无效`);
-      else toast.success(`已追加 ${res.added} 条范围`);
-      showScopeWarnings(res.warnings);
-      setOpen(false);
-      onSaved();
-    } catch (e) {
-      toast.error(`保存失败：${String((e as Error)?.message ?? e)}`);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7">
-          追加
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>追加资产范围 · {company.name}</DialogTitle>
-          <DialogDescription>新范围会追加到现有范围。ICP 精确匹配资产，企业关键词仅作为 Agent 提示。</DialogDescription>
-        </DialogHeader>
-        <FieldGroup className="py-2">
-          <ScopeTextEditor
-            id={`append-company-scope-${company.id}`}
-            value={scopeText}
-            onValueChange={setScopeText}
-            parsed={parsedScope}
-          />
-          <Field>
-            <FieldLabel htmlFor="as-reason">归属依据（可选）</FieldLabel>
-            <Input
-              id="as-reason"
-              placeholder="如 证书 / whois / ASN 佐证"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-          </Field>
-        </FieldGroup>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
-            取消
-          </Button>
-          <Button onClick={submit} disabled={busy || parsedScope.rules.length === 0 || parsedScope.errors.length > 0}>
-            {busy ? "保存中…" : "追加"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
