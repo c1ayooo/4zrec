@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Autumn-27/artex/agent"
-	"github.com/Autumn-27/artex/db"
+	"github.com/c1ayooo/4zrec/agent"
+	"github.com/c1ayooo/4zrec/db"
 
-	actool "github.com/Autumn-27/artex/tools"
+	actool "github.com/c1ayooo/4zrec/tools"
 )
 
 // jsonResult marshals v to a JSON tool result.
@@ -40,7 +40,10 @@ func jsonResult(v any) (actool.Result, error) {
 func (s *Server) hostTools() ([]actool.CoreTool, map[string][]string) {
 	tools := append(s.m.HostTools(), s.orchestrationTools()...)
 	tools = append(tools, s.findingRetestTools()...)
-	tools = append(tools, s.platformTools()...) // 平台操作工具(建改 skill/工具/MCP，给 Auto 用)
+	tools = append(tools, s.platformTools()...)       // 平台操作工具(建改 skill/工具/MCP，给 Auto 用)
+	tools = append(tools, s.spacemapTools()...)       // 空间测绘引擎查询(信息收集原生能力)
+	tools = append(tools, s.spacemapExpandTools()...) // ICP/证书/ASN 三路反查扩资产
+	tools = append(tools, s.reconTools()...)          // 被动子域枚举 + 子域名爆破
 	custom, err := s.customTools()
 	if err != nil {
 		log.Printf("[custom-tool] 加载失败: %v", err)
@@ -486,6 +489,7 @@ func (s *Server) seedOrchestrationTools() {
 		schema, _ := json.Marshal(t.InputSchema())
 		_ = s.m.PG().SeedTool(t.Name(), t.Description(), schema, autoAgents)
 	}
+	s.seedSpacemapTools()
 	s.refreshBuiltinToolSchemas()
 	s.seedAutoDefaultBindings()
 	s.seedPlannerDefaultBindings()
@@ -499,7 +503,9 @@ func (s *Server) seedOrchestrationTools() {
 	s.reseedMainAgentPrompt()         // mainagent 提示词加入「目标达成后 add_intent 反问是否建目标」(一次性)
 	s.reseedPlannerPrompt()           // planner 提示词:重写「0 意图」正当理由 + 加量化验收核对(一次性)
 	s.reseedWorkerPrompt()            // worker 提示词:加否定结论证据门槛(一次性)
+	s.reseedAssetSummaryPrompts()     // planner/mainagent 资产态势来源文案改原生采集(一次性)
 	s.seedReporterAgent()             // 预置「报告撰写」agent + 工具绑定 + finding 触发器(一次性)
+	s.seedReconAgent()                // 预置「信息收集」agent + 任务创建触发器(一次性)
 	s.upgradeReporterTriggerMessage() // 老库补迁移:让 reporter 回传 evidence_version(一次性)
 	s.seedFindingTrafficTools()       // 增加可选证据参数及只读证据工具，保留用户配置
 	s.seedFindingWorkflowTools()
@@ -682,6 +688,92 @@ func (s *Server) reseedWorkerPrompt() {
 		return
 	}
 	log.Printf("[prompts] worker 提示词已追加新默认版本(查上下文段收敛为 list_assets/list_findings,去掉 list_facts/node_detail/asset_neighbors,一次性)")
+}
+
+// reseedAssetSummaryPrompts 把 planner/mainagent 提示词里【开局资产态势】一行的来源
+// 文案从「4zrecon 资产同步」刷成「平台资产库原生采集」——4zrecon 同步功能已删除，
+// AssetSummary 的新鲜度也改为按资产 last_seen 标注。SeedPromptIfEmpty 首插入 only，
+// 旧库已有版本收不到，故用版本管理【追加一个新版本】并切过去，旧版本保留在历史里可找回。
+// settings flag 守卫 → 只做一次。全新库无需处理（seedPrompts 已 seed 最新默认）。
+// 与 reseedGoalsPrompt 同构，一次覆盖两个 agent（同一处文案变更）。
+func (s *Server) reseedAssetSummaryPrompts() {
+	const flag = "asset_summary_native_source_v1"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	defer func() { _ = s.m.pg.SetSetting(flag, "true") }() // 无论成功与否只尝试一次
+	for _, key := range []string{"planner", "mainagent"} {
+		a, err := s.m.pg.GetAgentByKey(key)
+		if err != nil || a == nil {
+			continue // 全新库尚未建 agent 行时,seedPrompts 会直接 seed 最新默认,无需此迁移
+		}
+		tmpl := agent.BuiltinPromptSeeds()[key]
+		if tmpl == "" {
+			continue
+		}
+		// 全新库 seedPrompts 已 seed 最新默认 → 当前版本已等于代码默认,不必再追加重复版本。
+		if cur, err := s.m.pg.CurrentPrompt(a.ID); err == nil && cur == tmpl {
+			continue
+		}
+		if _, err := s.m.pg.ResetPromptToDefault(a.ID, tmpl); err != nil {
+			log.Printf("[prompts] %s 提示词重刷为原生资产态势文案失败: %v", key, err)
+			continue
+		}
+		log.Printf("[prompts] %s 提示词已追加新默认版本(开局资产态势来源改原生采集,一次性)", key)
+	}
+}
+
+// seedReconAgent 预置一个「信息收集」自定义 agent(builtin=false,可在 UI 编辑/删除;
+// 可单独绑定 LLM profile——侦察循环偏机械,适合配便宜模型):
+// 绑定全部原生收集工具 + 资产读写/任务范围工具,挂「任务创建」触发器——带项目的
+// 新任务创建即唤起它做开局资产清扫(顶替原 4zrecon 同步开局的位置)。一次性
+// (settings flag 守卫):用户删掉后不再重建。与 seedReporterAgent 同构。
+func (s *Server) seedReconAgent() {
+	const flag = "recon_agent_seed_v1"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	defer func() { _ = s.m.pg.SetSetting(flag, "true") }() // 无论成功与否只尝试一次
+
+	if exist, _ := s.m.pg.GetAgentByKey("recon"); exist != nil {
+		return // key 已被占用(用户手建过)——不覆盖
+	}
+	a, err := s.m.pg.CreateAgent("recon", "信息收集",
+		"开局资产清扫与临时收集：任务创建时自动对项目授权范围做五引擎测绘/被动子域/反查扩资产;也可对话直连下达收集指令。")
+	if err != nil {
+		log.Printf("[recon] 创建 agent 失败: %v", err)
+		return
+	}
+	if err := s.m.pg.SeedPromptIfEmpty(a.ID, agent.ReconDefaultPrompt); err != nil {
+		log.Printf("[recon] seed prompt 失败: %v", err)
+	}
+	// 触发运行策略：serial + none —— 一任务一清扫、逐个执行不并发。
+	// merge 必须为 none：否则多任务创建会被合并成一次运行,各自的清扫语义丢失。
+	if err := s.m.pg.SetAgentTriggerBehavior("recon", "serial", "none", 1); err != nil {
+		log.Printf("[recon] 设置触发运行策略失败: %v", err)
+	}
+	// 绑定工具：全部原生收集工具 + 资产查询/写入 + 任务范围(经工具表,UI 可改绑)。
+	if err := s.m.pg.AddAgentToToolBinding("recon", []string{
+		"info_collect_capabilities", "space_search", "space_search_batch",
+		"icp_expand", "cert_expand", "asn_expand",
+		"subdomain_enum", "subdomain_brute",
+		"list_assets", "insert_assets", "add_task_scope", "suggest_scope",
+	}); err != nil {
+		log.Printf("[recon] 绑定工具失败: %v", err)
+	}
+	if _, err := s.m.pg.CreateTrigger(&db.AgentTrigger{
+		AgentKey: "recon",
+		Enabled:  true,
+		// OnTaskCreate=true：新任务创建即触发(scheduler.fireTaskCreates 带
+		// 任务 id/描述/目标唤起;无项目的任务清扫无意义,提示词里让它摸底即止)。
+		OnTaskCreate: true,
+		TaskCreateMessage: "新任务已创建。请按你的开局清扫剧本执行：先 list_assets 摸底该任务项目授权范围内的资产现状，" +
+			"再对授权根域跑 space_search_batch(已配置引擎)与 subdomain_enum 被动枚举，有备案/证书/ASN 线索就反查扩一圈，" +
+			"缺口明显且确有必要的根域经确认后 subdomain_brute。范围外结果只入库待审批，不主动探测。完成后汇总新增与覆盖缺口。",
+	}); err != nil {
+		log.Printf("[recon] 创建触发器失败: %v", err)
+	}
+	log.Printf("[recon] 已预置「信息收集」agent + 任务创建触发器")
 }
 
 // reporterToolCallMessage 必须无条件要求先读一次 get_finding_traffic 再写报告。

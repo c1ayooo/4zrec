@@ -6,10 +6,10 @@ import (
 	"log"
 	"time"
 
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/mcphttp"
-	mcp "github.com/Autumn-27/artex/mcpstdio"
-	actool "github.com/Autumn-27/artex/tools"
+	"github.com/c1ayooo/4zrec/db"
+	"github.com/c1ayooo/4zrec/mcphttp"
+	mcp "github.com/c1ayooo/4zrec/mcpstdio"
+	actool "github.com/c1ayooo/4zrec/tools"
 )
 
 // mcpClient is the shared surface of a connected MCP server (stdio, Streamable HTTP,

@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Autumn-27/artex/askernel"
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/intercept"
+	"github.com/c1ayooo/4zrec/askernel"
+	"github.com/c1ayooo/4zrec/db"
+	"github.com/c1ayooo/4zrec/intercept"
 )
 
 // =====================================================================
@@ -35,7 +35,8 @@ import (
 // 已知边界:只拦命令文本中字面可见的目标;变量拼接、IPv6、先解析再打等形态
 // 不在第一版覆盖内(见 docs/asset-fence)。代码标识符(re.findall/os.path 等)
 // 已由 TLD 后缀白名单排除,冷门后缀的真实域名会漏拦(宁漏勿扰,见
-// tldAllowlist 注释)。
+// tldAllowlist 注释)。纯十进制三段 IP 变体(1.2.3=1.2.0.3)与版本号碎片同形,
+// 刻意不判(suspiciousIPVariant 注释);整数/八进制/十六进制变体已覆盖。
 // =====================================================================
 
 // fenceTargets 是一次提取出的字面目标集合。
@@ -62,28 +63,34 @@ var reIPv4 = regexp.MustCompile(`(?:[0-9]{1,3}\.){3}[0-9]{1,3}`)
 // reToken 裸 token 切分:非 [字母数字.-] 均为分隔符。
 var reToken = regexp.MustCompile(`[a-z0-9.-]+`)
 
-// reQuoted 单引号段与反引号段:shell 里它们是字面载荷——python -c 代码、
-// awk/sed 脚本、curl -d 的 JSON 数据、解析日志用的正则——里面的裸 token
-// 是代码/数据不是命令行目标,从裸 token 扫描中整段剔除。双引号不剔除:
-// 双引号常用来包裹真实参数(nmap "sub.example.com"),漏掉真实目标的代价
-// 大于双引号载荷里偶发的裸域名噪音(后者还有 TLD 白名单兜底)。带 scheme
-// 的 URL 不在此列——第一步已在全文提取,引号内外一视同仁。
-var reQuoted = regexp.MustCompile("`[^`]*`|'[^']*'")
+// reQuoted 单引号段:shell 里它们是字面载荷——python -c 代码、awk/sed 脚本、
+// curl -d 的 JSON 数据、解析日志用的正则——里面的裸 token 是代码/数据不是命令
+// 行目标,从裸 token 扫描中整段剔除。双引号不剔除:双引号常用来包裹真实参数
+// (nmap "sub.example.com"),漏掉真实目标的代价大于双引号载荷里偶发的裸域名
+// 噪音(后者还有 TLD 白名单兜底)。带 scheme 的 URL 不在此列——第一步已在全
+// 文提取,引号内外一视同仁。
+//
+// 反引号不剔除(2026-10-16 围栏加固):反引号与 $() 是同一语义的命令替换,
+// 运行时都会执行并展开——只剔除反引号等于给"把目标藏进替换体"留了一条单
+// 向通道(`dig +short evil.com` 隐身而 $(dig ...) 不隐身)。剔除后的噪音由
+// TLD 白名单与扩展名黑名单兜底。
+var reQuoted = regexp.MustCompile(`'[^']*'`)
 
 // reEmailParam 匹配查询参数位的邮箱(紧邻 =/?/&/双引号),提取时整体剔除。
 var reEmailParam = regexp.MustCompile(`(?i)([=?&"])[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}`)
 
-// reHeredocStart 匹配 heredoc 开始(<<EOF / <<-'EOF' / <<< 变体排除在外)。
-// Go 的 RE2 不支持反向引用,结束标记(单独成行的同名 TAG)由 stripHeredocs
-// 手工扫描。
-var reHeredocStart = regexp.MustCompile(`<<-?[ \t]*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
+// reHeredocStart 匹配 heredoc 开始(<<EOF / <<-'EOF';<<< here-string 变体通过
+// 前置字符约束排除:<< 前不能再是 <)。Go 的 RE2 不支持反向引用/环视,结束
+// 标记(单独成行的同名 TAG)由 stripHeredocs 手工扫描。
+var reHeredocStart = regexp.MustCompile(`(?:^|[^<])<<-?[ \t]*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
 
 // stripHeredocs 把每段 heredoc(开始标记之后到单独成行的同名结束标记)整体
 // 替换为空格:heredoc 是喂给 stdin 的脚本/数据,里面的裸 token 不是命令行
 // 目标(worker 写 python 脚本的常态形态,m.group/re.finditer 是任务实测
 // 最大误报源);段内的出网目标只会以 URL 形态出现,而 URL 已在第一步全文
-// 提取。未闭合的 heredoc 视为其余全部文本都是载荷(整段剔除——宁可少问,
-// 不让残尾的代码 token 轰炸审批)。
+// 提取。未闭合的 heredoc 只剔除开始标记本身、保留其余全部文本——此前"余下
+// 全当载荷"的写法意味着一行合法前缀(cat <<EOF)就能让后续所有目标对围栏
+// 隐身;宁可多扫到几段代码 token(TLD 白名单可兜住),不给整段消失留通道。
 func stripHeredocs(text string) string {
 	for {
 		loc := reHeredocStart.FindStringSubmatchIndex(text)
@@ -112,9 +119,12 @@ func stripHeredocs(text string) string {
 			i = lineEnd
 		}
 		if endIdx < 0 {
-			return text[:loc[0]] + " " // 未闭合:余下全是载荷
+			// 未闭合:只抹掉开始标记,标记后的文本(含同行后续命令)保留提取。
+			// 保留标记前一字符(前缀约束吃掉的那个),避免贴邻形态的目标被啃字。
+			text = text[:loc[0]+1] + " " + text[loc[1]:]
+			continue
 		}
-		text = text[:loc[0]] + " " + text[endIdx:]
+		text = text[:loc[0]+1] + " " + text[endIdx:]
 	}
 }
 
@@ -179,6 +189,105 @@ func validFenceIPv4(s string) bool {
 	return true
 }
 
+// inetAtonIP 按 glibc inet_aton 语义把 IP 变体归一化为标准点分十进制:
+// 每段可用十进制/前导 0 八进制/0x 十六进制;不足 4 段时末段占多字节
+// (a.b.c → a.b.0.c;a → 整个 32 位)。解析失败返回空串。
+// 背景(2026-10-16 围栏加固):curl/wget/ping 都接受这些形态,16909060、
+// 0x7f000001、0177.0.0.1 此前两条校验路都过不了,被静默丢弃。
+func inetAtonIP(s string) string {
+	parts := strings.Split(s, ".")
+	if len(parts) == 0 || len(parts) > 4 {
+		return ""
+	}
+	var val uint64
+	for i, p := range parts {
+		if p == "" {
+			return ""
+		}
+		var n uint64
+		var err error
+		switch {
+		case len(p) > 2 && (p[:2] == "0x" || p[:2] == "0X"):
+			n, err = strconv.ParseUint(p[2:], 16, 64)
+		case len(p) > 1 && p[0] == '0':
+			n, err = strconv.ParseUint(p[1:], 8, 64)
+		default:
+			n, err = strconv.ParseUint(p, 10, 64)
+		}
+		if err != nil {
+			return ""
+		}
+		// 末段可占剩余全部字节(共 k 段时末段占 5-k 字节),非末段必须单字节。
+		if i == len(parts)-1 {
+			rem := uint64(1) << uint(8*(5-len(parts)))
+			if n >= rem {
+				return ""
+			}
+			val |= n
+		} else {
+			if n > 0xFF {
+				return ""
+			}
+			val |= n << (8 * uint(3-i))
+		}
+	}
+	return fmt.Sprintf("%d.%d.%d.%d", byte(val>>24), byte(val>>16), byte(val>>8), byte(val))
+}
+
+// suspiciousIPVariant 判定裸 token 是否为"带非十进制特征的 IP 变体":
+//   - 无点形态:≥8 位纯数字(最小公网 1.0.0.0=16777216,端口号/PID 到不了
+//     这个量级)或 0x 十六进制(≤0xFFFFFFFF);
+//   - 有点形态:各段为十进制/0x 十六进制,且带前导零段、十六进制段或非法
+//     四段(某段 >255)——纯十进制三段(1.2.3)刻意不判:它与版本号碎片完全
+//     同形,误报代价高,维持"宁漏勿扰"(已知边界,见 fence.go 头注释)。
+//
+// 命中的 token 由调用方归一化后按 IP 提取;归一化失败的仍按目标上报
+// (fail-closed:宁可多一次审批,不给变体形态留静默放行)。
+func suspiciousIPVariant(tok string) bool {
+	if tok == "" {
+		return false
+	}
+	if !strings.Contains(tok, ".") {
+		if len(tok) >= 2 && (tok[:2] == "0x" || tok[:2] == "0X") {
+			_, err := strconv.ParseUint(tok[2:], 16, 64)
+			return err == nil && len(tok[2:]) > 0
+		}
+		if len(tok) >= 8 && len(tok) <= 10 {
+			n, err := strconv.ParseUint(tok, 10, 64)
+			return err == nil && n <= 0xFFFFFFFF
+		}
+		return false
+	}
+	parts := strings.Split(tok, ".")
+	if len(parts) < 3 {
+		return false // 两段小数(3.14/2.0)与三段纯十进制(1.2.3)不判,见上
+	}
+	suspicious := false
+	for _, p := range parts {
+		if p == "" {
+			return false
+		}
+		if len(p) > 2 && (p[:2] == "0x" || p[:2] == "0X") {
+			if _, err := strconv.ParseUint(p[2:], 16, 64); err != nil {
+				return false
+			}
+			suspicious = true
+			continue
+		}
+		n, err := strconv.ParseUint(p, 10, 64)
+		if err != nil {
+			return false // 含非数字字符:不是 IP 变体
+		}
+		if len(p) > 1 && p[0] == '0' {
+			suspicious = true // 前导零(八进制)
+		}
+		if len(parts) == 4 && n > 0xFF {
+			suspicious = true // 非法四段(10.0.0.256 这类打错的/变体目标)
+		}
+	}
+	return suspicious
+}
+
 // tldAllowlist 引用 db.TLDAllowlist(单一事实源,范围候选生成器共用同一张
 // 表):代码标识符的尾缀——re.findall 的 findall、os.path 的 path、
 // json.dumps 的 dumps——不在表内,一律不当作目标。URL host 分支不受此表
@@ -229,8 +338,8 @@ var publicInfraIPs = map[string]bool{
 	"223.5.5.5": true, "223.6.6.6": true, // AliDNS
 	"119.29.29.29": true, "182.254.116.116": true, // DNSPod
 	"114.114.114.114": true, "114.114.115.115": true, // 114DNS
-	"180.76.76.76": true, // Baidu
-	"1.2.4.8": true, "210.2.4.8": true, // CNNIC
+	"180.76.76.76": true,                    // Baidu
+	"1.2.4.8":      true, "210.2.4.8": true, // CNNIC
 }
 
 // ExtractFenceTargets 从任意文本提取字面目标(IPv4 + 域名,URL 的 host 归类)。
@@ -324,10 +433,19 @@ func ExtractFenceTargets(text string) fenceTargets {
 	// 3) 裸域名 token(跳过 URL 段,已剔除)。
 	for _, tok := range reToken.FindAllString(lower, -1) {
 		if !strings.Contains(tok, ".") {
+			// 无点的 IP 变体(16909060 / 0x7f000001)没有别的分支能接住。
+			if suspiciousIPVariant(tok) {
+				addIPVariant(tok, addIP)
+			}
 			continue
 		}
 		// 纯数字/点已由 IPv4 分支处理
 		if validFenceIPv4(tok) || net.ParseIP(tok) != nil {
+			continue
+		}
+		// IP 变体(前导零/十六进制段/非法四段):归一化后按 IP 判定,不静默丢。
+		if suspiciousIPVariant(tok) {
+			addIPVariant(tok, addIP)
 			continue
 		}
 		if validFenceDomain(tok) {
@@ -336,15 +454,33 @@ func ExtractFenceTargets(text string) fenceTargets {
 	}
 	sort.Strings(t.Domains)
 	sort.Strings(t.IPs)
-	// 上限保护:超长目标集(如整段 IP 清单)截断,防止审批消息爆炸;
-	// 授权判定仍用截断前结果由调用方控制(此处只影响展示)。
-	if len(t.Domains) > 32 {
-		t.Domains = t.Domains[:32]
-	}
-	if len(t.IPs) > 32 {
-		t.IPs = t.IPs[:32]
-	}
+	// 不在此截断:授权/黑名单/登记必须用完整目标列表——曾经有"提取阶段截到
+	// 32 条"的实现,排序靠后的未授权目标被静默丢弃,审批文案里也看不到。
+	// 展示层截断见 displayList。
 	return t
+}
+
+// addIPVariant 把一个可疑 IP 变体 token 归一化后计入目标;归一化失败(解析
+// 不出的怪形态)也按原始 token 计入——fail-closed,交由审批裁决。
+func addIPVariant(tok string, addIP func(string)) {
+	if ip := net.ParseIP(inetAtonIP(tok)); ip != nil {
+		if ip.IsLoopback() || ip.IsUnspecified() {
+			return // 与点分十进制同待遇:回环/未指定地址不是渗透目标
+		}
+		addIP(ip.String())
+		return
+	}
+	addIP(tok)
+}
+
+// displayList 供审批文案使用的目标清单:超过 32 条截断并标注总数。只影响
+// 展示——判定与登记永远用完整列表(见 ExtractFenceTargets 尾注)。
+func (t fenceTargets) displayList() string {
+	all := t.list()
+	if len(all) <= 32 {
+		return strings.Join(all, "、")
+	}
+	return strings.Join(all[:32], "、") + fmt.Sprintf(" 等 %d 个目标", len(all))
 }
 
 // AssetFence 是资产围栏的 DB 支撑实现(guard 通过接口持有,便于测试替身)。
@@ -400,7 +536,7 @@ func (f *AssetFence) evaluate(ctx context.Context, toolName string, input []byte
 	}
 	return fenceDecision{
 		ProjectID: projectID, Targets: targets,
-		Reason: "目标资产不在项目授权范围内：" + strings.Join(targets.list(), "、") +
+		Reason: "目标资产不在项目授权范围内：" + targets.displayList() +
 			"。若确属本次委托范围，请批准；否则请拒绝并改测授权内资产。",
 	}
 }

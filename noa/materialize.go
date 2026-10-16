@@ -3,7 +3,7 @@ package noa
 import (
 	"time"
 
-	"github.com/Autumn-27/artex/acllm"
+	"github.com/c1ayooo/4zrec/acllm"
 )
 
 // Materialize applies a session's compression state to a message array so the

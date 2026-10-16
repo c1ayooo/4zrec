@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Database is the PostgreSQL connection config. Either set DSN directly, or set
@@ -25,18 +24,10 @@ type Database struct {
 	SSLMode  string `json:"sslmode"`
 }
 
-// Sync 是资产同步的节奏配置（config.json 的 "sync" 块）。
-type Sync struct {
-	// IntervalMinutes 是 4zrecon 增量同步 ticker 的周期（分钟）。
-	// 0 = 默认 30；负数 = 关闭定时同步（手动 POST /api/sync 仍可用）。
-	IntervalMinutes int `json:"4zrecon_interval_minutes"`
-}
-
 // Config is the on-disk config file shape.
 type Config struct {
 	Database Database `json:"database"`
 	SkillDir string   `json:"skill_dir"`
-	Sync     Sync     `json:"sync"`
 }
 
 // BaseDir is the directory that anchors all runtime artifacts (config.json and
@@ -155,20 +146,6 @@ func PostgresDSN() (dsn, source string, err error) {
 		return db.buildDSN(), "配置文件 " + Path() + " (database 字段)", nil
 	}
 	return "", "", fmt.Errorf("未找到数据库配置：环境变量 ARTEX_PG_DSN 未设置，且配置文件 %s 未提供 database（dsn 或 host/user/dbname）。请创建该配置文件或设置环境变量后重试", Path())
-}
-
-// SyncInterval resolves the incremental-sync ticker period.
-// 0 (unset) → 30min default; negative → ok=false disables the ticker.
-func (c Config) SyncInterval() (d time.Duration, ok bool) {
-	n := c.Sync.IntervalMinutes
-	switch {
-	case n < 0:
-		return 0, false
-	case n == 0:
-		return 30 * time.Minute, true
-	default:
-		return time.Duration(n) * time.Minute, true
-	}
 }
 
 func (d Database) buildDSN() string {

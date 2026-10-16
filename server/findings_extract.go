@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/report"
+	"github.com/c1ayooo/4zrec/db"
+	"github.com/c1ayooo/4zrec/report"
 )
 
 // POST /api/tasks/{id}/extract-findings — back-fill findings from the transcript.

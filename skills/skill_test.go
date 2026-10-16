@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Autumn-27/artex/acllm"
-	"github.com/Autumn-27/artex/tools"
+	"github.com/c1ayooo/4zrec/acllm"
+	"github.com/c1ayooo/4zrec/tools"
 )
 
 func TestSkillToolReturnsInstructions(t *testing.T) {

@@ -218,9 +218,9 @@ function ProjectDetail({ id }: { id: number }) {
                 done={assetsTotal > 0}
                 title="资产进项目"
                 doneText={`${assetsTotal} 条资产`}
-                href="/function/sync"
-                linkText="去同步"
-                hint="同步 4zrecon 资产或让任务发现——范围命中的会自动归属本项目并授权。"
+                href="/function/assets"
+                linkText="去资产页"
+                hint="在资产页管理资产或让任务执行中发现——范围命中的会自动归属本项目并授权。"
               />
               <WizardStep
                 index={3}

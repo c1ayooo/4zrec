@@ -3,8 +3,8 @@ package agent
 import (
 	"encoding/json"
 
-	"github.com/Autumn-27/artex/acllm"
-	"github.com/Autumn-27/artex/tools"
+	"github.com/c1ayooo/4zrec/acllm"
+	"github.com/c1ayooo/4zrec/tools"
 )
 
 // deferredSystem builds an agent's system-prompt segments from its DeferredInfo.

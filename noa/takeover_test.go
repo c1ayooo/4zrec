@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Autumn-27/artex/acllm"
-	"github.com/Autumn-27/artex/askernel"
-	"github.com/Autumn-27/artex/tools"
+	"github.com/c1ayooo/4zrec/acllm"
+	"github.com/c1ayooo/4zrec/askernel"
+	"github.com/c1ayooo/4zrec/tools"
 )
 
 // Consumer-side seam assertions: the takeover slots into askernel's Noa

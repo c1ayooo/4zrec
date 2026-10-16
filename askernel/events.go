@@ -12,7 +12,7 @@
 package askernel
 
 import (
-	"github.com/Autumn-27/artex/acllm"
+	"github.com/c1ayooo/4zrec/acllm"
 )
 
 // EventKind classifies a loop Event (harness.Event-compatible shape).

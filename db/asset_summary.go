@@ -4,12 +4,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // CompanyAssetSummary 按公司聚合资产生成"开局态势"摘要（planner/mainagent 的
 // AssetSummary 提示词变量，施工单变更3）。口径：公司名、各型计数、存活 service
-// top、root domain 清单、技术栈 top；末行标注数据来源与最近同步时间——防 agent
-// 把同步资产当实时探测结论。无公司/无资产/查询失败一律返回空串（模板条件块吞掉，
+// top、root domain 清单、技术栈 top；末行标注数据来源与资产库最近更新时间——防 agent
+// 把库内资产当实时探测结论。无公司/无资产/查询失败一律返回空串（模板条件块吞掉，
 // 不影响既有行为）。
 func (s *AssetStore) CompanyAssetSummary(ctx context.Context, companyIDs []int64) string {
 	if s == nil || s.DB() == nil || len(companyIDs) == 0 {
@@ -106,13 +107,15 @@ func (s *AssetStore) CompanyAssetSummary(ctx context.Context, companyIDs []int64
 		}
 	}
 
-	// 新鲜度标注：sync_state 的最近一轮。缺失时明说"同步时间未知"，来源语义
-	// 仍然成立（资产来自 4zrecon 同步，非本任务实时探测）。
-	line := "数据来源: 4zrecon 同步（source=4zrecon sync，非实时探测——以此为起点验证，不要当作已验证结论）"
-	if t, terr := d.LatestSyncRun(ctx); terr == nil && t != nil {
-		line += fmt.Sprintf("，最近同步 %s", t.Local().Format("2006-01-02 15:04"))
+	// 新鲜度标注：资产库的最近更新时间（max(last_seen)）。来源语义为平台原生
+	// 采集（agent 写入 / DNS·HTTP 自动补全），非本任务实时探测——planner 仍应
+	// 以"起点线索"对待，派意图时让 worker 先验证存活。
+	line := "数据来源: 平台资产库（原生采集，非本任务实时探测——以此为起点验证，不要当作已验证结论）"
+	var lastSeen *time.Time
+	if err := d.QueryRowContext(ctx, `SELECT max(last_seen) FROM assets WHERE company_id = ANY($1)`, companyIDs).Scan(&lastSeen); err == nil && lastSeen != nil {
+		line += fmt.Sprintf("，最近更新 %s", lastSeen.Local().Format("2006-01-02 15:04"))
 	} else {
-		line += "，同步时间未知"
+		line += "，更新时间未知"
 	}
 	b.WriteString(line)
 	return b.String()

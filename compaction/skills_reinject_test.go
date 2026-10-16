@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Autumn-27/artex/acllm"
+	"github.com/c1ayooo/4zrec/acllm"
 )
 
 // With many skills behind the boundary whose combined size exceeds the total

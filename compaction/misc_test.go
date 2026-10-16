@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Autumn-27/artex/acllm"
+	"github.com/c1ayooo/4zrec/acllm"
 )
 
 func TestIsOverflowStrings(t *testing.T) {

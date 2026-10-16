@@ -667,9 +667,14 @@ func (d *DB) ConvProjectID(convID int64) (int64, error) {
 	return 0, nil
 }
 
-// AuthorizedTarget 判定"执行侧提取到的目标"是否已获授权:
+// AuthorizedTarget 判定"执行侧提取到的目标"是否已获授权——ALL 语义:
+// 每一个目标(域名与 IP)都必须独立命中,任何一个未授权即整体返回 false
+// (2026-10-16 围栏加固:此前任一命中即放行整条命令,混合目标里夹带未授权
+// 目标可以借道放行)。单目标授权途径:
 //  1. 命中项目范围规则 → 授权;
-//  2. 库里存在 authz='approved' 且 host 精确相等的资产 → 授权;
+//  2. 库里存在 authz='approved' 且 host 精确相等的【本项目或未归属】资产
+//     → 授权(项目隔离:他项目批准的资产不构成本项目授权,他项目 rejected
+//     的终态也不会因本项目审批被翻回);
 //  3. 其余 → 未授权(调用方决定 block/ask)。
 //
 // 全局黑名单不在本方法内(由 CheckAssetsIntercept/拦截规则层负责)。
@@ -678,43 +683,60 @@ func (d *DB) AuthorizedTarget(projectID int64, domains, ips []string) bool {
 		// 无项目上下文:围栏不启用,只有已批准资产仍算授权(通常全放行)
 		return true
 	}
-	rules, err := d.ProjectScopeRules(projectID)
-	if err == nil {
-		for _, dom := range domains {
-			if _, ok := MatchProjectScope(rules, dom, ""); ok {
-				return true
-			}
+	rules, _ := d.ProjectScopeRules(projectID) // 出错时范围检查缺席,资产检查仍逐目标生效(fail-closed)
+	authorizedDomain := func(dom string) bool {
+		if _, ok := MatchProjectScope(rules, dom, ""); ok {
+			return true
 		}
-		for _, ip := range ips {
-			if _, ok := MatchProjectScope(rules, "", ip); ok {
-				return true
-			}
+		var one int
+		return d.QueryRow(`SELECT 1 FROM assets WHERE authz='approved' AND (domain=$1 OR root_domain=$1)
+			AND (project_id IS NULL OR project_id=$2) LIMIT 1`, dom, projectID).Scan(&one) == nil
+	}
+	authorizedIP := func(ip string) bool {
+		if _, ok := MatchProjectScope(rules, "", ip); ok {
+			return true
 		}
+		var one int
+		return d.QueryRow(`SELECT 1 FROM assets WHERE authz='approved' AND ip=$1
+			AND (project_id IS NULL OR project_id=$2) LIMIT 1`, ip, projectID).Scan(&one) == nil
 	}
 	for _, dom := range domains {
-		var one int
-		if err := d.QueryRow(`SELECT 1 FROM assets WHERE authz='approved' AND (domain=$1 OR root_domain=$1) LIMIT 1`, dom).Scan(&one); err == nil {
-			return true
+		if !authorizedDomain(dom) {
+			return false
 		}
 	}
 	for _, ip := range ips {
-		var one int
-		if err := d.QueryRow(`SELECT 1 FROM assets WHERE authz='approved' AND ip=$1 LIMIT 1`, ip).Scan(&one); err == nil {
-			return true
+		if !authorizedIP(ip) {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 // EnsureDiscoveredAsset 把执行侧撞到的未登记目标就地登记为 pending 资产(待审批),
 // 供审批挂起流使用:人工批准后它就是一条 approved 资产。type 由调用方按目标形态
-// 给出(domain→subdomain,ip→ip)。已存在则返回原 id,不改状态(assets 无唯一
-// 约束,先查后插;并发重复最多多一条 pending,由人工去重)。
+// 给出(domain→subdomain,ip→ip)。
+//
+// 单行模型下的项目语义(2026-10-16 围栏加固):assets 各类型有全局唯一索引,
+// 同一 host 全库只有一行——本项目的审批若命中【他项目占据的行】,把归属移交
+// 给本项目(授权随审批项目走):原项目的范围授权不受影响(范围匹配不依赖资产
+// 行),而它经资产 approved 的旧通道同步失效,不会出现"他项目审批、本项目放行"
+// 的漂移。未归属(NULL)的行照旧认领。
 func (d *DB) EnsureDiscoveredAsset(projectID int64, typ, domain, ip string) (int64, error) {
+	claimForeign := func(id int64) (int64, error) {
+		if _, err := d.Exec(`UPDATE assets SET project_id=$1, updated_at=now() WHERE id=$2`, projectID, id); err != nil {
+			return 0, err
+		}
+		return id, nil
+	}
 	if typ == "ip" {
 		var id int64
-		err := d.QueryRow(`SELECT id FROM assets WHERE type='ip' AND ip=$1 LIMIT 1`, ip).Scan(&id)
+		var owner sql.NullInt64
+		err := d.QueryRow(`SELECT id, project_id FROM assets WHERE type='ip' AND ip=$1 LIMIT 1`, ip).Scan(&id, &owner)
 		if err == nil {
+			if owner.Valid && owner.Int64 != projectID {
+				return claimForeign(id)
+			}
 			return id, nil
 		}
 		if err != sql.ErrNoRows {
@@ -726,8 +748,16 @@ INSERT INTO assets(type, ip, authz, project_id) VALUES ('ip', $1, 'pending', $2)
 		return id, err
 	}
 	var id int64
-	err := d.QueryRow(`SELECT id FROM assets WHERE domain=$1 LIMIT 1`, domain).Scan(&id)
+	var owner sql.NullInt64
+	// 同域可能同时存在 root_domain 行(UpsertSubdomain 的副作用)与 subdomain
+	// 行:围栏登记的目标优先落 subdomain 行(与插入形态一致),root 行兜底。
+	err := d.QueryRow(`SELECT id, project_id FROM assets
+		WHERE domain=$1 AND type IN ('subdomain','root_domain')
+		ORDER BY (type='subdomain') DESC LIMIT 1`, domain).Scan(&id, &owner)
 	if err == nil {
+		if owner.Valid && owner.Int64 != projectID {
+			return claimForeign(id)
+		}
 		return id, nil
 	}
 	if err != sql.ErrNoRows {

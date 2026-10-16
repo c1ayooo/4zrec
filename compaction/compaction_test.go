@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Autumn-27/artex/acllm"
+	"github.com/c1ayooo/4zrec/acllm"
 )
 
 func bigMsg(role acllm.Role, n int) acllm.Message {

@@ -12,8 +12,8 @@ import (
 	"io"
 	"sync"
 
-	"github.com/Autumn-27/artex/acllm"
-	"github.com/Autumn-27/artex/tools"
+	"github.com/c1ayooo/4zrec/acllm"
+	"github.com/c1ayooo/4zrec/tools"
 )
 
 // ToolName builds the three-segment MCP tool name.

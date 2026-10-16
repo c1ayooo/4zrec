@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Autumn-27/artex/acllm"
-	"github.com/Autumn-27/artex/agent"
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/sidequestion"
+	"github.com/c1ayooo/4zrec/acllm"
+	"github.com/c1ayooo/4zrec/agent"
+	"github.com/c1ayooo/4zrec/db"
+	"github.com/c1ayooo/4zrec/sidequestion"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 )

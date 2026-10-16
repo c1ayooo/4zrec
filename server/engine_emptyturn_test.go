@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/Autumn-27/artex/acllm"
+	"github.com/c1ayooo/4zrec/acllm"
 )
 
 // 空转回合(仅思考、无正文无工具)的识别与续跑，见 steerHooks.Stop。

@@ -13,8 +13,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/Autumn-27/artex/agent"
-	"github.com/Autumn-27/artex/db"
+	"github.com/c1ayooo/4zrec/agent"
+	"github.com/c1ayooo/4zrec/db"
 	"github.com/cloudwego/eino/schema"
 )
 

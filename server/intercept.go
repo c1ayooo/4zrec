@@ -10,10 +10,10 @@ import (
 	"regexp"
 	"strconv"
 
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/guard"
-	"github.com/Autumn-27/artex/intercept"
-	"github.com/Autumn-27/artex/llmrec"
+	"github.com/c1ayooo/4zrec/db"
+	"github.com/c1ayooo/4zrec/guard"
+	"github.com/c1ayooo/4zrec/intercept"
+	"github.com/c1ayooo/4zrec/llmrec"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 )

@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Autumn-27/artex/vulnintel/util"
+	"github.com/c1ayooo/4zrec/vulnintel/util"
 
 	"github.com/imroc/req/v3"
 )

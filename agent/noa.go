@@ -4,8 +4,8 @@ import (
 	"log"
 	"path/filepath"
 
-	"github.com/Autumn-27/artex/askernel"
-	"github.com/Autumn-27/artex/noa"
+	"github.com/c1ayooo/4zrec/askernel"
+	"github.com/c1ayooo/4zrec/noa"
 )
 
 // noaWarn returns a diagnostics sink tagging non-fatal noa messages with the

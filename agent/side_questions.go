@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Autumn-27/artex/askernel"
-	"github.com/Autumn-27/artex/compaction"
-	"github.com/Autumn-27/artex/sidequestion"
+	"github.com/c1ayooo/4zrec/askernel"
+	"github.com/c1ayooo/4zrec/compaction"
+	"github.com/c1ayooo/4zrec/sidequestion"
 )
 
 // attachSideCapture wires the side-question checkpoint capture into a run: it

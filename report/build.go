@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Autumn-27/artex/db"
+	"github.com/c1ayooo/4zrec/db"
 )
 
 // reAntiFoxDataPath / reVarFolders match PLATFORM-INTERNAL scratch paths only — the

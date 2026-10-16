@@ -25,9 +25,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/Autumn-27/artex/acllm"
-	"github.com/Autumn-27/artex/compaction"
-	"github.com/Autumn-27/artex/tools"
+	"github.com/c1ayooo/4zrec/acllm"
+	"github.com/c1ayooo/4zrec/compaction"
+	"github.com/c1ayooo/4zrec/tools"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"

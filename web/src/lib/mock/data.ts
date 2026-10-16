@@ -3234,14 +3234,6 @@ export const skills: SkillItem[] = [
     usage_agents: ["worker"],
     last_used: "2026-08-19T21:40:00Z",
   },
-  {
-    name: "4zrecon",
-    description: "从 4zrecon 拉取资产并归并到公司范围；批量导入资产时使用。",
-    files: ["SKILL.md", "assets/mapping.md"],
-    calls: 0,
-    tasks: 0,
-    usage_agents: [],
-  },
 ];
 
 export const skillCalls: SkillCall[] = [

@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Autumn-27/artex/acllm"
-	"github.com/Autumn-27/artex/compaction"
-	"github.com/Autumn-27/artex/tools"
-	"github.com/Autumn-27/artex/transcript"
+	"github.com/c1ayooo/4zrec/acllm"
+	"github.com/c1ayooo/4zrec/compaction"
+	"github.com/c1ayooo/4zrec/tools"
+	"github.com/c1ayooo/4zrec/transcript"
 	"github.com/cloudwego/eino/schema"
 )
 

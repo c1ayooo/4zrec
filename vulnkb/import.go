@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Autumn-27/artex/db"
+	"github.com/c1ayooo/4zrec/db"
 )
 
 // DefaultDir 是漏洞库源文件目录(相对工作目录)。仓库随二进制分发 vulnkb/,

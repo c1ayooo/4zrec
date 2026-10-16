@@ -15,11 +15,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Autumn-27/artex/agent"
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/llmrec"
-	"github.com/Autumn-27/artex/sidequestion"
-	"github.com/Autumn-27/artex/transcript"
+	"github.com/c1ayooo/4zrec/agent"
+	"github.com/c1ayooo/4zrec/db"
+	"github.com/c1ayooo/4zrec/llmrec"
+	"github.com/c1ayooo/4zrec/sidequestion"
+	"github.com/c1ayooo/4zrec/transcript"
 	"github.com/cloudwego/eino/components/model"
 )
 

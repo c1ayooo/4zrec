@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Autumn-27/artex/db"
+	"github.com/c1ayooo/4zrec/db"
 )
 
 // CompleteFunc 由宿主注入的单次补全实现(server 侧把 engine 的 llmpool 适配

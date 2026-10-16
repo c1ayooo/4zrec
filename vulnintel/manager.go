@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/vulnintel/grab"
+	"github.com/c1ayooo/4zrec/db"
+	"github.com/c1ayooo/4zrec/vulnintel/grab"
 )
 
 // settings 键。enabled 关掉即停轮询(下次 tick 生效),interval 改动同样

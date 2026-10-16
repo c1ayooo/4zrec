@@ -13,7 +13,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/imroc/req/v3"
 
-	"github.com/Autumn-27/artex/vulnintel/util"
+	"github.com/c1ayooo/4zrec/vulnintel/util"
 )
 
 type VenustechCrawler struct {

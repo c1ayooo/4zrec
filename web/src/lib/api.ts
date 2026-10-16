@@ -64,6 +64,8 @@ import type {
   LLMRetryPolicy,
   LLMTask,
   MCPServer,
+  ReconSchedule,
+  SpacemapEngine,
   MCPTool,
   MissingSkill,
   ModelTokenStat,
@@ -78,8 +80,6 @@ import type {
   Severity,
   SkillCall,
   SkillItem,
-  ReconProject,
-  ReconTask,
   Stats,
   Task,
   TaskArchive,
@@ -1165,40 +1165,21 @@ export const api = {
   mcpTools: (id: number) => get<{ tools: MCPTool[] }>(`/mcp/${id}/tools`).then((r) => arr(r.tools)),
   refreshMcpServer: (id: number) => post<{ tools: MCPTool[] }>(`/mcp/${id}/refresh`, {}).then((r) => arr(r.tools)),
 
-  // ---- 资产同步 (4zrecon 数据源) ----
-  reconStatus: () =>
-    get<{ exists: boolean; configured: boolean; enabled: boolean; reachable: boolean; url?: string; tools: string[] }>(
-      "/sync/4zrecon/status",
-    ),
-  reconDatasource: (body: { url?: string; api_key?: string }) =>
-    post<{ id: number; enabled: boolean }>("/sync/4zrecon/datasource", body),
-  reconProjects: (page = 1, size = 50, search = "") =>
-    get<{ projects: ReconProject[]; tag: Record<string, number> }>(
-      `/sync/4zrecon/projects?page=${page}&size=${size}${search ? `&search=${encodeURIComponent(search)}` : ""}`,
-    ).then((r) => ({ projects: arr(r.projects), tag: r.tag ?? {} })),
-  reconTasks: (page = 1, size = 50, search = "") =>
-    get<{ tasks: ReconTask[] }>(
-      `/sync/4zrecon/tasks?page=${page}&size=${size}${search ? `&search=${encodeURIComponent(search)}` : ""}`,
-    ).then((r) => arr(r.tasks)),
-  reconSync: (body: {
-    mode?: "full" | "inc"; // full=目标全量(需 dimension/targets); inc=全局增量(同定时通道)
-    dimension?: "project" | "task";
-    targets?: string[];
-    asset_types?: string[];
-    create_company?: boolean;
-    page_size?: number;
-  }) =>
-    post<{
-      mode?: string;
-      synced: Record<string, number>;
-      companies: string[] | null;
-      warnings: string[] | null;
-      errors: string[] | null;
-    }>("/sync/4zrecon/sync", body),
-  // 增量同步的项目范围:定时/手动增量只拉勾选项目,空=不同步
-  reconSelection: () => get<{ projects: string[] }>("/sync/4zrecon/selection").then((r) => arr(r.projects)),
-  reconSetSelection: (projects: string[]) =>
-    put<{ projects: string[]; watermarks_reset: number }>("/sync/4zrecon/selection", { projects }),
+  // ---- 空间测绘引擎 key 配置 ----
+  spacemapEngines: () =>
+    get<{ engines: SpacemapEngine[] }>("/spacemap/engines").then((r) => arr(r.engines)),
+  saveSpacemapEngine: (body: { provider: string; api_key?: string; base_url?: string }) =>
+    post<{ engines: SpacemapEngine[] }>("/spacemap/engines", body).then((r) => arr(r.engines)),
+
+  // ---- 周期采集任务 ----
+  reconSchedules: () =>
+    get<{ schedules: ReconSchedule[] }>("/recon-schedules").then((r) => arr(r.schedules)),
+  createReconSchedule: (body: Partial<ReconSchedule>) => post<{ id: number }>("/recon-schedules", body),
+  updateReconSchedule: (id: number, body: Partial<ReconSchedule>) => put<{ ok: boolean }>(`/recon-schedules/${id}`, body),
+  deleteReconSchedule: (id: number) => del<{ deleted: number }>(`/recon-schedules/${id}`),
+  toggleReconSchedule: (id: number, enabled: boolean) =>
+    post<{ ok: boolean }>(`/recon-schedules/${id}/toggle`, { enabled }),
+  runReconScheduleNow: (id: number) => post<{ ok: boolean }>(`/recon-schedules/${id}/run`, {}),
 
   // ---- skills (文件系统) ----
   skills: () => get<{ skills: SkillItem[] }>("/skills").then((r) => arr(r.skills)),

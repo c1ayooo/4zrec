@@ -19,15 +19,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Autumn-27/artex/agent"
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/intercept"
-	"github.com/Autumn-27/artex/llmpool"
-	"github.com/Autumn-27/artex/llmrec"
-	"github.com/Autumn-27/artex/report"
-	actool "github.com/Autumn-27/artex/tools"
-	"github.com/Autumn-27/artex/traffic"
-	"github.com/Autumn-27/artex/transcript"
+	"github.com/c1ayooo/4zrec/agent"
+	"github.com/c1ayooo/4zrec/db"
+	"github.com/c1ayooo/4zrec/intercept"
+	"github.com/c1ayooo/4zrec/llmpool"
+	"github.com/c1ayooo/4zrec/llmrec"
+	"github.com/c1ayooo/4zrec/report"
+	actool "github.com/c1ayooo/4zrec/tools"
+	"github.com/c1ayooo/4zrec/traffic"
+	"github.com/c1ayooo/4zrec/transcript"
 	"github.com/cloudwego/eino/components/model"
 )
 
@@ -61,10 +61,6 @@ type Server struct {
 	// scheduler tick and an HTTP settings change / task creation can't both count
 	// free slots off the same snapshot and over-promote past the limit.
 	concMu sync.Mutex
-
-	// syncMu 串行化资产同步轮次：ticker 的定时增量与 POST /sync 的手动触发
-	// （full/inc）不得并发跑同一数据源。TryLock 拿不到锁即跳过/拒绝本轮。
-	syncMu sync.Mutex
 
 	cfgMu     sync.Mutex
 	chatAgent *agent.ChatAgent // conversational runner for the chat page; nil w/o LLM
@@ -236,7 +232,6 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		domainReg := buildDomainReg(m.Assets())
 		wireTools(m.pg, domainReg) // 内置工具表：按 agent 过滤 + 覆盖描述/schema + 注入默认值
 		seedPrompts(m.pg)          // 内置 agent 默认提示词正文播种进 agent_prompts(仅空时)
-		s.seedReconGrants()        // 同步数据源只读 MCP 工具授权播种(一次性;未配置则等 POST datasource 时补播)
 		s.seedOrchestrationTools() // P2 跨任务编排工具 seed 进 tools 表(可按 agent 绑定)
 		if err := s.seedFindingRetester(); err != nil {
 			log.Printf("[retester] seed: %v", err)
@@ -247,9 +242,9 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		// 漏洞 IM 推送投递引擎。与 Scheduler 并列但独立：推送的实时性要求(3s)
 		// 与触发器的业务节奏不同，且两者失败互不牵连——推送卡住不该影响 agent 触发。
 		go newNotifier(s).Run(s.ctx)
-		// 资产增量同步 ticker（4zrecon）。与 Scheduler/Notifier 并列独立：
-		// 同步是 IO 密集的后台批任务，节奏由 config sync 块控制（默认 30min）。
-		go s.runSyncTicker(s.ctx)
+		// 周期采集 worker(五引擎按域采集/主动测绘流水线的定时执行,30s tick;
+		// 鉴权失败指数退避熔断,新资产入通知事件)。与 Scheduler/Notifier 并列独立。
+		go s.runReconScheduleWorker(s.ctx)
 		// Fill the tool cache for any enabled MCP that has none yet (notably the
 		// seeded browser MCP on first run). Async so it never blocks startup.
 		go s.discoverEmptyMCPsOnStartup()
@@ -926,14 +921,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/mcp/{id}", s.pgDeleteMCP)
 	mux.HandleFunc("GET /api/mcp/{id}/tools", s.pgMCPTools)
 	mux.HandleFunc("POST /api/mcp/{id}/refresh", s.pgRefreshMCP)
-	// 资产同步 — 4zrecon 数据源
-	mux.HandleFunc("GET /api/sync/4zrecon/status", s.syncReconStatus)
-	mux.HandleFunc("POST /api/sync/4zrecon/datasource", s.syncReconDatasource)
-	mux.HandleFunc("GET /api/sync/4zrecon/projects", s.syncReconProjects)
-	mux.HandleFunc("GET /api/sync/4zrecon/selection", s.syncReconGetSelection)
-	mux.HandleFunc("PUT /api/sync/4zrecon/selection", s.syncReconSetSelection)
-	mux.HandleFunc("GET /api/sync/4zrecon/tasks", s.syncReconTasks)
-	mux.HandleFunc("POST /api/sync/4zrecon/sync", s.syncReconRun)
+	// 空间测绘引擎 key 配置(信息收集原生能力)
+	mux.HandleFunc("GET /api/spacemap/engines", s.spacemapEnginesGet)
+	mux.HandleFunc("POST /api/spacemap/engines", s.spacemapEnginesSet)
+	// 周期采集任务管理
+	mux.HandleFunc("GET /api/recon-schedules", s.reconSchedList)
+	mux.HandleFunc("POST /api/recon-schedules", s.reconSchedCreate)
+	mux.HandleFunc("PUT /api/recon-schedules/{id}", s.reconSchedUpdate)
+	mux.HandleFunc("DELETE /api/recon-schedules/{id}", s.reconSchedDelete)
+	mux.HandleFunc("POST /api/recon-schedules/{id}/toggle", s.reconSchedToggle)
+	mux.HandleFunc("POST /api/recon-schedules/{id}/run", s.reconSchedRunNow)
 	// Skill CRUD (文件系统)
 	mux.HandleFunc("GET /api/skills", s.fsListSkills)
 	mux.HandleFunc("POST /api/skills", s.fsCreateSkill)
@@ -3973,4 +3970,15 @@ func atoiDefault(s string, d int) int {
 		return n
 	}
 	return d
+}
+
+// queryInt reads an int query param with a default fallback; non-positive
+// values also fall back (pagination params etc.).
+func queryInt(r *http.Request, key string, def int) int {
+	if v := r.URL.Query().Get(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
 }

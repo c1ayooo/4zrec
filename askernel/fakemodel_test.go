@@ -11,8 +11,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Autumn-27/artex/acllm"
-	"github.com/Autumn-27/artex/tools"
+	"github.com/c1ayooo/4zrec/acllm"
+	"github.com/c1ayooo/4zrec/tools"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 )

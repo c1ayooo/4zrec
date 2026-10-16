@@ -1,7 +1,9 @@
 package guard
 
 import (
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -25,8 +27,8 @@ func TestExtractFenceTargets(t *testing.T) {
 			domains: []string{"api.example.com"},
 		},
 		{
-			name: "多目标混合",
-			cmd:  `nmap 10.0.0.1 10.0.0.2 web.example.com`,
+			name:    "多目标混合",
+			cmd:     `nmap 10.0.0.1 10.0.0.2 web.example.com`,
 			domains: []string{"web.example.com"},
 			ips:     []string{"10.0.0.1", "10.0.0.2"},
 		},
@@ -98,28 +100,28 @@ func TestExtractFenceTargets(t *testing.T) {
 			domains: []string{"example.com"},
 		},
 		{
-			name: "管道与重定向中的目标",
-			cmd:  `dig +short sub.example.com | tee out.txt; curl http://10.9.8.7`,
+			name:    "管道与重定向中的目标",
+			cmd:     `dig +short sub.example.com | tee out.txt; curl http://10.9.8.7`,
 			domains: []string{"sub.example.com"},
-			ips:    []string{"10.9.8.7"},
+			ips:     []string{"10.9.8.7"},
 		},
 		{
 			name: "Python 代码标识符不当作域名",
 			cmd:  `python3 -c "import re,os,json; print(re.findall(r'[0-9]+', os.popen('echo hi').read())); json.loads('{}')"; pip install requests==2.31.0`,
 		},
 		{
-			name: "公共 DNS 解析器直接排除,真正目标照常提取",
-			cmd:  `dig @8.8.8.8 +short sub.example.com; nslookup x.com 114.114.114.114`,
+			name:    "公共 DNS 解析器直接排除,真正目标照常提取",
+			cmd:     `dig @8.8.8.8 +short sub.example.com; nslookup x.com 114.114.114.114`,
 			domains: []string{"sub.example.com", "x.com"},
 		},
 		{
-			name: "单引号载荷(代码/数据)里的裸 token 不是目标",
-			cmd:  `dig +short sub.example.com | awk '{print $1}' && python3 -c 'x="other.evil.com"; print(len(x))'`,
+			name:    "单引号载荷(代码/数据)里的裸 token 不是目标",
+			cmd:     `dig +short sub.example.com | awk '{print $1}' && python3 -c 'x="other.evil.com"; print(len(x))'`,
 			domains: []string{"sub.example.com"},
 		},
 		{
-			name: "引号内带 scheme 的 URL 仍是目标(代码里的真实请求)",
-			cmd:  `python3 -c 'import requests; requests.get("https://api.evil.com/x")'`,
+			name:    "引号内带 scheme 的 URL 仍是目标(代码里的真实请求)",
+			cmd:     `python3 -c 'import requests; requests.get("https://api.evil.com/x")'`,
 			domains: []string{"api.evil.com"},
 		},
 		{
@@ -143,8 +145,8 @@ for m in re.finditer(r'<script>(.*?)</script>', html, re.S):
 EOF`,
 		},
 		{
-			name:    "heredoc 之外的命令参数区目标照常识别",
-			cmd:     `grep -o sub.example.com index.html; python3 - <<'EOF'
+			name: "heredoc 之外的命令参数区目标照常识别",
+			cmd: `grep -o sub.example.com index.html; python3 - <<'EOF'
 x=m.group(1)
 EOF`,
 			domains: []string{"sub.example.com"},
@@ -157,6 +159,72 @@ EOF`,
 			name:    "内网伪 TLD 主机名仍识别",
 			cmd:     `nmap -p 22 app.corp.local dc01.prod web.internal`,
 			domains: []string{"app.corp.local", "dc01.prod", "web.internal"},
+		},
+
+		// ---- 对抗性用例(红队方向:必须提取到 / 必须拦住)。与上面的误报
+		// 排除用例对偶——2026-10-16 围栏加固引入,每个用例对应一个实测过的
+		// 绕过形态,改动提取器前先跑这里。----
+
+		{
+			// <<< here-string 曾被 reHeredocStart 从第二个 < 起误当 heredoc
+			// 起点,未闭合分支再吞掉全部剩余文本 → 目标隐身。
+			name:    "here-string(<<<)不是 heredoc 起点,后续目标照常提取",
+			cmd:     `cat <<<EOF; nmap sub.evil.com`,
+			domains: []string{"sub.evil.com"},
+		},
+		{
+			// 未闭合 heredoc 曾把余下全部文本当载荷剔除;实际 <<EOF 后同行的
+			// 命令是真实会执行的(分号分隔)。
+			name:    "未闭合 heredoc 只抹标记,同行后续命令目标照常提取",
+			cmd:     `cat <<EOF; nmap sub.evil.com`,
+			domains: []string{"sub.evil.com"},
+		},
+		{
+			// 单引号文本里的字面 <<EOF 曾被当 heredoc 起点 → 未闭合 → 吞全部。
+			name:    "引号内的字面 <<TAG 不启动 heredoc,后续目标照常提取",
+			cmd:     `echo 'see <<EOF docs'; nmap sub.evil.com`,
+			domains: []string{"sub.evil.com"},
+		},
+		{
+			// 反引号与 $() 运行时等价,此前只有反引号段被整段剔除。
+			name:    "反引号命令替换段不再剔除,其中目标照常提取",
+			cmd:     "ping -c1 `dig +short sub.evil.com`",
+			domains: []string{"sub.evil.com"},
+		},
+		{
+			// 整数形 IP(inet_aton):16909060 = 1.2.3.4。
+			name: "整数形 IP 变体归一化提取",
+			cmd:  `curl -s 16909060`,
+			ips:  []string{"1.2.3.4"},
+		},
+		{
+			// 十六进制形:0xC0A80001 = 192.168.0.1。
+			name: "十六进制 IP 变体归一化提取",
+			cmd:  `curl -s 0xC0A80001`,
+			ips:  []string{"192.168.0.1"},
+		},
+		{
+			// 前导零八进制段:0330 = 216。
+			name: "八进制段 IP 变体归一化提取",
+			cmd:  `curl -s 0330.0.0.1`,
+			ips:  []string{"216.0.0.1"},
+		},
+		{
+			// 末段前导零:10.0.0.01 → 10.0.0.1(validFenceIPv4 拒绝前导零,
+			// 由变体分支接住)。
+			name: "末段前导零 IP 归一化提取",
+			cmd:  `curl -s 10.0.0.01`,
+			ips:  []string{"10.0.0.1"},
+		},
+		{
+			// 八进制环回(0177.0.0.1 = 127.0.0.1)与点分环环回同待遇:排除。
+			name: "归一化后是回环地址则排除(与点分形态一致)",
+			cmd:  `curl -s 0177.0.0.1`,
+		},
+		{
+			// 版本号碎片(纯十进制三段)不判 IP 变体——防误报回归护栏。
+			name: "纯十进制三段仍不判 IP 变体(版本号形态)",
+			cmd:  `nginx version 1.2.3 updated 2.4.13 build 10.20.30`,
 		},
 	}
 	for _, tc := range cases {
@@ -215,6 +283,64 @@ func TestValidFenceDomain(t *testing.T) {
 	for _, s := range good {
 		if !validFenceDomain(s) {
 			t.Errorf("%q 应判定为域名", s)
+		}
+	}
+}
+
+// TestFenceNoTruncationBeforeJudgment 截断只影响展示,判定用完整列表
+// (2026-10-16 围栏加固回归):"提取阶段截到 32 条"曾经让排序靠后的未授权
+// 目标同时躲过黑名单匹配与审批文案——批准者被蒙在鼓里。
+func TestFenceNoTruncationBeforeJudgment(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString("nmap")
+	for i := 0; i < 34; i++ {
+		fmt.Fprintf(&sb, " t%02d.example.com", i)
+	}
+	got := ExtractFenceTargets(sb.String())
+	if len(got.Domains) != 34 {
+		t.Fatalf("提取应保留全部 34 个目标(判定/黑名单/登记用),得到 %d", len(got.Domains))
+	}
+	// 排序后垫底的 t33 必须在场——按字典序排,它正是旧截断实现丢掉的那批。
+	found := false
+	for _, d := range got.Domains {
+		if d == "t33.example.com" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("排序垫底的目标(t33.example.com)被丢弃——判定列表不得截断")
+	}
+	// 展示层才截断,并带总数标注。
+	dl := got.displayList()
+	if !strings.Contains(dl, "等 34 个目标") {
+		t.Fatalf("展示层应截断并标注总数: %q", dl)
+	}
+	if strings.Contains(dl, "t33.example.com") || strings.Contains(dl, "t32.example.com") {
+		t.Fatal("展示层截断后不应逐条列出第 32 名之外的目标")
+	}
+}
+
+// TestInetAtonIP 归一化核心:四段/三段/两段/单段、八进制与十六进制段、
+// 越界拒绝。可疑 IP 变体的判定正确性依赖这里。
+func TestInetAtonIP(t *testing.T) {
+	cases := map[string]string{
+		"16909060":   "1.2.3.4",     // 整数形
+		"0xC0A80001": "192.168.0.1", // 十六进制单段
+		"0x7f.1":     "127.0.0.1",   // 混合段
+		"0330.0.0.1": "216.0.0.1",   // 八进制首段
+		"1.2.3":      "1.2.0.3",     // 三段(末段占两字节)
+		"1.2.3.4":    "1.2.3.4",     // 标准四段
+		"10.0.0.01":  "10.0.0.1",    // 末段前导零
+		// 越界/非法 → 空串
+		"256.1.1.1":    "",
+		"1.2.3.4.5":    "",
+		"999999999999": "",
+		"1.2.65536":    "",
+		"":             "",
+	}
+	for in, want := range cases {
+		if got := inetAtonIP(in); got != want {
+			t.Errorf("inetAtonIP(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

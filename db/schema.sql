@@ -860,12 +860,12 @@ DROP TRIGGER IF EXISTS trg_mcp_upd ON mcp_servers;
 CREATE TRIGGER trg_mcp_upd BEFORE UPDATE ON mcp_servers
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
--- 默认数据源占位：4zrecon 资产同步 MCP（地址与认证均留空、未启用）。
--- 供「资产同步」页检测数据源是否已配置；用户在页面填入 url 与 X-API-Key 后再启用。
--- 仅在缺失时插入，绝不覆盖用户已配置/已启用的服务器（schema.sql 每次启动都会 Exec）。
-INSERT INTO mcp_servers (name, transport, url, env, enabled)
-VALUES ('4zrecon', 'http', NULL, '{"X-API-Key":""}', false)
-ON CONFLICT (name) DO NOTHING;
+-- 资产同步（4zrecon）功能已整体移除：清掉占位数据源行（CASCADE 带走其工具缓存与
+-- agent_visibility 授权行）、同步水位表与运行时 settings 键。schema.sql 每次启动
+-- 都会 Exec，这些语句天然幂等。
+DELETE FROM mcp_servers WHERE name = '4zrecon';
+DROP TABLE IF EXISTS sync_state;
+DELETE FROM settings WHERE key IN ('4zrecon_readonly_grants_seeded', 'sync_last_reconcile_at', 'sync.selected_projects');
 
 CREATE TABLE IF NOT EXISTS mcp_tools_cache (
     id            BIGSERIAL PRIMARY KEY,
@@ -900,26 +900,48 @@ CREATE TABLE IF NOT EXISTS agent_skill_visibility (
 );
 CREATE INDEX IF NOT EXISTS idx_askv_skill ON agent_skill_visibility(skill_name);
 
--- =====================================================================
--- 资产同步水位（4zrecon → 本仓）
--- =====================================================================
--- watermark 存上游原生的 "2006-01-02 15:04:05" 字符串（节点时区、无 tz 标记），
--- 与响应体同源做字符串比较，禁止本地时钟生成水位。asset_type 是本仓侧的类型键
--- （subdomain/root_domain/service/app），datasource_id 指向 mcp_servers 行。
-CREATE TABLE IF NOT EXISTS sync_state (
-    id            BIGSERIAL PRIMARY KEY,
-    datasource_id BIGINT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
-    asset_type    TEXT   NOT NULL,
-    watermark     TEXT   NOT NULL DEFAULT '',
-    last_run_at   TIMESTAMPTZ,
-    last_result   TEXT   NOT NULL DEFAULT '',
-    truncated     BOOLEAN NOT NULL DEFAULT false,
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (datasource_id, asset_type)
+-- 主动测绘流水线运行记录（recon_run 工具）。一次运行一行：阶段开关、逐阶段
+-- 统计与到达阶段、终态与错误——中断/失败从行内即可追溯（异步 goroutine 的
+-- 事实源；recon_results 工具读这里）。
+CREATE TABLE IF NOT EXISTS recon_runs (
+    id          BIGSERIAL PRIMARY KEY,
+    project_id  BIGINT REFERENCES projects(id) ON DELETE SET NULL,
+    domains     TEXT NOT NULL, -- 逗号拼接(读时拆分)
+    config      JSONB NOT NULL DEFAULT '{}',
+    status      TEXT NOT NULL DEFAULT 'running'
+        CHECK (status IN ('running','done','failed')),
+    stage       TEXT NOT NULL DEFAULT '',
+    stats       JSONB NOT NULL DEFAULT '{}',
+    error       TEXT NOT NULL DEFAULT '',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at TIMESTAMPTZ
 );
--- 每日对账（施工单变更1兜底）：上游总数快照 + 两次对账间的增量入库累计。
-ALTER TABLE sync_state ADD COLUMN IF NOT EXISTS upstream_total INT NOT NULL DEFAULT 0;
-ALTER TABLE sync_state ADD COLUMN IF NOT EXISTS inc_taken INT NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_recon_runs_project ON recon_runs(project_id) WHERE project_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_recon_runs_created ON recon_runs(created_at DESC);
+
+-- 资产侧：侦察优先级(P0-P4,recon/score 计算)——null=未评。排序用部分索引。
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS recon_level TEXT;
+
+-- 周期采集任务(recon-schedules worker,30s tick)。两种形态:engine=五引擎按域采集,
+-- pipeline=主动测绘流水线。熔断列:鉴权失败指数退避(backoff_until 之前不跑,
+-- 成功一次清零恢复)。增量通知只在新资产 > 0 时入 notification_events。
+CREATE TABLE IF NOT EXISTS recon_schedules (
+    id            BIGSERIAL PRIMARY KEY,
+    name          TEXT NOT NULL,
+    kind          TEXT NOT NULL CHECK (kind IN ('engine','pipeline')),
+    config        JSONB NOT NULL DEFAULT '{}',
+    interval_sec  INT NOT NULL DEFAULT 1800 CHECK (interval_sec >= 60),
+    project_id    BIGINT REFERENCES projects(id) ON DELETE CASCADE,
+    enabled       BOOLEAN NOT NULL DEFAULT true,
+    last_run_at   TIMESTAMPTZ,
+    next_run_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    auth_failures INT NOT NULL DEFAULT 0,
+    backoff_until TIMESTAMPTZ,
+    last_result   TEXT NOT NULL DEFAULT '',
+    last_new      INT NOT NULL DEFAULT 0,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_recon_sched_due ON recon_schedules(next_run_at) WHERE enabled;
 
 -- Skill 调用账本（见 db/skill_usage.go）。一次 Skill() 调用一行，只记维度不记正文。
 -- 刻意不设外键：任务/会话删除后统计仍要保留（与 llm_usage 同理），skill 本身也只是

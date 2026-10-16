@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Autumn-27/artex/agent"
-	"github.com/Autumn-27/artex/db"
-	actool "github.com/Autumn-27/artex/tools"
+	"github.com/c1ayooo/4zrec/agent"
+	"github.com/c1ayooo/4zrec/db"
+	actool "github.com/c1ayooo/4zrec/tools"
 )
 
 // hasSkillTool reports whether the packed tool set contains the Skill meta-tool.

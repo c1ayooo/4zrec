@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Autumn-27/artex/acllm"
-	"github.com/Autumn-27/artex/agent"
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/intercept"
+	"github.com/c1ayooo/4zrec/acllm"
+	"github.com/c1ayooo/4zrec/agent"
+	"github.com/c1ayooo/4zrec/db"
+	"github.com/c1ayooo/4zrec/intercept"
 )
 
 // Opt-in model regression: sends synthetic review inputs only, never executes

@@ -3,7 +3,7 @@ package grab
 import (
 	"log"
 	"os"
-	"github.com/Autumn-27/artex/vulnintel/util"
+	"github.com/c1ayooo/4zrec/vulnintel/util"
 	"context"
 	"encoding/json"
 	"fmt"

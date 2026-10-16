@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Autumn-27/artex/askernel"
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/intercept"
-	actool "github.com/Autumn-27/artex/tools"
-	"github.com/Autumn-27/artex/transcript"
+	"github.com/c1ayooo/4zrec/askernel"
+	"github.com/c1ayooo/4zrec/db"
+	"github.com/c1ayooo/4zrec/intercept"
+	actool "github.com/c1ayooo/4zrec/tools"
+	"github.com/c1ayooo/4zrec/transcript"
 	"github.com/cloudwego/eino/components/model"
 )
 
@@ -97,7 +97,7 @@ const mainAgentDefaultTmpl = `你是一个授权渗透测试系统的"主 agent"
 
 当前任务目标：{{.Goal}}
 {{if .AssetSummary}}
-【开局资产态势】（来自 4zrecon 资产同步，带新鲜度标注；回答资产相关问题时可直接引用，注意非实时探测）：
+【开局资产态势】（来自平台资产库原生采集，带新鲜度标注；回答资产相关问题时可直接引用，注意非实时探测）：
 {{.AssetSummary}}
 {{end}}
 不要编造发现；只根据工具返回的真实数据回答。`

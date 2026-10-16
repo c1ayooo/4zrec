@@ -12,11 +12,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Autumn-27/artex/acllm"
-	"github.com/Autumn-27/artex/agent"
-	"github.com/Autumn-27/artex/askernel"
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/intercept"
+	"github.com/c1ayooo/4zrec/acllm"
+	"github.com/c1ayooo/4zrec/agent"
+	"github.com/c1ayooo/4zrec/askernel"
+	"github.com/c1ayooo/4zrec/db"
+	"github.com/c1ayooo/4zrec/intercept"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 

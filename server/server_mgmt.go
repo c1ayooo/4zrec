@@ -23,10 +23,10 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/Autumn-27/artex/acllm"
-	"github.com/Autumn-27/artex/agent"
-	"github.com/Autumn-27/artex/db"
-	skill "github.com/Autumn-27/artex/skills"
+	"github.com/c1ayooo/4zrec/acllm"
+	"github.com/c1ayooo/4zrec/agent"
+	"github.com/c1ayooo/4zrec/db"
+	skill "github.com/c1ayooo/4zrec/skills"
 )
 
 // validSkillName checks the agentskills.io name constraints, widened so a skill can

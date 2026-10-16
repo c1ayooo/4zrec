@@ -8,7 +8,7 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
-	"github.com/Autumn-27/artex/report"
+	"github.com/c1ayooo/4zrec/report"
 )
 
 // wireReport 把报告子系统接进宿主:注入单次补全实现(激活 LLM profile,低温

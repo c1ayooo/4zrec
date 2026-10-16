@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Autumn-27/artex/acllm"
-	actool "github.com/Autumn-27/artex/tools"
+	"github.com/c1ayooo/4zrec/acllm"
+	actool "github.com/c1ayooo/4zrec/tools"
 )
 
 func TestDeferredSystem_NoGlobal(t *testing.T) {

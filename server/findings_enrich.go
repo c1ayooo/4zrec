@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/report"
-	"github.com/Autumn-27/artex/traffic"
+	"github.com/c1ayooo/4zrec/db"
+	"github.com/c1ayooo/4zrec/report"
+	"github.com/c1ayooo/4zrec/traffic"
 )
 
 // enrichmentDTO is the wire shape (report.Enrichment fields + status/source/severity).

@@ -2373,17 +2373,36 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
 
   // ── mcp ──
   if (path === "/mcp" && m === "GET") return { servers: D.mcpServers };
+
+  // ── 空间测绘引擎 key 配置（demo：fofa 已配）──
+  if (path === "/spacemap/engines" && m === "GET")
+    return {
+      engines: [
+        { provider: "fofa", display: "FOFA", configured: true, key_masked: "abcd******yz", from_env: false, base_url: "", default_query: 'domain="{d}"' },
+        { provider: "zoomeye", display: "ZoomEye", configured: false, key_masked: "", from_env: false, base_url: "", default_query: 'domain="{d}"' },
+        { provider: "quake", display: "Quake", configured: false, key_masked: "", from_env: false, base_url: "", default_query: 'domain:"{d}"' },
+        { provider: "shodan", display: "Shodan", configured: false, key_masked: "", from_env: false, base_url: "", default_query: "hostname:{d}" },
+        { provider: "hunter", display: "Hunter", configured: false, key_masked: "", from_env: false, base_url: "", default_query: 'domain.suffix="{d}"' },
+      ],
+    };
+  if (path === "/spacemap/engines" && m === "POST") return { engines: [] };
+
+  // ── 周期采集任务（demo）──
+  if (path === "/recon-schedules" && m === "GET")
+    return {
+      schedules: [
+        {
+          id: 1, name: "示例集团资产增量", kind: "engine", config: { domains: ["example.com"] },
+          interval_sec: 1800, enabled: true, next_run_at: "2026-10-16T12:30:00Z",
+          last_run_at: "2026-10-16T12:00:00Z", last_new: 3,
+          last_result: "命中 42,新资产 3(引擎遍历 5 域 1)", auth_failures: 0, created_at: "2026-10-01T08:00:00Z",
+        },
+      ],
+    };
   if (path === "/mcp" && m === "POST") return { id: 3 };
   if (seg[0] === "mcp" && seg[2] === "tools") return { tools: D.mcpToolsById[Number(seg[1])] ?? [] };
   if (seg[0] === "mcp" && seg[2] === "refresh") return { tools: D.mcpToolsById[Number(seg[1])] ?? [] };
   if (seg[0] === "mcp" && seg.length === 2 && m === "DELETE") return { deleted: Number(seg[1]) };
-
-  // ── 4zrecon（demo：未配置）──
-  if (path === "/sync/4zrecon/status")
-    return { exists: false, configured: false, enabled: false, reachable: false, tools: [] };
-  if (path === "/sync/4zrecon/projects") return { projects: [], tag: {} };
-  if (path === "/sync/4zrecon/tasks") return { tasks: [] };
-  if (path === "/sync/4zrecon/sync") return { synced: {}, companies: null, warnings: null, errors: null };
 
   // ── skills ──
   if (path === "/skills" && m === "GET") return { skills: D.skills };

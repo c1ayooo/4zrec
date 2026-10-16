@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Autumn-27/artex/vulnintel/util"
+	"github.com/c1ayooo/4zrec/vulnintel/util"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/dop251/goja"
 	"github.com/dop251/goja_nodejs/eventloop"

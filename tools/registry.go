@@ -1,6 +1,6 @@
 package tools
 
-import "github.com/Autumn-27/artex/acllm"
+import "github.com/c1ayooo/4zrec/acllm"
 
 // Registry is an ordered, name-indexed collection of tools (FR-04.3).
 type Registry struct {

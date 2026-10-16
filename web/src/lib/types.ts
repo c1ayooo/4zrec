@@ -1229,6 +1229,35 @@ export interface MCPServer {
   tools?: string[]; // mcp_tools_cache (names only, for the count)
 }
 
+// ---- 周期采集任务 ----
+export interface ReconSchedule {
+  id: number;
+  name: string;
+  kind: "engine" | "pipeline";
+  config: Record<string, unknown> | null;
+  interval_sec: number;
+  project_id?: number | null;
+  enabled: boolean;
+  last_run_at?: string | null;
+  next_run_at: string;
+  auth_failures: number;
+  backoff_until?: string | null;
+  last_result: string;
+  last_new: number;
+  created_at: string;
+}
+
+// ---- 空间测绘引擎 ----
+export interface SpacemapEngine {
+  provider: string;
+  display: string;
+  configured: boolean;
+  key_masked: string;
+  from_env: boolean;
+  base_url: string;
+  default_query: string;
+}
+
 export interface MCPTool {
   name: string;
   description: string;
@@ -1406,24 +1435,6 @@ export interface InterceptApprovalRow extends InterceptPending {
   conv_title: string; // "" if no linked conversation
   conv_agent_key: string; // "" if no linked conversation
   rule_name: string; // "" if rule was deleted
-}
-
-// ── 资产同步 (4zrecon 数据源) ──────────────────────────────────────────────
-export interface ReconProject {
-  id: string; // MongoDB ObjectID — used as filter.project
-  name: string;
-  logo?: string;
-  AssetCount?: number;
-  tag?: string;
-}
-
-export interface ReconTask {
-  id: string;
-  name: string; // used as filter.task
-  status?: number;
-  progress?: number;
-  creatTime?: string;
-  endTime?: string;
 }
 
 // ConvTokenSummary — one conversation's token total (+ profile/date) for merging

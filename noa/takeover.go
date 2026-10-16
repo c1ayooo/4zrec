@@ -3,10 +3,10 @@ package noa
 import (
 	"context"
 
-	"github.com/Autumn-27/artex/acllm"
-	"github.com/Autumn-27/artex/askernel"
-	"github.com/Autumn-27/artex/compaction"
-	"github.com/Autumn-27/artex/tools"
+	"github.com/c1ayooo/4zrec/acllm"
+	"github.com/c1ayooo/4zrec/askernel"
+	"github.com/c1ayooo/4zrec/compaction"
+	"github.com/c1ayooo/4zrec/tools"
 )
 
 // Takeover adapts a Session to the kernel's context-manager seam.

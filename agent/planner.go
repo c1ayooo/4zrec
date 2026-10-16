@@ -7,11 +7,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Autumn-27/artex/askernel"
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/intercept"
-	actool "github.com/Autumn-27/artex/tools"
-	"github.com/Autumn-27/artex/transcript"
+	"github.com/c1ayooo/4zrec/askernel"
+	"github.com/c1ayooo/4zrec/db"
+	"github.com/c1ayooo/4zrec/intercept"
+	actool "github.com/c1ayooo/4zrec/tools"
+	"github.com/c1ayooo/4zrec/transcript"
 	"github.com/cloudwego/eino/components/model"
 )
 
@@ -298,7 +298,7 @@ const plannerDefaultTmpl = `你是一个网络安全平台授权渗透测试系�
 
 任务目标：{{.Goal}}
 {{if .AssetSummary}}
-【开局资产态势】（来自 4zrecon 资产同步，带新鲜度标注；这是起点线索不是已验证结论，据此派意图时让 worker 先验证存活与真实性）：
+【开局资产态势】（来自平台资产库原生采集，带新鲜度标注；这是起点线索不是已验证结论，据此派意图时让 worker 先验证存活与真实性）：
 {{.AssetSummary}}
 {{end}}
 **本轮该产出几个意图（先想清楚这条）**：

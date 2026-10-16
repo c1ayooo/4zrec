@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	actool "github.com/Autumn-27/artex/tools"
+	actool "github.com/c1ayooo/4zrec/tools"
 )
 
 func TestFindingWorkflowSharedAssemblyAndSwitch(t *testing.T) {

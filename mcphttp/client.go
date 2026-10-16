@@ -23,8 +23,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Autumn-27/artex/acllm"
-	"github.com/Autumn-27/artex/tools"
+	"github.com/c1ayooo/4zrec/acllm"
+	"github.com/c1ayooo/4zrec/tools"
 )
 
 const protocolVersion = "2025-06-18"
@@ -322,10 +322,10 @@ func (c *Client) wrap(rt remoteTool) tools.CoreTool {
 	})
 }
 
-// Call invokes one tool and returns the concatenated text of its content blocks
-// (4zrecon answers with a single JSON text block). Unlike the CoreTool wrapper
-// from Tools(), this bypasses the agent permission (AskUser) layer — it is meant
-// for backend batch jobs (e.g. asset sync) that call MCP tools programmatically.
+// Call invokes one tool and returns the concatenated text of its content blocks.
+// Unlike the CoreTool wrapper from Tools(), this bypasses the agent permission
+// (AskUser) layer — it is meant for backend batch jobs that call MCP tools
+// programmatically.
 func (c *Client) Call(ctx context.Context, tool string, args any) (string, error) {
 	raw, err := c.call(ctx, "tools/call", map[string]any{"name": tool, "arguments": args})
 	if err != nil {

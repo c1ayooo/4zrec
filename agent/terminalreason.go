@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Autumn-27/artex/askernel"
+	"github.com/c1ayooo/4zrec/askernel"
 )
 
 // runTrace retains the latest tool call so an interrupted run can identify the

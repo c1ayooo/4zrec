@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/report"
+	"github.com/c1ayooo/4zrec/db"
+	"github.com/c1ayooo/4zrec/report"
 )
 
 type reportJob struct {

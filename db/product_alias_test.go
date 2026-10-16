@@ -1,6 +1,6 @@
 package db
 
-// 变更4：指纹归一化回归（真连 PostgreSQL，无库跳过——与 sync_state_test 同约定）。
+// 变更4：指纹归一化回归（真连 PostgreSQL，无库跳过）。
 
 import (
 	"context"

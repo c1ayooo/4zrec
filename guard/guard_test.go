@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Autumn-27/artex/askernel"
+	"github.com/c1ayooo/4zrec/askernel"
 )
 
 // A guard with no interceptor no longer hard-blocks anything: destructive/exfil
