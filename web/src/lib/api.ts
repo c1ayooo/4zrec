@@ -65,6 +65,7 @@ import type {
   LLMTask,
   MCPServer,
   EntProvider,
+  Connection,
   EntCandidate,
   EntJob,
   FingerprintRule,
@@ -1209,6 +1210,14 @@ export const api = {
       `/spacemap/results?${q.toString()}`,
     );
   },
+  connections: (params: { projectId?: number; kind?: string }) => {
+    const q = new URLSearchParams();
+    if (params.projectId) q.set("project_id", String(params.projectId));
+    if (params.kind) q.set("kind", params.kind);
+    return get<{ connections: Connection[] }>(`/connections?${q.toString()}`).then((r) => arr(r.connections));
+  },
+  createConnection: (c: Partial<Connection>) => post<{ id: number }>("/connections", c),
+  deleteConnection: (id: number) => del<{ deleted: number }>(`/connections/${id}`),
   entJobs: (projectId?: number) =>
     get<{ jobs: EntJob[] }>(`/enterprise/jobs${projectId ? `?project_id=${projectId}` : ""}`).then((r) => arr(r.jobs)),
   entCandidates: (status = "", page = 1, projectId?: number) =>

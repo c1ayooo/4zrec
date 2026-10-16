@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/c1ayooo/4zrec/creds"
+	"github.com/c1ayooo/4zrec/db"
 	actool "github.com/c1ayooo/4zrec/tools"
 )
 
@@ -115,6 +116,17 @@ func (s *Server) toolCredVerifyDB() actool.CoreTool {
 			if res.Alive && !res.Authed {
 				b.WriteString("(服务可达,凭据未通过——弱口令字典可换候选重试)\n")
 			}
+			// 验证成功 → 自动落连接台账(项目上下文时)。
+			if res.Alive && res.Authed {
+				note := s.autoCaptureConnection(ctx, &db.Connection{
+					Kind: strings.ToLower(strings.TrimSpace(in.Type)), Host: in.Host, Port: in.Port,
+					Username: in.Username, Secret: in.Password, Status: "alive",
+					Note: "credential_verify_db 验证成功",
+				})
+				if note != "" {
+					b.WriteString(note + "\n")
+				}
+			}
 			return actool.Text(b.String()), nil
 		},
 	})
@@ -150,6 +162,21 @@ func (s *Server) toolCredVerifySSH() actool.CoreTool {
 			}
 			var b strings.Builder
 			fmt.Fprintf(&b, "%s\n", res.Detail)
+			// 验证成功 → 自动落连接台账(项目上下文时)。
+			if res.Alive && res.Authed {
+				secret := in.Password
+				if secret == "" {
+					secret = in.PrivateKey
+				}
+				note := s.autoCaptureConnection(ctx, &db.Connection{
+					Kind: "ssh", Host: in.Host, Port: in.Port,
+					Username: in.Username, Secret: secret, Status: "alive",
+					Note: "credential_verify_ssh 验证成功",
+				})
+				if note != "" {
+					b.WriteString(note + "\n")
+				}
+			}
 			if res.Authed {
 				if res.User != "" {
 					fmt.Fprintf(&b, "用户: %s\n", res.User)

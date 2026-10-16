@@ -952,6 +952,30 @@ CREATE INDEX IF NOT EXISTS idx_recon_sched_due ON recon_schedules(next_run_at) W
 ALTER TABLE recon_runs ADD COLUMN IF NOT EXISTS schedule_id BIGINT REFERENCES recon_schedules(id) ON DELETE CASCADE;
 CREATE INDEX IF NOT EXISTS idx_recon_runs_schedule ON recon_runs(schedule_id) WHERE schedule_id IS NOT NULL;
 
+-- 连接台账：SSH/数据库/协议(SMB/WinRM/LDAP/VNC/FTP)凭据统一存储。
+-- 设计口径(用户拍板)：明文存储(不做 vault 加密)；必须绑定项目(project_id NOT NULL);
+-- worker 任务中发现/验证成功的凭据自动落库(source=discovered),手工录入 source=manual。
+-- 同项目同 kind 同 host:port 同用户唯一(重录合并 secret)。
+CREATE TABLE IF NOT EXISTS connections (
+    id            BIGSERIAL PRIMARY KEY,
+    project_id    BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    kind          TEXT NOT NULL CHECK (kind IN ('ssh','postgres','mysql','redis','mongodb','elasticsearch','smb','winrm','ldap','vnc','ftp','proxy','tunnel')),
+    host          TEXT NOT NULL,
+    port          INT NOT NULL DEFAULT 0,
+    username      TEXT NOT NULL DEFAULT '',
+    secret        TEXT NOT NULL DEFAULT '', -- 密码/私钥/令牌(明文)
+    extra         JSONB NOT NULL DEFAULT '{}', -- kind 专属(dbname/domain 等)
+    source        TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual','discovered')),
+    status        TEXT NOT NULL DEFAULT 'unknown' CHECK (status IN ('unknown','alive','dead')),
+    last_checked_at TIMESTAMPTZ,
+    note          TEXT NOT NULL DEFAULT '',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (project_id, kind, host, port, username)
+);
+CREATE INDEX IF NOT EXISTS idx_connections_project ON connections(project_id);
+CREATE INDEX IF NOT EXISTS idx_connections_kind ON connections(kind);
+
 -- Skill 调用账本（见 db/skill_usage.go）。一次 Skill() 调用一行，只记维度不记正文。
 -- 刻意不设外键：任务/会话删除后统计仍要保留（与 llm_usage 同理），skill 本身也只是
 -- 文件系统上的目录名，没有对应的表。

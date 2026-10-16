@@ -51,6 +51,7 @@ func (s *Server) hostTools() ([]actool.CoreTool, map[string][]string) {
 	tools = append(tools, s.coverageTools()...)       // 项目级覆盖度缺口
 	tools = append(tools, s.oobTools()...)            // 带外验证:DNSLog/VT被动子域/AI面探测
 	tools = append(tools, s.probeTools()...)          // 结构化HTTP请求+指纹扫描
+	tools = append(tools, s.connTools()...)           // 连接台账(查询/手工登记)
 	custom, err := s.customTools()
 	if err != nil {
 		log.Printf("[custom-tool] 加载失败: %v", err)

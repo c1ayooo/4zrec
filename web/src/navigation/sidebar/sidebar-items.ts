@@ -7,8 +7,10 @@ import {
   Brain,
   Bug,
   Building2,
+  Cable,
   CalendarClock,
   ClipboardList,
+  KeyRound,
   Compass,
   FileText,
   Fingerprint,
@@ -93,6 +95,14 @@ export const sidebarItems: NavGroup[] = [
           { id: "spacemap", title: "空间测绘", url: "/function/spacemap", icon: Radar },
           { id: "recon-schedules", title: "周期采集", url: "/system/recon-schedules", icon: CalendarClock },
           { id: "enterprise", title: "企业采集", url: "/function/enterprise", icon: Building2 },
+        ],
+      },
+      {
+        id: "connections",
+        title: "连接管理",
+        icon: Cable,
+        subItems: [
+          { id: "connections", title: "凭据台账", url: "/function/connections", icon: KeyRound },
         ],
       },
       {

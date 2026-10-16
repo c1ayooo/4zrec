@@ -1311,6 +1311,25 @@ export interface IntelKey {
   masked: string;
 }
 
+// ---- 连接台账 ----
+export interface Connection {
+  id: number;
+  project_id: number;
+  project_name?: string;
+  kind: string;
+  host: string;
+  port: number;
+  username: string;
+  secret: string;
+  extra: Record<string, unknown> | null;
+  source: "manual" | "discovered";
+  status: "unknown" | "alive" | "dead";
+  last_checked_at?: string | null;
+  note: string;
+  created_at: string;
+  updated_at: string;
+}
+
 // ---- 企业数据源 ----
 export interface EntProvider {
   name: string;

@@ -2426,6 +2426,20 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       ],
     };
 
+  // ── 连接管理（demo）──
+  if (path === "/connections" && m === "GET")
+    return {
+      connections: [
+        { id: 1, project_id: 3, project_name: "示例集团", kind: "ssh", host: "10.1.2.3", port: 22,
+          username: "root", secret: "P@ssw0rd", extra: null, source: "discovered", status: "alive",
+          note: "credential_verify_ssh 验证成功", created_at: "2026-10-17T08:00:00Z", updated_at: "2026-10-17T08:00:00Z" },
+        { id: 2, project_id: 3, project_name: "示例集团", kind: "redis", host: "10.1.2.9", port: 6379,
+          username: "", secret: "", extra: null, source: "discovered", status: "alive",
+          note: "未授权访问", created_at: "2026-10-17T08:05:00Z", updated_at: "2026-10-17T08:05:00Z" },
+      ],
+    };
+  if (path === "/connections" && m === "POST") return { id: 3 };
+
   // ── 空间测绘搜索台（demo）──
   if (path === "/spacemap/search" && m === "POST")
     return {
