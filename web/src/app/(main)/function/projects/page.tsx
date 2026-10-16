@@ -6,6 +6,7 @@ import * as React from "react";
 import Link from "next/link";
 import {
   CheckIcon,
+  EyeIcon,
   FolderIcon,
   PencilIcon,
   PlusIcon,
@@ -229,7 +230,7 @@ export default function ProjectsPage() {
     try {
       const updated = await api.updateProject(edit.project.id, {
         name,
-        company_id: edit.company ? Number(edit.company) : 0,
+        company_id: null, // 企业概念已移除:保存不再携带(0 会撞外键)
         description: edit.desc.trim(),
         status: edit.project.status,
       });
@@ -431,6 +432,11 @@ export default function ProjectsPage() {
                     )}
                   </div>
                   <div className="flex shrink-0 gap-1">
+                    <Button variant="ghost" size="icon" className="size-7" asChild title="详情(任务/资产/漏洞聚合)">
+                      <Link href={`/function/projects/detail?id=${p.id}`}>
+                        <EyeIcon />
+                      </Link>
+                    </Button>
                     <Button variant="ghost" size="icon" className="size-7" onClick={() => openEdit(p)}>
                       <PencilIcon />
                     </Button>
