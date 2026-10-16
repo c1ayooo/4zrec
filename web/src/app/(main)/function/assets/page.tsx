@@ -349,7 +349,7 @@ export default function AssetsPage() {
           <span className="text-sm text-muted-foreground">
             共 <span className="tabular-nums">{totalAssets}</span> 项资产
           </span>
-          {projectFilter === "-1" && (
+          {selected.size > 0 && (
             <div className="flex items-center gap-1.5">
               <Select value={bindTarget || "none"} onValueChange={setBindTarget}>
                 <SelectTrigger className="h-8 w-40" aria-label="归属到项目">
