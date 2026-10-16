@@ -34,8 +34,9 @@ func TestSeedReconAgent(t *testing.T) {
 	if err != nil || a == nil {
 		t.Fatalf("recon agent 未创建: %v", err)
 	}
-	if a.Builtin || !a.Enabled {
-		t.Fatalf("应为可编辑启用的自定义 agent: %+v", a)
+	// 口径更新:recon 为内置角色(不可删除,提示词仍可编辑)。
+	if !a.Builtin || !a.Enabled {
+		t.Fatalf("recon 应为内置启用的 agent: %+v", a)
 	}
 	// 可独立绑定 LLM profile 的前提是 agents.llm_profile_id 列存在(默认 NULL=继承)。
 	if a.LLMProfileID != nil {

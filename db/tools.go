@@ -230,3 +230,17 @@ UPDATE tools SET description=$2, schema=$3, agents=$4, enabled=$5 WHERE key=$1`,
 		key, desc, schema, agents, enabled)
 	return err
 }
+
+// UpdateToolAgentsForTest 测试助手:直接改写某工具行的 agents 绑定(模拟旧库口径)。
+func (d *DB) UpdateToolAgentsForTest(agentKey string, keys []string) error {
+	if len(keys) == 0 {
+		_, err := d.Exec(`UPDATE tools SET agents = agents - $1`, agentKey)
+		return err
+	}
+	for _, k := range keys {
+		if _, err := d.Exec(`UPDATE tools SET agents = agents || to_jsonb($1::text) WHERE key=$2 AND NOT (agents ? $1)`, agentKey, k); err != nil {
+			return err
+		}
+	}
+	return nil
+}

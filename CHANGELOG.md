@@ -182,6 +182,8 @@
 
 - **连接管理②:图形化手工操作控制台（原生）**：①**全交互 SSH 终端**——WebSocket↔SSH PTY 桥（协议移植自 4zreco ssh_terminal.go 原样：二进制帧=stdin 字节、文本帧=resize JSON；30 分钟硬超时+ping 保活；同源 cookie 鉴权）；前端 xterm.js 终端对话框（@xterm/xterm+fit addon，移植 4zreco SshTerminalDialog.vue 的交互设计为 React 组件）。②**SSH 一次性命令执行**（`POST /api/connections/{id}/ssh/exec`，页内命令控制台）。③**DB 制台**（`POST /api/connections/{id}/db/query`：postgres SQL 返回列/行表格，redis 裸 RESP 命令，执行结果回写台账 status/last_checked_at）。连接页按类型展示入口：SSH→终端+命令，postgres/redis→控制台。说明：4zreco 前端为 Vue 3，组件不能直接插入本仓 React/Next——移植口径为「交互设计+前后端协议原样、组件按本仓栈重写」，后续其 DB 浏览树/VNC 等组件按同一方式翻。
 
+- **角色内置化 + recon 工具补绑**：planner/worker/mainagent/goals/auto/reporter/recon **全部为内置角色（不可删除，提示词仍可编辑）**——reporter/recon 由自定义提升为内置（存量库 flag 守卫一次性迁移，后端 DeleteAgent 拒删 + 前端隐藏删除按钮双向守卫）。信息收集 agent 的工具绑定改为**动态枚举全部收集工具族**（新加工具不再手抄绑定清单），存量库一次性补绑——`fingerprint_scan`/`http_probe`/`cdn_origin`/`edge_classify`/`legacy_hunter`/`takeover_check`/`dnslog`/`vt_subdomains`/`ai_protocol_scan`/`project_coverage`/`connections_list`/`credential_register` 等 31 个收集工具现对 recon 可见；worker 一直可见（工具默认绑 auto+worker）。
+
 #### 修复的问题
 
 > 本节是功能初版完成后一轮安全审计的结论，每条都先复现、再修、再补回归测试。

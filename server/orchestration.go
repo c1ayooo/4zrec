@@ -1,6 +1,7 @@
 package server
 
 import (
+	"slices"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -514,6 +515,8 @@ func (s *Server) seedOrchestrationTools() {
 	s.reseedAssetSummaryPrompts()     // planner/mainagent 资产态势来源文案改原生采集(一次性)
 	s.seedReporterAgent()             // 预置「报告撰写」agent + 工具绑定 + finding 触发器(一次性)
 	s.seedReconAgent()                // 预置「信息收集」agent + 任务创建触发器(一次性)
+	s.rebindReconToolsV2()            // recon 补绑新增收集工具族(一次性)
+	s.promoteCoreAgentsBuiltin()      // reporter/recon 提升内置角色(一次性)
 	s.upgradeReporterTriggerMessage() // 老库补迁移:让 reporter 回传 evidence_version(一次性)
 	s.seedFindingTrafficTools()       // 增加可选证据参数及只读证据工具，保留用户配置
 	s.seedFindingWorkflowTools()
@@ -760,13 +763,14 @@ func (s *Server) seedReconAgent() {
 	if err := s.m.pg.SetAgentTriggerBehavior("recon", "serial", "none", 1); err != nil {
 		log.Printf("[recon] 设置触发运行策略失败: %v", err)
 	}
-	// 绑定工具：全部原生收集工具 + 资产查询/写入 + 任务范围(经工具表,UI 可改绑)。
-	if err := s.m.pg.AddAgentToToolBinding("recon", []string{
-		"info_collect_capabilities", "space_search", "space_search_batch",
-		"icp_expand", "cert_expand", "asn_expand",
-		"subdomain_enum", "subdomain_brute",
-		"list_assets", "insert_assets", "add_task_scope", "suggest_scope",
-	}); err != nil {
+	// 内置角色:不可删除(与 planner/worker/mainagent/goals/auto 同待遇)。
+	if err := s.m.pg.SetAgentBuiltin("recon", true); err != nil {
+		log.Printf("[recon] 提升内置标记失败: %v", err)
+	}
+	// 绑定工具:动态枚举全部收集工具(新工具随枚举自动覆盖)+ 资产/范围工具。
+	bind := append(s.collectToolNames(),
+		"list_assets", "insert_assets", "add_task_scope", "suggest_scope")
+	if err := s.m.pg.AddAgentToToolBinding("recon", bind); err != nil {
 		log.Printf("[recon] 绑定工具失败: %v", err)
 	}
 	if _, err := s.m.pg.CreateTrigger(&db.AgentTrigger{
@@ -782,6 +786,55 @@ func (s *Server) seedReconAgent() {
 		log.Printf("[recon] 创建触发器失败: %v", err)
 	}
 	log.Printf("[recon] 已预置「信息收集」agent + 任务创建触发器")
+}
+
+// collectToolNames 动态枚举全部信息收集工具名(各工具族切片聚合)——recon agent
+// 的绑定清单由此生成,新加工具不再需要手抄进绑定列表。
+func (s *Server) collectToolNames() []string {
+	var all []actool.CoreTool
+	all = slices.Concat(
+		s.spacemapTools(), s.spacemapExpandTools(), s.reconTools(),
+		s.atomicTools(), s.entTools(), s.credTools(),
+		s.webreconTools(), s.coverageTools(), s.oobTools(),
+		s.probeTools(), s.connTools(),
+	)
+	out := make([]string, 0, len(all))
+	for _, t := range all {
+		out = append(out, t.Name())
+	}
+	return out
+}
+
+// rebindReconToolsV2 存量库迁移:recon agent 补绑播种后新增的工具族
+// (原子判定/探测/带外/覆盖度/连接台账等)。幂等,flag 守卫只做一次。
+func (s *Server) rebindReconToolsV2() {
+	const flag = "recon_agent_tools_v2"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	defer func() { _ = s.m.pg.SetSetting(flag, "true") }()
+	if a, _ := s.m.pg.GetAgentByKey("recon"); a == nil {
+		return // 用户手删过(旧口径)——不重建
+	}
+	if err := s.m.pg.AddAgentToToolBinding("recon", s.collectToolNames()); err != nil {
+		log.Printf("[recon] 工具重绑失败: %v", err)
+		return
+	}
+	log.Printf("[recon] 已补绑新增收集工具族(一次性)")
+}
+
+// promoteCoreAgentsBuiltin 存量库迁移:reporter/recon 提升为内置角色
+// (不可删除;planner/worker/mainagent/goals/auto 出厂即内置)。幂等。
+func (s *Server) promoteCoreAgentsBuiltin() {
+	const flag = "core_agents_builtin_v1"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	defer func() { _ = s.m.pg.SetSetting(flag, "true") }()
+	for _, key := range []string{"reporter", "recon"} {
+		_ = s.m.pg.SetAgentBuiltin(key, true)
+	}
+	log.Printf("[agents] reporter/recon 已提升为内置角色(不可删除,一次性)")
 }
 
 // reporterToolCallMessage 必须无条件要求先读一次 get_finding_traffic 再写报告。
@@ -856,6 +909,10 @@ func (s *Server) seedReporterAgent() {
 	// maxParallel=5：同时最多 5 个报告会话，避免瞬时太多 LLM 调用。
 	if err := s.m.pg.SetAgentTriggerBehavior("reporter", "parallel", "none", 5); err != nil {
 		log.Printf("[reporter] 设置触发运行策略失败: %v", err)
+	}
+	// 内置角色:不可删除(与 planner/worker/mainagent 同待遇;用户可编辑提示词)。
+	if err := s.m.pg.SetAgentBuiltin("reporter", true); err != nil {
+		log.Printf("[reporter] 提升内置标记失败: %v", err)
 	}
 	// 绑定它需要的工具：写报告 + 读证据/执行过程/态势。
 	if err := s.m.pg.AddAgentToToolBinding("reporter", []string{

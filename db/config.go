@@ -576,6 +576,12 @@ func (d *DB) UpdateAgentMeta(key, name, description string) error {
 // DeleteAgent removes a custom agent. Built-in agents are protected by the
 // builtin=false guard. agent_prompts / agent_prompt_vars / visibility rows cascade
 // via FK; tools.agents bindings for the key are cleaned by the caller.
+// SetAgentBuiltin 提升/降级 agent 内置标记(内置=不可删除,套件角色用)。
+func (d *DB) SetAgentBuiltin(key string, builtin bool) error {
+	_, err := d.Exec(`UPDATE agents SET builtin=$2 WHERE key=$1`, key, builtin)
+	return err
+}
+
 func (d *DB) DeleteAgent(key string) error {
 	_, err := d.Exec(`DELETE FROM agents WHERE key=$1 AND builtin=false`, key)
 	return err
