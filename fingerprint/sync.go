@@ -424,3 +424,78 @@ func fetchUpstream(ctx context.Context, rawURL, token string) ([]byte, error) {
 	}
 	return data, nil
 }
+
+// FingerprintRuleRow 规则库列表行(前端指纹规则库页)。
+type FingerprintRuleRow struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Category  string `json:"category"`
+	Expression string `json:"expression"`
+	Source    string `json:"source"`
+	Enabled   bool   `json:"enabled"`
+}
+
+// FingerprintSourceRow 数据源同步状态行。
+type FingerprintSourceRow struct {
+	Name        string `json:"name"`
+	UpstreamURL string `json:"upstream_url"`
+	RuleCount   int    `json:"rule_count"`
+	FetchedAt   string `json:"fetched_at"`
+}
+
+// ListRulesPage 规则分页(名称/类别/来源模糊搜索)。
+func (s *Store) ListRulesPage(ctx context.Context, query, source string, limit, offset int) ([]FingerprintRuleRow, int, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	where := "TRUE"
+	args := []any{}
+	if query != "" {
+		args = append(args, "%"+query+"%")
+		where += fmt.Sprintf(" AND (name ILIKE $%d OR category ILIKE $%d OR expression ILIKE $%d)", len(args), len(args), len(args))
+	}
+	if source != "" {
+		args = append(args, source)
+		where += fmt.Sprintf(" AND source=$%d", len(args))
+	}
+	var total int
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM fingerprint_rules WHERE `+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	args = append(args, limit, offset)
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, name, category, expression, source, enabled FROM fingerprint_rules WHERE `+where+`
+ORDER BY source, name LIMIT `+fmt.Sprintf("$%d OFFSET $%d", len(args)-1, len(args)), args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	out := make([]FingerprintRuleRow, 0, limit)
+	for rows.Next() {
+		var r FingerprintRuleRow
+		if err := rows.Scan(&r.ID, &r.Name, &r.Category, &r.Expression, &r.Source, &r.Enabled); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, r)
+	}
+	return out, total, rows.Err()
+}
+
+// ListSources 数据源同步状态(含规则计数)。
+func (s *Store) ListSources(ctx context.Context) ([]FingerprintSourceRow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT name, upstream_url, rule_count, fetched_at FROM fingerprint_sources ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []FingerprintSourceRow{}
+	for rows.Next() {
+		var r FingerprintSourceRow
+		if err := rows.Scan(&r.Name, &r.UpstreamURL, &r.RuleCount, &r.FetchedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}

@@ -73,7 +73,9 @@
 
 ### 引擎
 
-#### 修复
+- **http_probe / fingerprint_scan 工具（原生）**：`httpprobe`（直接搬：完整请求/响应报文捕获、30x 默认不跟随+redirectguard 逐跳守卫带跨域/降级标注、UA 指纹随机化、multipart 上传；netproxy 依赖解耦为可注入出口表）与 `redirectguard` 两个包迁入原样含测试。工具 `http_probe`（结构化发请求替代手写 curl 脚本，响应体快照截断+报文保全）与 `fingerprint_scan`（平台指纹规则库探测+匹配，组件结论回写服务资产 technologies，联动 1day 漏洞库），均带 RoE 门控+人工确认。
+- **指纹规则库前端可见**：新增 `GET /api/fingerprint/rules`（规则分页/搜索 + 数据源同步状态 + 启用计数）与「系统管理 → 指纹规则库」页（三源分布卡片：webanalyze/wappalyzergo/dddd、规则搜索表）。规则由既有 24h 上游自动同步维护，页面只读；fingerprint_scan 与 enrich 指纹链路读同一规则库。
+- **信息收集按项目归集**：
 
 - **围栏目标提取器三连修(实测驱动)**:Python 代码标识符(`re.findall`/`os.path`)不再被当作域名(TLD 后缀白名单);公共 DNS 解析器(`dig @8.8.8.8` 等)不再触发审批;heredoc/单引号载荷(python -c、awk 脚本、JSON 数据)里的裸 token 不再误判为目标,双引号真实参数与代码内带协议的 URL 照常识别。
 - 围栏目标提取器再修两条误报:URL 尾部 shell 变量(`http://host$p` 循环/函数参数拼路径)剥离到合法主机再归类,整段是变量则丢弃;接口参数位邮箱(`?to=a@b.com`)不再把 `@` 后段误当主机——`user@host` 凭据形态不在参数位,仍保留提取(宁误报勿漏拦)。

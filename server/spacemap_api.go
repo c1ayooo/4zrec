@@ -350,7 +350,7 @@ func (s *Server) seedSpacemapTools() {
 	allCollectTools := slices.Concat(
 		s.spacemapTools(), s.spacemapExpandTools(), s.reconTools(),
 		s.atomicTools(), s.entTools(), s.credTools(),
-		s.webreconTools(), s.coverageTools(), s.oobTools(),
+		s.webreconTools(), s.coverageTools(), s.oobTools(), s.probeTools(),
 	)
 	for _, t := range allCollectTools {
 		schema, _ := json.Marshal(t.InputSchema())

@@ -1271,6 +1271,23 @@ export interface EntCandidate {
   fingerprint_status: string;
 }
 
+// ---- 指纹规则库 ----
+export interface FingerprintRule {
+  id: string;
+  name: string;
+  category: string;
+  expression: string;
+  source: string;
+  enabled: boolean;
+}
+
+export interface FingerprintSource {
+  name: string;
+  upstream_url: string;
+  rule_count: number;
+  fetched_at: string;
+}
+
 // ---- 被动源凭据(VT/GitHub) ----
 export interface IntelKey {
   key: string;

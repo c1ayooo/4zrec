@@ -2411,6 +2411,21 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       ],
     };
 
+  // ── 指纹规则库（demo）──
+  if (path === "/fingerprint/rules")
+    return {
+      rules: [
+        { id: "w1", name: "Nginx", category: "server", expression: "header:server~nginx", source: "webanalyze", enabled: true },
+        { id: "w2", name: "Spring Boot", category: "framework", expression: "body~actuator|body~Whitelabel Error", source: "dddd", enabled: true },
+      ],
+      total: 2, page: 1, enabled: 15832,
+      sources: [
+        { name: "webanalyze", upstream_url: "https://raw…/technologies.json", rule_count: 6120, fetched_at: "2026-10-17T06:00:00Z" },
+        { name: "wappalyzergo", upstream_url: "https://raw…/fingerprints.json", rule_count: 5010, fetched_at: "2026-10-17T06:00:00Z" },
+        { name: "dddd", upstream_url: "https://raw…/finger.yaml", rule_count: 4700, fetched_at: "2026-10-17T06:00:00Z" },
+      ],
+    };
+
   // ── 空间测绘结果（demo）──
   if (path === "/spacemap/results")
     return {

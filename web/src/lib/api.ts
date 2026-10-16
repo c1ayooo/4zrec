@@ -67,6 +67,8 @@ import type {
   EntProvider,
   EntCandidate,
   EntJob,
+  FingerprintRule,
+  FingerprintSource,
   IntelKey,
   SpacemapResultRow,
   ReconRun,
@@ -1177,6 +1179,15 @@ export const api = {
   saveSpacemapEngine: (body: { provider: string; api_key?: string; base_url?: string }) =>
     post<{ engines: SpacemapEngine[] }>("/spacemap/engines", body).then((r) => arr(r.engines)),
   intelKeys: () => get<{ keys: IntelKey[] }>("/spacemap/intelkeys").then((r) => arr(r.keys)),
+  fingerprintRules: (params: { query?: string; source?: string; page?: number }) => {
+    const q = new URLSearchParams();
+    if (params.query) q.set("query", params.query);
+    if (params.source) q.set("source", params.source);
+    q.set("page", String(params.page ?? 1));
+    return get<{ rules: FingerprintRule[]; total: number; page: number; enabled: number; sources: FingerprintSource[] }>(
+      `/fingerprint/rules?${q.toString()}`,
+    );
+  },
   spacemapResults: (params: { engine?: string; type?: string; projectId?: number; page?: number; size?: number }) => {
     const q = new URLSearchParams();
     if (params.engine) q.set("engine", params.engine);

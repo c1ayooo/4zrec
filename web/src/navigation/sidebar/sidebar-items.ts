@@ -11,6 +11,7 @@ import {
   ClipboardList,
   Compass,
   FileText,
+  Fingerprint,
   FolderOpen,
   LayoutDashboard,
   type LucideIcon,
@@ -140,6 +141,7 @@ export const sidebarItems: NavGroup[] = [
         icon: Settings2,
         subItems: [
           { id: "spacemap-config", title: "空间测绘配置", url: "/system/spacemap", icon: Radar },
+          { id: "fingerprint", title: "指纹规则库", url: "/system/fingerprint", icon: Fingerprint },
           { id: "enterprise-config", title: "企业数据源", url: "/system/enterprise", icon: Building2 },
           { id: "logs", title: "日志", url: "/system/logs", icon: ScrollText },
           { id: "settings", title: "系统配置", url: "/system/settings", icon: Settings2 },
