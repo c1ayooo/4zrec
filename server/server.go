@@ -924,6 +924,8 @@ func (s *Server) Handler() http.Handler {
 	// 空间测绘引擎 key 配置(信息收集原生能力)
 	mux.HandleFunc("GET /api/spacemap/engines", s.spacemapEnginesGet)
 	mux.HandleFunc("POST /api/spacemap/engines", s.spacemapEnginesSet)
+	mux.HandleFunc("GET /api/spacemap/intelkeys", s.intelKeysGet)
+	mux.HandleFunc("POST /api/spacemap/intelkeys", s.intelKeysSet)
 	// 周期采集任务管理
 	mux.HandleFunc("GET /api/recon-schedules", s.reconSchedList)
 	mux.HandleFunc("POST /api/recon-schedules", s.reconSchedCreate)

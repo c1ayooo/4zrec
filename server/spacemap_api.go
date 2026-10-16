@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 
@@ -339,4 +340,83 @@ func (s *Server) seedSpacemapTools() {
 		schema, _ := json.Marshal(t.InputSchema())
 		_ = s.m.PG().SeedTool(t.Name(), t.Description(), schema, agents)
 	}
+}
+
+// ---------- HTTP: /api/spacemap/intelkeys(被动源与情报凭据:VT/GitHub) ----------
+
+type intelKeyDef struct {
+	Setting string // settings 键
+	Label   string
+	Env     string // 环境变量名(优先)
+}
+
+var intelKeys = []intelKeyDef{
+	{Setting: "virustotal.key", Label: "VirusTotal", Env: "VT_API_KEY"},
+	{Setting: "githubsearch.token", Label: "GitHub", Env: "GITHUB_TOKEN"},
+}
+
+func (s *Server) intelKeysGet(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	type row struct {
+		Key        string `json:"key"`
+		Label      string `json:"label"`
+		Env        string `json:"env"`
+		FromEnv    bool   `json:"from_env"`
+		Configured bool   `json:"configured"`
+		Masked     string `json:"masked"`
+	}
+	out := make([]row, 0, len(intelKeys))
+	for _, k := range intelKeys {
+		val := ""
+		if v := strings.TrimSpace(os.Getenv(k.Env)); v != "" {
+			val = v
+		} else if v, ok, err := pg.GetSetting(k.Setting); err == nil && ok {
+			val = strings.TrimSpace(v)
+		}
+		out = append(out, row{
+			Key: k.Setting, Label: k.Label, Env: k.Env,
+			FromEnv:    val != "" && strings.TrimSpace(os.Getenv(k.Env)) != "",
+			Configured: val != "", Masked: spacemap.Mask(val),
+		})
+	}
+	writeJSON(w, 200, map[string]any{"keys": out})
+}
+
+// intelKeysSet 保存(留空不变,"clear"清除)。
+func (s *Server) intelKeysSet(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	var in struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	}
+	if err := decode(r, &in); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	valid := false
+	for _, k := range intelKeys {
+		if k.Setting == in.Key {
+			valid = true
+		}
+	}
+	if !valid {
+		writeErr(w, 400, "key 不支持")
+		return
+	}
+	if v := strings.TrimSpace(in.Value); v != "" {
+		if v == "clear" {
+			v = ""
+		}
+		if err := pg.SetSetting(in.Key, v); err != nil {
+			writeErr(w, 500, "db: "+err.Error())
+			return
+		}
+	}
+	s.intelKeysGet(w, r)
 }

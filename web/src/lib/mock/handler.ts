@@ -2386,6 +2386,14 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       ],
     };
   if (path === "/spacemap/engines" && m === "POST") return { engines: [] };
+  if (path === "/spacemap/intelkeys" && m === "GET")
+    return {
+      keys: [
+        { key: "virustotal.key", label: "VirusTotal", env: "VT_API_KEY", from_env: false, configured: false, masked: "" },
+        { key: "githubsearch.token", label: "GitHub", env: "GITHUB_TOKEN", from_env: false, configured: false, masked: "" },
+      ],
+    };
+  if (path === "/spacemap/intelkeys" && m === "POST") return { keys: [] };
 
   // ── 周期采集任务（demo）──
   if (path === "/recon-schedules" && m === "GET")

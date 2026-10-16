@@ -65,6 +65,7 @@ import type {
   LLMTask,
   MCPServer,
   EntProvider,
+  IntelKey,
   ReconSchedule,
   SpacemapEngine,
   MCPTool,
@@ -1171,6 +1172,9 @@ export const api = {
     get<{ engines: SpacemapEngine[] }>("/spacemap/engines").then((r) => arr(r.engines)),
   saveSpacemapEngine: (body: { provider: string; api_key?: string; base_url?: string }) =>
     post<{ engines: SpacemapEngine[] }>("/spacemap/engines", body).then((r) => arr(r.engines)),
+  intelKeys: () => get<{ keys: IntelKey[] }>("/spacemap/intelkeys").then((r) => arr(r.keys)),
+  saveIntelKey: (body: { key: string; value?: string }) =>
+    post<{ keys: IntelKey[] }>("/spacemap/intelkeys", body).then((r) => arr(r.keys)),
 
   // ---- 周期采集任务 ----
   reconSchedules: () =>

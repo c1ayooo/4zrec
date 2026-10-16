@@ -1229,6 +1229,16 @@ export interface MCPServer {
   tools?: string[]; // mcp_tools_cache (names only, for the count)
 }
 
+// ---- 被动源凭据(VT/GitHub) ----
+export interface IntelKey {
+  key: string;
+  label: string;
+  env: string;
+  from_env: boolean;
+  configured: boolean;
+  masked: string;
+}
+
 // ---- 企业数据源 ----
 export interface EntProvider {
   name: string;
