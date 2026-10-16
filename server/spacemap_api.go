@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/c1ayooo/4zrec/db"
@@ -329,7 +330,12 @@ func (s *Server) toolSpaceSearchBatch() actool.CoreTool {
 // seedSpacemapTools 工具表播种(首插入生效,UI 可改绑/停用)。
 func (s *Server) seedSpacemapTools() {
 	agents, _ := json.Marshal([]string{"auto", "worker"})
-	for _, t := range append(append(append(append(append(append(append(s.spacemapTools(), s.spacemapExpandTools()...), s.reconTools()...), s.atomicTools()...), s.entTools()...), s.credTools()...), s.webreconTools()...), s.coverageTools()...) {
+	allCollectTools := slices.Concat(
+		s.spacemapTools(), s.spacemapExpandTools(), s.reconTools(),
+		s.atomicTools(), s.entTools(), s.credTools(),
+		s.webreconTools(), s.coverageTools(), s.oobTools(),
+	)
+	for _, t := range allCollectTools {
 		schema, _ := json.Marshal(t.InputSchema())
 		_ = s.m.PG().SeedTool(t.Name(), t.Description(), schema, agents)
 	}
