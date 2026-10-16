@@ -232,7 +232,7 @@ func (e *Engine) doHTTP(id int64, rawURL string) {
 	if err != nil {
 		return
 	}
-	req.Header.Set("User-Agent", "artex-enrich/1.0")
+	req.Header.Set("User-Agent", "4zrec-enrich/1.0")
 	resp, err := e.client.Do(req)
 	if err != nil {
 		return

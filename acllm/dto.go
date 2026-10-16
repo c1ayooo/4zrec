@@ -1,6 +1,6 @@
 // Package acllm is the session-DTO and conversion layer of the eino migration.
 //
-// It owns the on-disk conversation vocabulary that ARTEX transcripts have used
+// It owns the on-disk conversation vocabulary that 4zrec transcripts have used
 // since the norma era (Anthropic content-block shape: Message/ContentBlock with
 // text/thinking/tool_use/tool_result blocks, Usage with cache tokens). The JSON
 // field names of these types are FROZEN — existing transcript files and resume

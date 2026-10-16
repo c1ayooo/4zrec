@@ -56,7 +56,7 @@ func NewSession(opts Options) *Session {
 		toolSet = tools.DefaultTools()
 	}
 	if s.opts.PermissionMode == "" {
-		s.opts.PermissionMode = tools.ModeBypass // ARTEX现状恒为 bypass
+		s.opts.PermissionMode = tools.ModeBypass // 4ZREC现状恒为 bypass
 	}
 	if s.opts.NudgeLimit <= 0 {
 		s.opts.NudgeLimit = 5 // norma: worker 2 / others 5; the worker assembler sets 2
@@ -489,7 +489,7 @@ func (s *Session) driveAgent(ctx context.Context, ps *promptState, rs *runState,
 	}
 
 	cfg := &adk.ChatModelAgentConfig{
-		Name:          "artex",
+		Name:          "4zrec",
 		Model:         s.opts.Model,
 		MaxIterations: maxTurns,
 		ToolsConfig: adk.ToolsConfig{

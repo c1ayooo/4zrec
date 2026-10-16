@@ -388,7 +388,7 @@ func (s *Server) exportFinding(w http.ResponseWriter, r *http.Request) {
 			DataDir:     s.dataDir,
 			NoAI:        true,
 		}
-		stage, err := os.MkdirTemp("", "artex-finding-docx-")
+		stage, err := os.MkdirTemp("", "4zrec-finding-docx-")
 		if err != nil {
 			writeErr(w, 500, err.Error())
 			return

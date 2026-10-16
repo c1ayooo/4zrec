@@ -109,7 +109,7 @@ func isEmptyAssistant(msg *schema.Message) bool {
 // other error is a transport-level failure and retried — UNLESS it embeds an
 // HTTP status (adapter errors do: eino-ext openai surfaces *openai.APIError,
 // eino-ext claude surfaces the anthropic SDK's error), in which case the status
-// decides. That last rule is load-bearing for ARTEX's quota routing: the
+// decides. That last rule is load-bearing for 4zrec's quota routing: the
 // transport rewrites a quota-exhausted 429 to 402 precisely so the call fails
 // over immediately, and a 402 must therefore never be retried.
 func retryableCallErr(ctx context.Context, err error) bool {

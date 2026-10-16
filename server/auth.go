@@ -138,12 +138,12 @@ func verifyJWT(tokenStr string, key []byte) bool {
 }
 
 // extractToken reads the JWT from Authorization: Bearer header,
-// artex_token cookie, or ?token= query param (for SSE connections).
+// 4zrec_token cookie, or ?token= query param (for SSE connections).
 func extractToken(r *http.Request) string {
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
 		return strings.TrimPrefix(h, "Bearer ")
 	}
-	if c, err := r.Cookie("artex_token"); err == nil && c.Value != "" {
+	if c, err := r.Cookie("4zrec_token"); err == nil && c.Value != "" {
 		return c.Value
 	}
 	return r.URL.Query().Get("token")

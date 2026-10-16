@@ -144,7 +144,7 @@ func toolResultSchema(b ContentBlock) *schema.Message {
 }
 
 // FromSchema converts eino runtime messages back into DTO history (resume
-// seeding, transcript writing). System messages are skipped — ARTEX keeps the
+// seeding, transcript writing). System messages are skipped — 4zrec keeps the
 // system prompt outside the message array, as before.
 func FromSchema(msgs []*schema.Message) []Message {
 	out := make([]Message, 0, len(msgs))

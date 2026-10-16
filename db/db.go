@@ -1,4 +1,4 @@
-// Package db is the PostgreSQL data source for ARTEX (取代旧 graph 单文件 SQLite)。
+// Package db is the PostgreSQL data source for 4ZREC (取代旧 graph 单文件 SQLite)。
 // 它打开连接、应用 schema、并 seed 内置 agent 与变量目录。
 package db
 
@@ -89,15 +89,15 @@ func coordinateWithSchemaMigration(tx *sql.Tx) error {
 }
 
 // DSN resolves the PostgreSQL connection string and reports where it came from.
-// Precedence: env ARTEX_PG_DSN > config file (config.json). There is no
+// Precedence: env 4ZREC_PG_DSN > config file (config.json). There is no
 // built-in default — it errors if neither source is configured.
 //
-// 测试护栏:go test 二进制里必须显式设置 ARTEX_PG_DSN,拒绝回落到 config.json。
+// 测试护栏:go test 二进制里必须显式设置 4ZREC_PG_DSN,拒绝回落到 config.json。
 // config.json 指向的通常是常驻/生产库——测试夹具会往里灌垃圾(2026-10-14 一次
 // 裸跑 go test 就把 41 个夹具任务写进了生产库)。
 func DSN() (dsn, source string, err error) {
-	if inTestBinary() && strings.TrimSpace(os.Getenv("ARTEX_PG_DSN")) == "" {
-		return "", "", fmt.Errorf("go test 未设置 ARTEX_PG_DSN,拒绝回落到 config.json 的数据库(防测试夹具污染常驻库)。请指向一次性测试库,例如:\n  ARTEX_PG_DSN=\"postgres:///artex_eino_migration?host=/var/run/postgresql&port=5433&sslmode=disable\" go test ./...")
+	if inTestBinary() && strings.TrimSpace(os.Getenv("ZREC_PG_DSN")) == "" {
+		return "", "", fmt.Errorf("go test 未设置 4ZREC_PG_DSN,拒绝回落到 config.json 的数据库(防测试夹具污染常驻库)。请指向一次性测试库,例如:\n  4ZREC_PG_DSN=\"postgres:///4zrec_eino_migration?host=/var/run/postgresql&port=5433&sslmode=disable\" go test ./...")
 	}
 	return config.PostgresDSN()
 }

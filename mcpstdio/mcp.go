@@ -179,7 +179,7 @@ func (c *Client) initialize(ctx context.Context) error {
 	_, err := c.conn.call(ctx, "initialize", map[string]any{
 		"protocolVersion": "2024-11-05",
 		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "artex", "version": "0.2"},
+		"clientInfo":      map[string]any{"name": "4zrec", "version": "0.2"},
 	})
 	if err != nil {
 		return err

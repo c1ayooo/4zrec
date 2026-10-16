@@ -72,7 +72,7 @@ func isGoRunDir(dir string) bool {
 }
 
 // Path returns the config file path. Resolution order:
-//  1. env ARTEX_CONFIG (explicit override)
+//  1. env 4ZREC_CONFIG (explicit override;ARTEX_CONFIG 旧名回退)
 //  2. ./config.json in the current working directory (running from the project
 //     dir — robust no matter where `go run` placed the temp/cached binary)
 //  3. config.json next to the executable (a distributed binary keeps it beside)
@@ -80,7 +80,7 @@ func isGoRunDir(dir string) bool {
 // The first existing file wins. If none exist, the CWD path is returned so the
 // "not found" message points at the project dir the user most likely expected.
 func Path() string {
-	if v := strings.TrimSpace(os.Getenv("ARTEX_CONFIG")); v != "" {
+	if v := strings.TrimSpace(envCompat("ARTEX_CONFIG", "ZREC_CONFIG")); v != "" {
 		return v
 	}
 	var candidates []string
@@ -110,12 +110,12 @@ func Load() Config {
 
 // SkillDir returns the skill root directory with precedence:
 //
-//	env ARTEX_SKILL_DIR  >  config file (skill_dir)  >  BaseDir()/skills
+//	env 4ZREC_SKILL_DIR(旧名 ARTEX_SKILL_DIR 回退) > config(skill_dir) > BaseDir()/skills
 //
 // The directory is created if it does not exist.
 func SkillDir() string {
 	var d string
-	if v := strings.TrimSpace(os.Getenv("ARTEX_SKILL_DIR")); v != "" {
+	if v := strings.TrimSpace(envCompat("ARTEX_SKILL_DIR", "ZREC_SKILL_DIR")); v != "" {
 		d = v
 	} else if v := strings.TrimSpace(Load().SkillDir); v != "" {
 		d = v
@@ -128,15 +128,15 @@ func SkillDir() string {
 
 // PostgresDSN resolves the connection string with precedence:
 //
-//	env ARTEX_PG_DSN  >  config file (database.dsn, or assembled from fields)
+//	env 4ZREC_PG_DSN(旧名 ARTEX_PG_DSN 回退) > config file (database.dsn, or assembled from fields)
 //
 // There is NO built-in fallback: when neither source supplies a database config,
 // it returns an error naming the config path it inspected, so startup fails loudly
 // instead of silently connecting to a wrong default. source describes where the
 // DSN came from (for startup logging).
 func PostgresDSN() (dsn, source string, err error) {
-	if v := strings.TrimSpace(os.Getenv("ARTEX_PG_DSN")); v != "" {
-		return v, "环境变量 ARTEX_PG_DSN", nil
+	if v := strings.TrimSpace(envCompat("ARTEX_PG_DSN", "ZREC_PG_DSN")); v != "" {
+		return v, "环境变量 4ZREC_PG_DSN", nil
 	}
 	db := Load().Database
 	if d := strings.TrimSpace(db.DSN); d != "" {
@@ -145,7 +145,7 @@ func PostgresDSN() (dsn, source string, err error) {
 	if db.Host != "" || db.DBName != "" || db.User != "" {
 		return db.buildDSN(), "配置文件 " + Path() + " (database 字段)", nil
 	}
-	return "", "", fmt.Errorf("未找到数据库配置：环境变量 ARTEX_PG_DSN 未设置，且配置文件 %s 未提供 database（dsn 或 host/user/dbname）。请创建该配置文件或设置环境变量后重试", Path())
+	return "", "", fmt.Errorf("未找到数据库配置：环境变量 4ZREC_PG_DSN(或旧名 ARTEX_PG_DSN) 未设置，且配置文件 %s 未提供 database（dsn 或 host/user/dbname）。请创建该配置文件或设置环境变量后重试", Path())
 }
 
 func (d Database) buildDSN() string {
@@ -189,4 +189,12 @@ func Redact(dsn string) string {
 		}
 	}
 	return fmt.Sprintf("%s", u.String())
+}
+
+// envCompat 新版环境变量优先,旧版 ARTEX_ 前缀回退(兼容既有部署习惯)。
+func envCompat(oldEnv, newEnv string) string {
+	if v := strings.TrimSpace(os.Getenv(newEnv)); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv(oldEnv))
 }

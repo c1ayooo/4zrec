@@ -144,7 +144,7 @@ func compactionConfig(windowTokens int) *compaction.Config {
 //	ARTEX_LLM_PROXY    = proxy URL        (optional; http/https/socks5)
 //	ANTHROPIC_API_KEY / OPENAI_API_KEY         = credentials
 func FromEnv() (Config, bool) {
-	prov := os.Getenv("ARTEX_LLM_PROVIDER")
+	prov := envCompat("ARTEX_LLM_PROVIDER", "ZREC_LLM_PROVIDER")
 	anthKey := os.Getenv("ANTHROPIC_API_KEY")
 	oaiKey := os.Getenv("OPENAI_API_KEY")
 
@@ -160,11 +160,11 @@ func FromEnv() (Config, bool) {
 	}
 
 	c := Config{
-		BaseURL: os.Getenv("ARTEX_LLM_BASE_URL"),
-		Model:   os.Getenv("ARTEX_LLM_MODEL"),
-		Proxy:   strings.TrimSpace(os.Getenv("ARTEX_LLM_PROXY")),
+		BaseURL: envCompat("ARTEX_LLM_BASE_URL", "ZREC_LLM_BASE_URL"),
+		Model:   envCompat("ARTEX_LLM_MODEL", "ZREC_LLM_MODEL"),
+		Proxy:   strings.TrimSpace(envCompat("ARTEX_LLM_PROXY", "ZREC_LLM_PROXY")),
 		// 默认流式;ARTEX_LLM_STREAM=false/0/off 显式关闭走非流式。
-		Stream: !isFalsy(os.Getenv("ARTEX_LLM_STREAM")),
+		Stream: !isFalsy(envCompat("ARTEX_LLM_STREAM", "ZREC_LLM_STREAM")),
 	}
 	switch prov {
 	case "openai":
@@ -528,4 +528,12 @@ func TestConnection(ctx context.Context, c Config) (time.Duration, string, error
 		return lat, "", fmt.Errorf("模型无回复内容（请求已通，但未返回任何文本）")
 	}
 	return lat, reply, nil
+}
+
+// envCompat 新版环境变量优先,旧版 ARTEX_ 前缀回退(兼容既有部署习惯)。
+func envCompat(oldEnv, newEnv string) string {
+	if v := strings.TrimSpace(os.Getenv(newEnv)); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv(oldEnv))
 }
