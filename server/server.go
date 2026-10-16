@@ -1587,6 +1587,11 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, "关联企业不存在或无效")
 			return
 		}
+		if errors.Is(err, db.ErrTaskScopeFenced) {
+			// 项目围栏拒绝:请求越出授权根,是客户端错误而非服务端故障。
+			writeErr(w, 400, err.Error())
+			return
+		}
 		writeErr(w, 500, err.Error())
 		return
 	}

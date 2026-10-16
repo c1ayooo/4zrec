@@ -239,6 +239,17 @@ RETURNING id, status, paused, created_at`, opts.Name, opts.CategoryID, descripti
 	if err := insertTaskRelations(tx, t.ID, opts.SourceTaskIDs); err != nil {
 		return nil, err
 	}
+	// 项目围栏(授权根):任务挂项目时,项目授权范围种成本任务初始 task_scope,
+	// 让规划器第一轮就有范围可依,而不是自己在全库里"锚定"(2026-10-15 事故
+	// 根因之一);创建时的关联企业同样必须落在项目授权范围内。
+	if opts.ProjectID != nil && *opts.ProjectID > 0 {
+		if err := fenceTaskCompaniesTx(tx, *opts.ProjectID, opts.CompanyIDs); err != nil {
+			return nil, err
+		}
+		if err := insertTaskProjectScope(tx, t.ID, *opts.ProjectID); err != nil {
+			return nil, err
+		}
+	}
 	if err := insertTaskCompanies(tx, t.ID, opts.CompanyIDs); err != nil {
 		return nil, err
 	}
@@ -254,6 +265,54 @@ RETURNING id, status, paused, created_at`, opts.Name, opts.CategoryID, descripti
 		t.LLMFailoverState = "ready"
 	}
 	return t, tx.Commit()
+}
+
+// fenceTaskCompaniesTx 项目围栏的创建时企业校验:挂项目任务只能关联项目所属
+// 企业(客户主体),项目未挂企业时不允许关联任何企业——否则关联企业的整库
+// 资产会经 task_scope(company)进入任务作用域,围栏形同虚设。
+func fenceTaskCompaniesTx(tx *sql.Tx, projectID int64, companyIDs []int64) error {
+	if len(companyIDs) == 0 {
+		return nil
+	}
+	var projCompany sql.NullInt64
+	if err := tx.QueryRow(`SELECT company_id FROM projects WHERE id=$1`, projectID).Scan(&projCompany); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("项目 #%d 不存在", projectID)
+		}
+		return err
+	}
+	if !projCompany.Valid {
+		return fmt.Errorf("%w: 项目 #%d 未挂企业, 任务不允许关联企业(请先在项目页挂企业)", ErrTaskScopeFenced, projectID)
+	}
+	for _, id := range companyIDs {
+		if id != projCompany.Int64 {
+			return fmt.Errorf("%w: 任务只能关联项目所属企业(#%d), 企业 #%d 不在项目 #%d 的授权范围内", ErrTaskScopeFenced, projCompany.Int64, id, projectID)
+		}
+	}
+	return nil
+}
+
+// ErrTaskScopeFenced 任务作用域/关联企业被项目围栏拒绝:调用方(HTTP 层)应映射
+// 为 400 语义的客户端错误——不是服务端故障,是请求越出了授权根。文本是各条
+// 围栏报错的前缀,保持「项目围栏」字样以便 agent 与操作者识别。
+var ErrTaskScopeFenced = errors.New("项目围栏")
+
+// insertTaskProjectScope 把项目授权范围(project_scope)种成本任务的初始
+// task_scope(source='project'):domain→root_domain、ip/cidr→cidr。icp/keyword
+// 是提示规则(MatchProjectScope 不参与围栏匹配),不构成授权,不种子。
+func insertTaskProjectScope(tx *sql.Tx, taskID, projectID int64) error {
+	_, err := tx.Exec(`
+INSERT INTO task_scope(task_id, kind, domain, net, source, reason)
+SELECT $1,
+       CASE ps.kind WHEN 'domain' THEN 'root_domain' ELSE 'cidr' END,
+       NULLIF(ps.domain, ''),
+       ps.net,
+       'project',
+       '任务创建时继承项目授权范围(project_scope #' || ps.id || ')'
+FROM project_scope ps
+WHERE ps.project_id = $2 AND ps.kind IN ('domain', 'ip', 'cidr')
+ON CONFLICT DO NOTHING`, taskID, projectID)
+	return err
 }
 
 func insertTaskCompanies(tx *sql.Tx, taskID int64, companyIDs []int64) error {

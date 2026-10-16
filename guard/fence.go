@@ -70,6 +70,9 @@ var reToken = regexp.MustCompile(`[a-z0-9.-]+`)
 // 的 URL 不在此列——第一步已在全文提取,引号内外一视同仁。
 var reQuoted = regexp.MustCompile("`[^`]*`|'[^']*'")
 
+// reEmailParam 匹配查询参数位的邮箱(紧邻 =/?/&/双引号),提取时整体剔除。
+var reEmailParam = regexp.MustCompile(`(?i)([=?&"])[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}`)
+
 // reHeredocStart 匹配 heredoc 开始(<<EOF / <<-'EOF' / <<< 变体排除在外)。
 // Go 的 RE2 不支持反向引用,结束标记(单独成行的同名 TAG)由 stripHeredocs
 // 手工扫描。
@@ -262,6 +265,19 @@ func ExtractFenceTargets(text string) fenceTargets {
 		}
 		if parsed, err := url.Parse(u); err == nil && parsed.Host != "" {
 			host := parsed.Hostname()
+			// 渗透脚本常把 shell 变量拼进 URL(woniuxy.com$2 —— 循环/函数参数
+			// 拼路径是常态),字面 token 会带着 $ 尾巴:剥掉再归类;剥完为空
+			// (整个 host 都是变量)或以裸 $ 结尾(变量表达式被 URL 正则截断,
+			// 如 x.${port}a)都整段丢弃——变量运行时才展开,不可见即宁漏勿扰。
+			if i := strings.Index(host, "$"); i >= 0 {
+				if i == len(host)-1 {
+					continue
+				}
+				host = host[:i]
+				if host == "" {
+					continue
+				}
+			}
 			if pip := net.ParseIP(host); pip != nil {
 				if pip.To4() != nil && validFenceIPv4(pip.String()) {
 					addIP(pip.String())
@@ -279,6 +295,11 @@ func ExtractFenceTargets(text string) fenceTargets {
 	for _, m := range reQuoted.FindAllString(rest, -1) {
 		rest = strings.ReplaceAll(rest, m, " ")
 	}
+	// 邮箱查询参数剔除:?to=a@b.com 这类接口参数里的邮箱不是连接目标,@ 后段
+	// 却会被裸 token 扫描误当主机(2026-10-15 b.com 误报)。只剔参数位(紧邻
+	// =/?/&/双引号)的邮箱;命令行凭据/登录名(user@host)不紧邻这些字符,
+	// 保留提取——宁误报勿漏拦。
+	rest = reEmailParam.ReplaceAllString(rest, "$1")
 	lower := strings.ToLower(rest)
 	// 2) IPv4(边界校验:前后不能是数字或点,避免版本号 1.2.3.4.5 的截断误报)。
 	for _, loc := range reIPv4.FindAllStringIndex(lower, -1) {

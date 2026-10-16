@@ -734,6 +734,8 @@ WHERE t.active_llm_profile_id IS NULL
 --     （root_domain→root_domain，subdomain/service/endpoint→subdomain(host)，ip→ip）；
 --     side-effect 派生的资产不入范围（钩子在 handler 顶层，派生在 db 层内部）。
 --   agent 填(source='agent')：add_task_scope 加 company/root_domain/subdomain/ip。
+--   project 填(source='project')：任务挂项目时继承 project_scope(domain→root_domain、
+--     ip/cidr→cidr)；icp/keyword 是提示规则不种子。
 -- 覆盖度 = 匹配 active 行的 assets（分母）中，被 fact 节点锚定过的占比（分子）。
 CREATE TABLE IF NOT EXISTS task_scope (
     id          BIGSERIAL PRIMARY KEY,
@@ -743,7 +745,7 @@ CREATE TABLE IF NOT EXISTS task_scope (
     domain      TEXT,          -- root_domain / subdomain
     net         CIDR,          -- ip / cidr
     value       TEXT,          -- icp / keyword
-    source      TEXT NOT NULL DEFAULT 'auto' CHECK (source IN ('auto','agent','manual')),
+    source      TEXT NOT NULL DEFAULT 'auto' CHECK (source IN ('auto','agent','manual','project')),
     reason      TEXT,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -752,6 +754,10 @@ ALTER TABLE task_scope ADD COLUMN IF NOT EXISTS value TEXT;
 ALTER TABLE task_scope DROP CONSTRAINT IF EXISTS task_scope_kind_check;
 ALTER TABLE task_scope ADD CONSTRAINT task_scope_kind_check
     CHECK (kind IN ('company','root_domain','subdomain','ip','cidr','icp','keyword'));
+-- 旧库升级：source 增加项目继承来源（任务挂项目时 project_scope 种子行）。
+ALTER TABLE task_scope DROP CONSTRAINT IF EXISTS task_scope_source_check;
+ALTER TABLE task_scope ADD CONSTRAINT task_scope_source_check
+    CHECK (source IN ('auto','agent','manual','project'));
 -- 去重：同一 task 的同一条范围只存一次（自动填批量插入靠它幂等）。
 DROP INDEX IF EXISTS uq_task_scope;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_task_scope_v2 ON task_scope(

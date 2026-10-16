@@ -214,10 +214,87 @@ func (s *AssetStore) AddAgentScope(taskID int64, kind, value, reason, source str
 	default:
 		return ts, fmt.Errorf("不支持的 kind: %s（company/root_domain/subdomain/ip/cidr/icp/keyword）", kind)
 	}
+	// 项目围栏:任务挂了项目(授权根)时,扩大范围必须落在项目授权范围内。
+	// 2026-10-15 事故:规划器在 woniuxy 项目的任务上把「西安文理」整家公司
+	// 圈进作用域,跨项目资产经 list_assets 全量可读。icp/keyword 是提示规则
+	// (MatchProjectScope 不参与围栏匹配),对挂项目任务直接拒绝。
+	if projectID, perr := s.DB().TaskProjectID(taskID); perr != nil {
+		return ts, perr
+	} else if projectID > 0 {
+		if err := s.fenceAgentScope(projectID, ts); err != nil {
+			return ts, err
+		}
+	}
 	if err := s.upsertTaskScope(ts); err != nil {
 		return ts, err
 	}
 	return ts, nil
+}
+
+// fenceAgentScope 校验一条待加入的任务范围是否落在项目授权范围内。域名按
+// 后缀匹配(授权根含其全部子域,与 MatchProjectScope 同语义),网段按包含
+// 关系,company 仅限项目所属企业(客户主体),icp/keyword 是提示规则不构成
+// 授权。报错信息带上「围栏」字样并指路项目页,让 agent 与操作者都能自纠。
+func (s *AssetStore) fenceAgentScope(projectID int64, ts TaskScope) error {
+	var projCompany sql.NullInt64
+	if err := s.db.QueryRow(`SELECT company_id FROM projects WHERE id=$1`, projectID).Scan(&projCompany); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("%w: 项目 #%d 不存在", ErrTaskScopeFenced, projectID)
+		}
+		return err
+	}
+	deny := func(what string) error {
+		return fmt.Errorf("%w: %s 不在项目 #%d 的授权范围内;确需放宽请到项目页调整授权范围后重试", ErrTaskScopeFenced, what, projectID)
+	}
+	switch ts.Kind {
+	case "company":
+		if !projCompany.Valid || ts.CompanyID == nil || *ts.CompanyID != projCompany.Int64 {
+			return deny("该公司不属于本项目")
+		}
+	case "root_domain", "subdomain":
+		rules, err := s.db.ProjectScopeRules(projectID)
+		if err != nil {
+			return err
+		}
+		for _, r := range rules {
+			if r.Kind != "domain" || r.Domain == "" {
+				continue
+			}
+			if ts.Domain == r.Domain || strings.HasSuffix(ts.Domain, "."+r.Domain) {
+				return nil
+			}
+		}
+		return deny(fmt.Sprintf("域名 %s", ts.Domain))
+	case "ip", "cidr":
+		rules, err := s.db.ProjectScopeRules(projectID)
+		if err != nil {
+			return err
+		}
+		_, innerNet, err := net.ParseCIDR(ts.Net)
+		if err != nil {
+			return deny(fmt.Sprintf("网段 %s", ts.Net))
+		}
+		for _, r := range rules {
+			if r.Kind != "ip" && r.Kind != "cidr" {
+				continue
+			}
+			_, outer, err := net.ParseCIDR(r.Net)
+			if err != nil {
+				continue
+			}
+			// innerNet 是 ParseCIDR 归一化的网络地址:基址被 outer 包含且掩码
+			// 更宽(或相等),即整段被完整包含。
+			oMask, _ := outer.Mask.Size()
+			iMask, _ := innerNet.Mask.Size()
+			if oMask <= iMask && outer.Contains(innerNet.IP) {
+				return nil
+			}
+		}
+		return deny(fmt.Sprintf("网段 %s", ts.Net))
+	default: // icp、keyword
+		return deny(fmt.Sprintf("%s 规则(提示类,不构成授权)", ts.Kind))
+	}
+	return nil
 }
 
 // DeleteTaskScope removes a single scope row by id, scoped to the given task.

@@ -21,7 +21,7 @@ context_tasks AS (
   WHERE relation.task_id=$1
 )`
 
-const contextCoverageCTE = directTaskContextCTE + `,
+const contextCoverageCTE = directTaskContextCTE + taskProjectFenceCTE + `,
 target AS (
   SELECT DISTINCT a.id, a.type,
          COALESCE(a.url, a.domain, a.ip, a.app_name, a.root_domain, '') AS label
@@ -37,6 +37,7 @@ target AS (
        ))
   )
   JOIN context_tasks ctx ON ctx.task_id=ts.task_id
+  WHERE` + projectFencePredicate + `
 	UNION
 	SELECT a.id, a.type,
 	       COALESCE(a.url, a.domain, a.ip, a.app_name, a.root_domain, '') AS label
@@ -44,6 +45,7 @@ target AS (
 	JOIN exploration_anchors ea ON ea.asset_id=a.id
 	JOIN exploration_nodes en ON en.id=ea.node_id
 	JOIN context_tasks ctx ON ctx.exploration_id=en.exploration_id
+	WHERE` + projectFencePredicate + `
 ),
 tested AS (
   SELECT DISTINCT ea.asset_id
@@ -51,6 +53,31 @@ tested AS (
   JOIN exploration_nodes en ON en.id=ea.node_id AND en.kind='fact'
   JOIN context_tasks ctx ON ctx.exploration_id=en.exploration_id
 )`
+
+// taskProjectFenceCTE 解析任务($1)归属的项目;无行=未挂项目,围栏不启用
+// (渐进接入,与 guard 执行侧同语义)。只与 projectFencePredicate 搭配使用。
+const taskProjectFenceCTE = `,
+fence AS (
+  SELECT t0.project_id
+  FROM tasks t0
+  WHERE t0.id=$1 AND t0.project_id IS NOT NULL
+)`
+
+// projectFencePredicate 挂项目任务的资产读取兜底(第二道闸):资产要么已归属
+// 本项目,要么命中项目授权范围(根域精确=列已归一化、网段包含,与
+// MatchProjectScope/围栏白名单同语义)。task_scope 是任务自身的覆盖账本,
+// 可能被漂移写脏(直插/存量/关联任务继承),读取以项目授权范围为准。
+// 引用别名:assets a、fence。2026-10-15 事故:规划器把「西安文理」整家公司
+// 圈进 woniuxy 任务作用域后,跨项目资产经 list_assets 全量可读——此谓词保证
+// 无论 task_scope 怎么脏,挂项目任务的读取都出不了授权根。
+const projectFencePredicate = `
+    (NOT EXISTS (SELECT 1 FROM fence)
+     OR EXISTS (SELECT 1 FROM fence f WHERE f.project_id = a.project_id)
+     OR EXISTS (
+          SELECT 1 FROM fence f
+          JOIN project_scope ps ON ps.project_id = f.project_id
+          WHERE (ps.kind = 'domain' AND a.root_domain = ps.domain)
+             OR (ps.kind IN ('ip','cidr') AND ps.net >>= try_inet(a.ip))))`
 
 // scopeTargetCTE selects every asset that BELONGS to the current task's (and its
 // direct source tasks') declared scope — membership, not literal value: a
@@ -60,7 +87,7 @@ tested AS (
 // it carries neither the fact-anchor union nor the tested set — it is pure "in
 // declared scope", independent of what has already been touched. Used by the
 // agent's list_assets so a query returns the task's relevant assets, not the
-// whole shared库.
+// whole shared库. 挂项目任务再与项目授权范围求交(见 projectFencePredicate)。
 const scopeTargetCTE = `
 context_tasks AS (
   SELECT t.id AS task_id
@@ -71,7 +98,7 @@ context_tasks AS (
   FROM task_relations relation
   JOIN tasks source ON source.id=relation.source_task_id AND source.deleted_at IS NULL
   WHERE relation.task_id=$1
-),
+)` + taskProjectFenceCTE + `,
 target AS (
   SELECT DISTINCT a.id
   FROM assets a
@@ -86,6 +113,7 @@ target AS (
        ))
   )
   JOIN context_tasks ctx ON ctx.task_id=ts.task_id
+  WHERE` + projectFencePredicate + `
 )`
 
 // ListTaskScopeWithSources returns the current task's scope followed by the
@@ -199,7 +227,7 @@ ORDER BY target.id LIMIT $`+limitPosition+` OFFSET $`+offsetPosition, pageArgs..
 // used for destructive task cleanup; HostsByTask intentionally retains that
 // narrower, task-owned behavior.
 func (s *AssetStore) HostsByTaskWithSources(taskID int64) ([]string, error) {
-	rows, err := s.db.Query(`WITH `+directTaskContextCTE+`,
+	rows, err := s.db.Query(`WITH `+directTaskContextCTE+taskProjectFenceCTE+`,
 context_assets AS (
   SELECT DISTINCT a.id
   FROM assets a
@@ -207,7 +235,7 @@ context_assets AS (
   UNION
   SELECT ea.asset_id
   FROM exploration_anchors ea
-  JOIN exploration_nodes en ON en.id=ea.node_id
+  JOIN exploration_nodes en ON en.id=ea.node_id AND en.kind='fact'
   JOIN context_tasks ctx ON ctx.exploration_id=en.exploration_id
   UNION
   SELECT DISTINCT a.id
@@ -225,7 +253,8 @@ context_assets AS (
   JOIN context_tasks ctx ON ctx.task_id=ts.task_id
 )
 SELECT COALESCE(a.domain,''), COALESCE(a.ip,''), COALESCE(a.url,'')
-FROM assets a JOIN context_assets ctx ON ctx.id=a.id`, taskID)
+FROM assets a JOIN context_assets ctx ON ctx.id=a.id
+WHERE`+projectFencePredicate, taskID)
 	if err != nil {
 		return nil, err
 	}

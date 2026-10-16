@@ -400,6 +400,21 @@ UPDATE project_scope_suggestions SET status=$3 WHERE project_id=$1 AND domain = 
 // 触发点:项目范围变更(server addProjectScope)与每轮同步收尾(同步入库
 // 只做企业归属,项目侧在这里补)。
 func (s *ProjectStore) RecomputeProjectAttribution() (int64, error) {
+	// 范围规则正向生成资产:用户在项目里配置的授权域名,本身就是一条可见的
+	// root_domain 资产——否则只有范围没有资产行,任务作用域继承得再对,
+	// list_assets 也读到 0(2026-10-15 woniuxy 任务规划器两眼一抹黑,只能去翻
+	// /etc/hosts 找目标)。幂等:已有同根 root_domain 资产则跳过(不抢别的
+	// 项目的归属,唯一键兜底),存量规则在下一轮 recompute 补建。
+	if _, err := s.db.Exec(`
+INSERT INTO assets(type, domain, root_domain, project_id, authz)
+SELECT 'root_domain', ps.domain, ps.domain, ps.project_id, 'approved'
+FROM project_scope ps
+WHERE ps.kind = 'domain' AND COALESCE(ps.domain, '') != ''
+  AND NOT EXISTS (
+    SELECT 1 FROM assets a WHERE a.type = 'root_domain' AND a.root_domain = ps.domain
+  )`); err != nil {
+		return 0, err
+	}
 	res, err := s.db.Exec(`
 WITH matched AS (
     SELECT DISTINCT ON (a.id) a.id AS asset_id, ps.project_id
@@ -723,4 +738,24 @@ INSERT INTO assets(type, domain, root_domain, authz, project_id)
 VALUES ('subdomain', $1, $2, 'pending', $3) RETURNING id`,
 		domain, DomainKey(domain), projectID).Scan(&id)
 	return id, err
+}
+
+// ClaimAssetToProject 手工资产归属项目(资产 API 显式指定 project_id 的写入路径,
+// 与待审批队列的 ApproveAssetsWithProject 并列)。只认领 project_id IS NULL 的
+// 资产——不抢别项目的归属;authz 空/pending 提为 approved(显式归属=授权),
+// rejected 终态不复活(只升不降)。返回是否发生了认领。
+func (s *AssetStore) ClaimAssetToProject(assetID, projectID int64) (bool, error) {
+	if assetID <= 0 || projectID <= 0 {
+		return false, nil
+	}
+	res, err := s.db.Exec(`
+UPDATE assets
+SET project_id=$2,
+    authz = CASE WHEN COALESCE(authz,'') IN ('','pending') THEN 'approved' ELSE authz END
+WHERE id=$1 AND project_id IS NULL`, assetID, projectID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }

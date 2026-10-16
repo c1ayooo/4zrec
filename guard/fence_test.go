@@ -54,6 +54,41 @@ func TestExtractFenceTargets(t *testing.T) {
 			domains: []string{"localhost"}, // localhost 是域名形态,回环 IP 被排除
 		},
 		{
+			// 2026-10-15 误报:渗透脚本把 shell 变量拼进 URL(循环/函数参数拼路径),
+			// 提取器把 $p 一起当域名,授权内的 www.woniucx.com 反倒要审批。
+			name:    "URL 带 shell 变量尾巴剥到合法主机",
+			cmd:     `for p in /a /b; do curl -s "http://www.woniucx.com$p"; done`,
+			domains: []string{"www.woniucx.com"},
+		},
+		{
+			name:    "heredoc 探针函数的 $2 参数拼接",
+			cmd:     `probe(){ r=$(curl -s -m 15 -X "$1" "https://woniuxy.com$2" -w "%{http_code}"); }`,
+			domains: []string{"woniuxy.com"},
+		},
+		{
+			name: "URL host 整段是变量则丢弃",
+			cmd:  `curl "http://$host/path" && curl "http://x.${port}a/x"`,
+		},
+		{
+			// 2026-10-15 误报原始形态:路径列表是独立的双引号串(URL 剔除不到),
+			// 接口参数里的邮箱(?to=a@b.com)不是连接目标,@ 后段被裸 token
+			// 扫描误当主机。
+			name:    "邮箱查询参数不当作目标",
+			cmd:     `for p in "/partner-back/download" "/partner-back/demo/mail/sendMessageWithAttachment?to=a@b.com"; do curl -s "http://www.woniucx.com$p"; done`,
+			domains: []string{"www.woniucx.com"},
+		},
+		{
+			name:    "JSON 载荷里的邮箱参数不当作目标",
+			cmd:     `curl -d '{"to":"a@b.com","from":"x@y.org"}' "https://woniuxy.com/api/send"`,
+			domains: []string{"woniuxy.com"},
+		},
+		{
+			// user@host 形态的凭据/登录名不在参数位,保留提取(宁误报勿漏拦)。
+			name:    "user@host 凭据保留主机提取",
+			cmd:     `curl -u admin@evil.com http://api.example.com/`,
+			domains: []string{"api.example.com", "evil.com"},
+		},
+		{
 			name: "路径里的点分串不算目标",
 			cmd:  `./run.sh --config ./conf/app.prod.yaml`,
 		},
