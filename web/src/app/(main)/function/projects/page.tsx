@@ -38,13 +38,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Sheet,
-  SheetContent,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import {
   Dialog,
   DialogContent,
   DialogFooter,
@@ -516,12 +509,12 @@ export default function ProjectsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 范围编辑 Sheet */}
-      <Sheet open={!!edit} onOpenChange={(o) => !o && setEdit(null)}>
-        <SheetContent className="flex w-full flex-col gap-4 overflow-y-auto sm:max-w-xl">
-          <SheetHeader>
-            <SheetTitle>项目设置 — {edit?.project.name}</SheetTitle>
-          </SheetHeader>
+      {/* 项目设置弹窗(居中卡片):基本信息 + 授权范围 + 已有范围 */}
+      <Dialog open={!!edit} onOpenChange={(o) => !o && setEdit(null)}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>项目设置 — {edit?.project.name}</DialogTitle>
+          </DialogHeader>
           <div className="flex flex-col gap-2 border-b pb-4">
             <p className="text-sm font-medium">基本信息</p>
             <Input
@@ -668,9 +661,13 @@ export default function ProjectsPage() {
               ))}
             </div>
           </div>
-          <SheetFooter />
-        </SheetContent>
-      </Sheet>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEdit(null)}>
+              取消
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
