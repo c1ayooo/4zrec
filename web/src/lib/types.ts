@@ -1229,6 +1229,16 @@ export interface MCPServer {
   tools?: string[]; // mcp_tools_cache (names only, for the count)
 }
 
+// ---- 企业数据源 ----
+export interface EntProvider {
+  name: string;
+  label: string;
+  auth: string;
+  available: boolean;
+  hint: string;
+  configured: boolean;
+}
+
 // ---- 周期采集任务 ----
 export interface ReconSchedule {
   id: number;

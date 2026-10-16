@@ -64,6 +64,7 @@ import type {
   LLMRetryPolicy,
   LLMTask,
   MCPServer,
+  EntProvider,
   ReconSchedule,
   SpacemapEngine,
   MCPTool,
@@ -1180,6 +1181,14 @@ export const api = {
   toggleReconSchedule: (id: number, enabled: boolean) =>
     post<{ ok: boolean }>(`/recon-schedules/${id}/toggle`, { enabled }),
   runReconScheduleNow: (id: number) => post<{ ok: boolean }>(`/recon-schedules/${id}/run`, {}),
+
+  // ---- 企业数据源会话 ----
+  entProviders: () =>
+    get<{ providers: EntProvider[] }>("/enterprise/providers").then((r) => arr(r.providers)),
+  entSessions: () =>
+    get<{ sessions: unknown[] }>("/enterprise/sessions").then((r) => arr(r.sessions)),
+  saveEntSession: (body: { provider: string; config: Record<string, string> }) =>
+    post<{ ok: boolean }>("/enterprise/sessions", body),
 
   // ---- skills (文件系统) ----
   skills: () => get<{ skills: SkillItem[] }>("/skills").then((r) => arr(r.skills)),

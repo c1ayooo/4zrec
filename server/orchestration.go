@@ -45,6 +45,7 @@ func (s *Server) hostTools() ([]actool.CoreTool, map[string][]string) {
 	tools = append(tools, s.spacemapExpandTools()...) // ICP/证书/ASN 三路反查扩资产
 	tools = append(tools, s.reconTools()...)          // 被动子域枚举 + 子域名爆破 + 端口扫描 + 流水线
 	tools = append(tools, s.atomicTools()...)         // 原子判定:CDN源站/边缘分类/遗留猎人/接管
+	tools = append(tools, s.entTools()...)            // 企业关系采集(BFS+候选池)
 	custom, err := s.customTools()
 	if err != nil {
 		log.Printf("[custom-tool] 加载失败: %v", err)
