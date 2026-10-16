@@ -100,7 +100,6 @@ func (d *DB) ListReconSchedules(ctx context.Context) ([]*ReconSchedule, error) {
 		if err != nil {
 			return nil, err
 		}
-		r.Config = r.Config
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -116,7 +115,7 @@ func (d *DB) GetReconSchedule(ctx context.Context, id int64) (*ReconSchedule, er
 }
 
 // MarkScheduleRan 执行收尾:推进 next_run_at;authFailed=true 时熔断指数退避
-//(15min→1h→6h→24h 封顶,成功清零——恢复后立即回归正常节奏)。
+// (15min→1h→6h→24h 封顶,成功清零——恢复后立即回归正常节奏)。
 func (d *DB) MarkScheduleRan(ctx context.Context, id int64, intervalSec int, authFailed bool, result string, newAssets int) error {
 	if authFailed {
 		var fails int

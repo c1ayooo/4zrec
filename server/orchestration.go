@@ -48,6 +48,7 @@ func (s *Server) hostTools() ([]actool.CoreTool, map[string][]string) {
 	tools = append(tools, s.entTools()...)            // 企业关系采集(BFS+候选池)
 	tools = append(tools, s.credTools()...)           // 凭据验证:云AK/DB/SSH实连+GitHub泄露
 	tools = append(tools, s.webreconTools()...)       // Web侦察:未授权探测+JS侦察
+	tools = append(tools, s.coverageTools()...)       // 项目级覆盖度缺口
 	custom, err := s.customTools()
 	if err != nil {
 		log.Printf("[custom-tool] 加载失败: %v", err)

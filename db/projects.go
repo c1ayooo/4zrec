@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net"
@@ -788,4 +789,77 @@ WHERE id=$1 AND project_id IS NULL`, assetID, projectID)
 	}
 	n, _ := res.RowsAffected()
 	return n > 0, nil
+}
+
+// ProjectCoverage 项目覆盖度总览:授权范围内的资产盘子、已测/未测分布与
+// 未测样本(覆盖度缺口视图——list_untested_assets 是任务级,这是项目级)。
+// "已测"= 存在事实锚点(exploration_anchors→fact 节点),与任务级口径一致。
+type ProjectCoverage struct {
+	ScopeRules int            `json:"scope_rules"`
+	InScope    int            `json:"in_scope"`
+	Tested     int            `json:"tested"`
+	Untested   int            `json:"untested"`
+	ByType     map[string]int `json:"by_type"`
+	Sample     []CoverageItem `json:"sample"`
+}
+
+// CoverageItem 未测样本行。
+type CoverageItem struct {
+	ID    int64  `json:"id"`
+	Type  string `json:"type"`
+	Label string `json:"label"`
+}
+
+// ProjectCoverageOverview 项目覆盖度查询。资产盘子=归属本项目的资产行 ∪ 命中
+// 项目范围规则的资产(与读侧围栏谓词同语义,项目维度直查)。
+func (d *DB) ProjectCoverageOverview(ctx context.Context, projectID int64) (*ProjectCoverage, error) {
+	if projectID <= 0 {
+		return nil, fmt.Errorf("project_id 无效")
+	}
+	out := &ProjectCoverage{ByType: map[string]int{}}
+	if err := d.QueryRowContext(ctx, `SELECT count(*) FROM project_scope WHERE project_id=$1`, projectID).Scan(&out.ScopeRules); err != nil {
+		return nil, err
+	}
+	inscope := `a.project_id = $1
+     OR EXISTS (SELECT 1 FROM project_scope ps WHERE ps.project_id=$1
+        AND ((ps.kind='domain' AND a.root_domain = ps.domain)
+          OR (ps.kind IN ('ip','cidr') AND ps.net >>= try_inet(a.ip))))`
+	tested := ` EXISTS (SELECT 1 FROM exploration_anchors ea
+      JOIN exploration_nodes en ON en.id=ea.node_id AND en.kind='fact'
+      WHERE ea.asset_id=a.id)`
+	if err := d.QueryRowContext(ctx, `SELECT count(*), count(*) FILTER (WHERE `+tested+`) FROM assets a WHERE `+inscope, projectID).Scan(&out.InScope, &out.Tested); err != nil {
+		return nil, err
+	}
+	out.Untested = out.InScope - out.Tested
+	rows, err := d.QueryContext(ctx, `
+SELECT a.type, count(*) FROM assets a WHERE `+inscope+` GROUP BY a.type`, projectID)
+	if err == nil {
+		for rows.Next() {
+			var t string
+			var n int
+			if rows.Scan(&t, &n) == nil {
+				out.ByType[t] = n
+			}
+		}
+		rows.Close()
+	}
+	rows2, err := d.QueryContext(ctx, `
+SELECT a.id, a.type, COALESCE(a.url, a.domain, a.ip, a.app_name, a.root_domain, '')
+FROM assets a
+WHERE NOT (`+tested+`) AND (
+  a.project_id = $1
+  OR EXISTS (SELECT 1 FROM project_scope ps WHERE ps.project_id=$1
+     AND ((ps.kind='domain' AND a.root_domain = ps.domain)
+       OR (ps.kind IN ('ip','cidr') AND ps.net >>= try_inet(a.ip)))))
+ORDER BY a.id LIMIT 100`, projectID)
+	if err == nil {
+		for rows2.Next() {
+			var it CoverageItem
+			if rows2.Scan(&it.ID, &it.Type, &it.Label) == nil {
+				out.Sample = append(out.Sample, it)
+			}
+		}
+		rows2.Close()
+	}
+	return out, nil
 }
