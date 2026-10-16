@@ -43,7 +43,8 @@ func (s *Server) hostTools() ([]actool.CoreTool, map[string][]string) {
 	tools = append(tools, s.platformTools()...)       // 平台操作工具(建改 skill/工具/MCP，给 Auto 用)
 	tools = append(tools, s.spacemapTools()...)       // 空间测绘引擎查询(信息收集原生能力)
 	tools = append(tools, s.spacemapExpandTools()...) // ICP/证书/ASN 三路反查扩资产
-	tools = append(tools, s.reconTools()...)          // 被动子域枚举 + 子域名爆破
+	tools = append(tools, s.reconTools()...)          // 被动子域枚举 + 子域名爆破 + 端口扫描 + 流水线
+	tools = append(tools, s.atomicTools()...)         // 原子判定:CDN源站/边缘分类/遗留猎人/接管
 	custom, err := s.customTools()
 	if err != nil {
 		log.Printf("[custom-tool] 加载失败: %v", err)
