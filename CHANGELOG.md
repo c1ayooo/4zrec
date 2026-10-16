@@ -180,6 +180,8 @@
 
 - **连接管理①:凭据台账 + worker 自动捕获（原生）**：统一 `connections` 表（SSH/数据库/协议族 SMB·WinRM·LDAP·VNC·FTP/代理/隧道）——**明文存储不做加密**（用户口径）、**project_id 硬绑定**、同键（项目+类型+host:port+用户）合并语义（secret 非空才覆盖、source 手工优先不降级、status 跟随验证结果回写）。**worker 任务中验证成功的凭据自动落库**（`credential_verify_ssh/db` 成功路径接 autoCaptureConnection，项目从任务/会话解析；无项目明确提示挂载）。工具 `connections_list`（台账查询含凭据原文供连接复用）/`credential_register`（手工登记，需项目）；前端新增「连接管理」侧边栏组 + 凭据台账页（项目/类型筛选、手工登记对话框、删除、来源/状态徽标：任务发现·有效）。三条连接管理工单口径同步更新（#18–#20：无 vault、读台账、剩 netproxy/SSH 终端/协议制台/隧道）。
 
+- **连接管理②:图形化手工操作控制台（原生）**：①**全交互 SSH 终端**——WebSocket↔SSH PTY 桥（协议移植自 4zreco ssh_terminal.go 原样：二进制帧=stdin 字节、文本帧=resize JSON；30 分钟硬超时+ping 保活；同源 cookie 鉴权）；前端 xterm.js 终端对话框（@xterm/xterm+fit addon，移植 4zreco SshTerminalDialog.vue 的交互设计为 React 组件）。②**SSH 一次性命令执行**（`POST /api/connections/{id}/ssh/exec`，页内命令控制台）。③**DB 制台**（`POST /api/connections/{id}/db/query`：postgres SQL 返回列/行表格，redis 裸 RESP 命令，执行结果回写台账 status/last_checked_at）。连接页按类型展示入口：SSH→终端+命令，postgres/redis→控制台。说明：4zreco 前端为 Vue 3，组件不能直接插入本仓 React/Next——移植口径为「交互设计+前后端协议原样、组件按本仓栈重写」，后续其 DB 浏览树/VNC 等组件按同一方式翻。
+
 #### 修复的问题
 
 > 本节是功能初版完成后一轮安全审计的结论，每条都先复现、再修、再补回归测试。

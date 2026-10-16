@@ -1218,6 +1218,17 @@ export const api = {
   },
   createConnection: (c: Partial<Connection>) => post<{ id: number }>("/connections", c),
   deleteConnection: (id: number) => del<{ deleted: number }>(`/connections/${id}`),
+  connSSHExec: (id: number, command: string) =>
+    post<{ ok: boolean; output?: string; error?: string; elapsed_ms: number }>(`/connections/${id}/ssh/exec`, { command }),
+  connDBQuery: (id: number, query: string) =>
+    post<{
+      ok: boolean;
+      columns?: string[];
+      rows?: string[][];
+      output?: string;
+      error?: string;
+      elapsed_ms: number;
+    }>(`/connections/${id}/db/query`, { query }),
   entJobs: (projectId?: number) =>
     get<{ jobs: EntJob[] }>(`/enterprise/jobs${projectId ? `?project_id=${projectId}` : ""}`).then((r) => arr(r.jobs)),
   entCandidates: (status = "", page = 1, projectId?: number) =>

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { Loader2Icon, PlusIcon, Trash2Icon } from "lucide-react";
+import { Loader2Icon, PlayIcon, PlusIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +19,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api";
+
+import { SshTerminalDialog } from "./_components/ssh-terminal-dialog";
 import type { Connection, Project } from "@/lib/types";
 
 // 连接管理:SSH/数据库(SMB/WinRM/LDAP/VNC/FTP 等)凭据台账。明文存储(用户口径),
@@ -51,6 +53,10 @@ export default function ConnectionsPage() {
   const [kindFilter, setKindFilter] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [addOpen, setAddOpen] = React.useState(false);
+  const [consoleRow, setConsoleRow] = React.useState<Connection | null>(null);
+  const [consoleInput, setConsoleInput] = React.useState("");
+  const [consoleLog, setConsoleLog] = React.useState<{ cmd: string; out: string; ok: boolean }[]>([]);
+  const [consoleBusy, setConsoleBusy] = React.useState(false);
   const [draft, setDraft] = React.useState({
     project_id: "", kind: "ssh", host: "", port: "", username: "", secret: "", note: "",
   });
@@ -103,6 +109,45 @@ export default function ConnectionsPage() {
       await load();
     } catch (err) {
       toast.error(String(err instanceof Error ? err.message : err));
+    }
+  };
+
+  const [terminalRow, setTerminalRow] = React.useState<Connection | null>(null);
+  const consoleKinds = new Set(["ssh", "postgres", "redis"]);
+  const runConsole = async () => {
+    if (!consoleRow || !consoleInput.trim()) return;
+    const cmd = consoleInput.trim();
+    setConsoleBusy(true);
+    setConsoleInput("");
+    try {
+      if (consoleRow.kind === "ssh") {
+        const res = await api.connSSHExec(consoleRow.id, cmd);
+        setConsoleLog((l) => [
+          ...l,
+          res.ok
+            ? { cmd, out: res.output || "(无输出)", ok: true }
+            : { cmd, out: res.error || "执行失败", ok: false },
+        ]);
+      } else {
+        const res = await api.connDBQuery(consoleRow.id, cmd);
+        if (!res.ok) {
+          setConsoleLog((l) => [...l, { cmd, out: res.error || "执行失败", ok: false }]);
+        } else if (res.columns) {
+          const header = res.columns.join(" | ");
+          const body = (res.rows ?? []).map((r) => r.join(" | ")).join("\n");
+          setConsoleLog((l) => [
+            ...l,
+            { cmd, out: `${header}\n${body || "(0 行)"}\n[${res.rows?.length ?? 0} 行, ${res.elapsed_ms}ms]`, ok: true },
+          ]);
+        } else {
+          setConsoleLog((l) => [...l, { cmd, out: (res.output || "") + ` [${res.elapsed_ms}ms]`, ok: true }]);
+        }
+      }
+      await load();
+    } catch (err) {
+      setConsoleLog((l) => [...l, { cmd, out: String(err instanceof Error ? err.message : err), ok: false }]);
+    } finally {
+      setConsoleBusy(false);
     }
   };
 
@@ -214,9 +259,29 @@ export default function ConnectionsPage() {
                       </td>
                       <td className="text-muted-foreground max-w-40 truncate px-4 py-2 text-xs">{c.note || "-"}</td>
                       <td className="px-4 py-2">
-                        <Button size="sm" variant="outline" onClick={() => void del(c.id)}>
-                          <Trash2Icon className="size-3.5" />
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          {c.kind === "ssh" ? (
+                            <Button size="sm" onClick={() => setTerminalRow(c)}>
+                              <SquareTerminalIcon className="size-3.5" /> 终端
+                            </Button>
+                          ) : null}
+                          {consoleKinds.has(c.kind) ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setConsoleRow(c);
+                                setConsoleLog([]);
+                                setConsoleInput("");
+                              }}
+                            >
+                              <SquareTerminalIcon className="size-3.5" /> {c.kind === "ssh" ? "命令" : "控制台"}
+                            </Button>
+                          ) : null}
+                          <Button size="sm" variant="outline" onClick={() => void del(c.id)}>
+                            <Trash2Icon className="size-3.5" />
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -316,6 +381,47 @@ export default function ConnectionsPage() {
             </Button>
             <Button onClick={() => void add()}>登记</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <SshTerminalDialog connection={terminalRow} onClose={() => setTerminalRow(null)} />
+
+      <Dialog open={consoleRow !== null} onOpenChange={(v) => !v && setConsoleRow(null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>
+              控制台 · {consoleRow ? `${KIND_LABELS[consoleRow.kind] ?? consoleRow.kind} ${consoleRow.username ? consoleRow.username + "@" : ""}${consoleRow.host}:${consoleRow.port}` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="bg-muted/40 h-80 overflow-y-auto rounded-md border p-3 font-mono text-xs">
+            {consoleLog.length === 0 ? (
+              <p className="text-muted-foreground">
+                {consoleRow?.kind === "ssh" ? "输入远程命令,回车执行(一次性 exec,非交互会话)" : "输入查询:SQL(postgres)或 Redis 命令"}
+              </p>
+            ) : (
+              consoleLog.map((entry, i) => (
+                <div key={i} className="mb-2">
+                  <div className="text-primary">$ {entry.cmd}</div>
+                  <pre className={entry.ok ? "whitespace-pre-wrap" : "text-destructive whitespace-pre-wrap"}>{entry.out}</pre>
+                </div>
+              ))
+            )}
+            {consoleBusy ? <Loader2Icon className="size-3 animate-spin" /> : null}
+          </div>
+          <div className="flex items-center gap-2">
+            <Input
+              className="font-mono"
+              placeholder={consoleRow?.kind === "redis" ? "INFO server" : consoleRow?.kind === "postgres" ? "SELECT 1" : "id && uname -a"}
+              value={consoleInput}
+              onChange={(e) => setConsoleInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void runConsole();
+              }}
+            />
+            <Button disabled={consoleBusy} onClick={() => void runConsole()}>
+              <PlayIcon className="size-4" /> 执行
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

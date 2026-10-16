@@ -951,6 +951,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/connections", s.connList)
 	mux.HandleFunc("POST /api/connections", s.connCreate)
 	mux.HandleFunc("DELETE /api/connections/{id}", s.connDelete)
+	// 连接制台(图形化手工操作):SSH 命令执行 / DB 查询
+	mux.HandleFunc("POST /api/connections/{id}/ssh/exec", s.connSSHExec)
+	mux.HandleFunc("POST /api/connections/{id}/db/query", s.connDBQuery)
+	// 全交互 SSH 终端(WebSocket,同源 cookie 鉴权)
+	mux.HandleFunc("GET /api/connections/{id}/terminal", s.connSSHTerminal)
 	// Skill CRUD (文件系统)
 	mux.HandleFunc("GET /api/skills", s.fsListSkills)
 	mux.HandleFunc("POST /api/skills", s.fsCreateSkill)
