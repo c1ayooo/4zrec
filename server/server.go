@@ -938,6 +938,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/enterprise/providers", s.entProvidersGet)
 	mux.HandleFunc("GET /api/enterprise/sessions", s.entSessionsList)
 	mux.HandleFunc("POST /api/enterprise/sessions", s.entSessionsSet)
+	// 企业采集数据页(任务/候选/导入)
+	mux.HandleFunc("GET /api/enterprise/jobs", s.entJobsList)
+	mux.HandleFunc("GET /api/enterprise/candidates", s.entCandidatesList)
+	mux.HandleFunc("POST /api/enterprise/import", s.entImport)
+	// 空间测绘结果页
+	mux.HandleFunc("GET /api/spacemap/results", s.spacemapResultsList)
 	// Skill CRUD (文件系统)
 	mux.HandleFunc("GET /api/skills", s.fsListSkills)
 	mux.HandleFunc("POST /api/skills", s.fsCreateSkill)

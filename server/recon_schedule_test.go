@@ -42,7 +42,7 @@ func TestReconScheduleEngineIncremental(t *testing.T) {
 	}
 	// 注意 defer(而非 t.Cleanup):t.Cleanup 在 defer m.Close 之后执行,连接已关。
 	defer func() {
-		_, _ = m.pg.Exec(`DELETE FROM assets WHERE domain LIKE '%` + domain + `'`)
+		_, _ = m.pg.Exec(`DELETE FROM assets WHERE domain LIKE '%` + domain + `' OR ip='198.51.100.7'`)
 		_, _ = m.pg.Exec(`DELETE FROM recon_schedules`)
 		_ = m.pg.SetSetting("spacemap.key.fofa", "")
 		_ = m.pg.SetSetting("spacemap.baseurl.fofa", "")

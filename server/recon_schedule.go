@@ -134,7 +134,7 @@ func (s *Server) executeEngineSchedule(sched *db.ReconSchedule) (string, int, bo
 					newCount++
 				}
 				// 复用统一入库路径(域名+IP+服务,范围认领)。
-				s.spacemapImport(projectID, 0, []*spacemap.Result{r})
+				s.spacemapImport(context.Background(), projectID, 0, []*spacemap.Result{r})
 			}
 		}
 	}

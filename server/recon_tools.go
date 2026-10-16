@@ -18,12 +18,12 @@ import (
 )
 
 // importSubdomains 域名列表导入资产库(范围内 approved/范围外 pending)。
-func (s *Server) importSubdomains(projectID int64, domains []string) int {
+func (s *Server) importSubdomains(ctx context.Context, projectID int64, domains []string) int {
 	results := make([]*spacemap.Result, 0, len(domains))
 	for _, d := range domains {
 		results = append(results, &spacemap.Result{Domain: d, Host: d})
 	}
-	n, _, _ := s.spacemapImport(projectID, 0, results)
+	n, _, _ := s.spacemapImport(ctx, projectID, 0, results)
 	return n
 }
 
@@ -105,7 +105,7 @@ func (s *Server) toolSubdomainEnum() actool.CoreTool {
 				}
 			}
 			if in.ProjectID > 0 {
-				imported := s.importSubdomains(in.ProjectID, sorted)
+				imported := s.importSubdomains(ctx, in.ProjectID, sorted)
 				fmt.Fprintf(&b, "已导入资产库 %d/%d(范围内自动授权,范围外待审批)\n", imported, len(sorted))
 			}
 			return actool.Text(b.String()), nil
@@ -181,7 +181,7 @@ func (s *Server) toolSubdomainBrute() actool.CoreTool {
 				for _, h := range hits {
 					names = append(names, h.Name)
 				}
-				imported := s.importSubdomains(in.ProjectID, names)
+				imported := s.importSubdomains(ctx, in.ProjectID, names)
 				fmt.Fprintf(&b, "已导入资产库 %d/%d(范围内自动授权,范围外待审批)\n", imported, len(names))
 			}
 			return actool.Text(b.String()), nil

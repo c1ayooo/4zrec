@@ -3,6 +3,7 @@ package enterprise
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -419,4 +420,45 @@ func normalizeDomain(v string) string {
 		return ""
 	}
 	return v
+}
+
+// ListRecentJobs 跨项目最近任务(平台数据页用;ListJobs 按项目过滤,这里全量)。
+func (s *Store) ListRecentJobs(ctx context.Context, limit int) ([]Job, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+jobColumns+` FROM enterprise_jobs ORDER BY created_at DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Job
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}
+
+// MarkCandidatesImportedByValue 按域名值把候选标为已导入(导入走资产库后调用)。
+func (s *Store) MarkCandidatesImportedByValue(ctx context.Context, values []string) (int64, error) {
+	if len(values) == 0 {
+		return 0, nil
+	}
+	ph := make([]string, 0, len(values))
+	args := make([]any, 0, len(values))
+	for i, v := range values {
+		ph = append(ph, fmt.Sprintf("$%d", i+1))
+		args = append(args, strings.ToLower(strings.TrimSpace(v)))
+	}
+	r, err := s.db.ExecContext(ctx,
+		`UPDATE enterprise_assets SET status='imported' WHERE lower(value) IN (`+strings.Join(ph, ",")+`) AND status='candidate'`, args...)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := r.RowsAffected()
+	return n, nil
 }

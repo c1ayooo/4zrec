@@ -1229,6 +1229,46 @@ export interface MCPServer {
   tools?: string[]; // mcp_tools_cache (names only, for the count)
 }
 
+// ---- 空间测绘结果 ----
+export interface SpacemapResultRow {
+  id: number;
+  type: string;
+  label: string;
+  port?: number;
+  title: string;
+  source: string;
+  authz?: string | null;
+  last_seen: string;
+}
+
+// ---- 企业采集任务/候选 ----
+export interface EntJob {
+  id: string;
+  project_id: string;
+  provider: string;
+  keyword: string;
+  status: string;
+  depth: number;
+  max_nodes: number;
+  nodes: number;
+  entities: number;
+  domains: number;
+  imported: number;
+  error: string;
+  created_at: string;
+}
+
+export interface EntCandidate {
+  id: string;
+  job_id: string;
+  source: string;
+  job_name: string;
+  value: string;
+  entity_name: string;
+  status: string;
+  fingerprint_status: string;
+}
+
 // ---- 被动源凭据(VT/GitHub) ----
 export interface IntelKey {
   key: string;

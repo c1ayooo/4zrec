@@ -2411,6 +2411,42 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       ],
     };
 
+  // ── 空间测绘结果（demo）──
+  if (path === "/spacemap/results")
+    return {
+      results: [
+        { id: 1, type: "subdomain", label: "www.example.com", port: 0, title: "", source: "FOFA", authz: "approved", last_seen: "2026-10-16T12:00:00Z" },
+        { id: 2, type: "ip", label: "1.2.3.4", port: 443, title: "登录页", source: "Quake", authz: "pending", last_seen: "2026-10-16T11:30:00Z" },
+        { id: 3, type: "service", label: "https://api.example.com", port: 0, title: "API 网关", source: "Hunter", authz: null, last_seen: "2026-10-16T10:00:00Z" },
+      ],
+      total: 3, page: 1, size: 50,
+      engines: [
+        { provider: "fofa", display: "FOFA" }, { provider: "zoomeye", display: "ZoomEye" },
+        { provider: "quake", display: "Quake" }, { provider: "shodan", display: "Shodan" },
+        { provider: "hunter", display: "Hunter" },
+      ],
+    };
+
+  // ── 企业采集数据页（demo）──
+  if (path === "/enterprise/jobs")
+    return {
+      jobs: [
+        { id: "job-1", project_id: "3", provider: "aqc", keyword: "示例集团", status: "waiting_authorization",
+          depth: 2, max_nodes: 20, nodes: 18, entities: 9, domains: 12, imported: 4, error: "", created_at: "2026-10-16T10:00:00Z" },
+      ],
+    };
+  if (path === "/enterprise/candidates")
+    return {
+      candidates: [
+        { id: "c1", job_id: "job-1", source: "enterprise", job_name: "示例集团", value: "subs.example.cn",
+          entity_name: "示例子公司A", status: "candidate", fingerprint_status: "" },
+        { id: "c2", job_id: "job-1", source: "enterprise", job_name: "示例集团", value: "shop.example.cn",
+          entity_name: "示例电商", status: "imported", fingerprint_status: "done" },
+      ],
+      total: 2, page: 1,
+    };
+  if (path === "/enterprise/import") return { imported: 1, total: 1 };
+
   // ── 周期采集任务（demo）──
   if (path === "/recon-schedules" && m === "GET")
     return {

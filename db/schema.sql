@@ -921,6 +921,10 @@ CREATE INDEX IF NOT EXISTS idx_recon_runs_created ON recon_runs(created_at DESC)
 
 -- 资产侧：侦察优先级(P0-P4,recon/score 计算)——null=未评。排序用部分索引。
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS recon_level TEXT;
+-- 资产来源标注(空间测绘引擎展示名 FOFA/Quake…、企业采集等);null=本地发现。
+-- 空间测绘结果页按此列筛选引擎。
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS source TEXT;
+CREATE INDEX IF NOT EXISTS idx_assets_source ON assets(source) WHERE source IS NOT NULL;
 
 -- 周期采集任务(recon-schedules worker,30s tick)。两种形态:engine=五引擎按域采集,
 -- pipeline=主动测绘流水线。熔断列:鉴权失败指数退避(backoff_until 之前不跑,

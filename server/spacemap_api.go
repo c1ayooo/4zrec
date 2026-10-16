@@ -109,7 +109,7 @@ func (s *Server) spacemapEnginesSet(w http.ResponseWriter, r *http.Request) {
 //   - projectID>0 时逐资产 StampDiscoveredAsset:命中项目范围 → approved,
 //     范围外 → pending 待人工审批(不静默丢,不抢授权);
 //   - 幂等:全部走 AssetStore 的 upsert 通道。
-func (s *Server) spacemapImport(projectID int64, taskID int64, results []*spacemap.Result) (domains, ips, services int) {
+func (s *Server) spacemapImport(ctx0 context.Context, projectID int64, taskID int64, results []*spacemap.Result) (domains, ips, services int) {
 	as := s.m.Assets()
 	for _, r := range results {
 		var ids []int64
@@ -142,6 +142,12 @@ func (s *Server) spacemapImport(projectID int64, taskID int64, results []*spacem
 		if projectID > 0 {
 			for _, id := range ids {
 				_, _ = as.StampDiscoveredAsset(id, projectID)
+			}
+		}
+		// 来源标注:空间测绘结果页按引擎筛选的数据依据。
+		if r.Source != "" {
+			for _, id := range ids {
+				s.m.pg.StampAssetSource(ctx0, id, r.Source)
 			}
 		}
 	}
@@ -236,7 +242,7 @@ func (s *Server) toolSpaceSearch() actool.CoreTool {
 			fmt.Fprintf(&b, "引擎 %s 查询成功:命中 %d 条,返回 %d 条候选\n",
 				spacemap.ProviderDisplayName(in.Engine), total, len(results))
 			if in.AutoImport {
-				d, i, sv := s.spacemapImport(in.ProjectID, 0, results)
+				d, i, sv := s.spacemapImport(ctx, in.ProjectID, 0, results)
 				fmt.Fprintf(&b, "已导入资产库: 域名 %d / IP %d / 服务 %d(范围内自动授权,范围外进待审批)\n", d, i, sv)
 				if in.ProjectID > 0 {
 					fmt.Fprintf(&b, "目标项目 %d\n", in.ProjectID)
@@ -310,7 +316,7 @@ func (s *Server) toolSpaceSearchBatch() actool.CoreTool {
 						fmt.Fprintf(&b, "- %s %s: %v\n", spacemap.ProviderDisplayName(engine), target, err)
 						continue
 					}
-					d, i, sv := s.spacemapImport(in.ProjectID, 0, results)
+					d, i, sv := s.spacemapImport(ctx, in.ProjectID, 0, results)
 					totDomains += d
 					fmt.Fprintf(&b, "- %s %s: 命中 %d,导入 域名%d/IP%d/服务%d\n",
 						spacemap.ProviderDisplayName(engine), target, total, d, i, sv)
@@ -419,4 +425,50 @@ func (s *Server) intelKeysSet(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.intelKeysGet(w, r)
+}
+
+// ---------- HTTP: /api/spacemap/results(结果页数据) ----------
+
+// spacemapResultsList 按引擎筛选的测绘结果分页。
+func (s *Server) spacemapResultsList(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	q := r.URL.Query()
+	engine := strings.TrimSpace(q.Get("engine"))
+	typ := strings.TrimSpace(q.Get("type"))
+	page := strconvAtoiDefault(q.Get("page"), 1)
+	size := strconvAtoiDefault(q.Get("size"), 50)
+	if page < 1 {
+		page = 1
+	}
+	if size <= 0 || size > 200 {
+		size = 50
+	}
+	rows, total, err := pg.SpacemapResultsPage(r.Context(), engine, typ, size, (page-1)*size)
+	if err != nil {
+		writeErr(w, 500, "db: "+err.Error())
+		return
+	}
+	// 引擎清单(归一化名→展示名,前端筛选 chips 用)。
+	engines := make([]map[string]any, 0, len(spacemap.Providers))
+	for _, p := range spacemap.Providers {
+		engines = append(engines, map[string]any{"provider": p, "display": spacemap.ProviderDisplayName(p)})
+	}
+	writeJSON(w, 200, map[string]any{"results": rows, "total": total, "page": page, "size": size, "engines": engines})
+}
+
+func strconvAtoiDefault(s string, def int) int {
+	n := 0
+	for _, c := range strings.TrimSpace(s) {
+		if c < '0' || c > '9' {
+			return def
+		}
+		n = n*10 + int(c-'0')
+	}
+	if n <= 0 {
+		return def
+	}
+	return n
 }

@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -369,7 +370,7 @@ func (s *Server) toolEntImport() actool.CoreTool {
 			if len(domains) == 0 {
 				return actool.Text("没有可导入的候选域名"), nil
 			}
-			imported := s.importSubdomains(in.ProjectID, domains)
+			imported := s.importSubdomains(ctx, in.ProjectID, domains)
 			return actool.Text(fmt.Sprintf("已导入 %d/%d 个候选域名(范围内自动授权,范围外待审批)", imported, len(domains))), nil
 		},
 	})
@@ -383,4 +384,78 @@ func (s *Server) entTools() []actool.CoreTool {
 		s.toolEntJobStatus(),
 		s.toolEntImport(),
 	}
+}
+
+// ---------- HTTP: 企业采集数据页(任务/候选/导入) ----------
+
+func (s *Server) entJobsList(w http.ResponseWriter, r *http.Request) {
+	stk, err := s.entStores()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	jobs, err := stk.store.ListRecentJobs(r.Context(), 20)
+	if err != nil {
+		writeErr(w, 500, "db: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"jobs": jobs})
+}
+
+func (s *Server) entCandidatesList(w http.ResponseWriter, r *http.Request) {
+	stk, err := s.entStores()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	status := r.URL.Query().Get("status")
+	rows, total, err := stk.store.ListCandidateAssets(r.Context(), "", status, "", page, 50)
+	if err != nil {
+		writeErr(w, 500, "db: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"candidates": rows, "total": total, "page": page})
+}
+
+// entImport 候选域名导入资产库(指定 domains 或全部 candidate),并标已导入。
+func (s *Server) entImport(w http.ResponseWriter, r *http.Request) {
+	stk, err := s.entStores()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	var in struct {
+		ProjectID int64    `json:"project_id"`
+		Domains   []string `json:"domains"`
+	}
+	if err := decode(r, &in); err != nil || in.ProjectID <= 0 {
+		writeErr(w, 400, "project_id 必填")
+		return
+	}
+	domains := in.Domains
+	if len(domains) == 0 {
+		rows, _, err := stk.store.ListCandidateAssets(r.Context(), fmt.Sprintf("%d", in.ProjectID), "candidate", "", 1, 500)
+		if err != nil {
+			writeErr(w, 500, "db: "+err.Error())
+			return
+		}
+		for _, c := range rows {
+			domains = append(domains, c.Value)
+		}
+	}
+	if len(domains) == 0 {
+		writeJSON(w, 200, map[string]any{"imported": 0, "note": "没有可导入的候选"})
+		return
+	}
+	imported := s.importSubdomains(r.Context(), in.ProjectID, domains)
+	if n, err := stk.store.MarkCandidatesImportedByValue(r.Context(), domains); err != nil {
+		log.Printf("[enterprise] 候选标记已导入失败(导入已完成): %v", err)
+	} else {
+		_ = n
+	}
+	writeJSON(w, 200, map[string]any{"imported": imported, "total": len(domains)})
 }
