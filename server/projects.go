@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -329,6 +331,7 @@ func (s *Server) assetsBind(w http.ResponseWriter, r *http.Request) {
 	if pg == nil {
 		return
 	}
+	as := pg.Assets()
 	var in struct {
 		ProjectID int64   `json:"project_id"`
 		IDs       []int64 `json:"ids"`
@@ -343,23 +346,39 @@ func (s *Server) assetsBind(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	bound, approved, pending := 0, 0, 0
-	as := pg.Assets()
+	// 手工归属 = 操作者的人工授权决定:直接 approved,不再进待审批二次确认。
 	for _, id := range in.IDs {
-		authz, err := as.StampDiscoveredAsset(id, in.ProjectID)
-		if err != nil {
-			continue
+		_, _ = as.StampDiscoveredAsset(id, in.ProjectID)
+		_ = as.SetAssetAuthz([]int64{id}, "approved")
+	}
+	bound := len(in.IDs)
+	// 子资产跟随归属:所选资产(根域名/子域名)的同根 IP/子域名/服务一并归属
+	// (只认领未归属,不抢他项目),并同样直接 approved。
+	// 子资产根集合:逐 id 查询(数量小)。
+	rootsSet := map[string]bool{}
+	for _, id := range in.IDs {
+		var r string
+		if err := pg.QueryRowContext(context.Background(), `SELECT COALESCE(NULLIF(root_domain,''), '') FROM assets WHERE id=$1`, id).Scan(&r); err == nil && r != "" {
+			rootsSet[r] = true
 		}
-		bound++
-		switch authz {
-		case "approved":
-			approved++
-		case "pending":
-			pending++
+	}
+	if len(rootsSet) > 0 {
+		roots := make([]string, 0, len(rootsSet))
+		for r := range rootsSet {
+			roots = append(roots, r)
 		}
+		ph := make([]string, 0, len(roots))
+		args := []any{in.ProjectID}
+		for _, r := range roots {
+			args = append(args, r)
+			ph = append(ph, fmt.Sprintf("$%d", len(args)))
+		}
+		_, _ = pg.ExecContext(context.Background(), `
+UPDATE assets SET project_id=COALESCE(project_id,$1), authz='approved', updated_at=now()
+WHERE root_domain IN (`+strings.Join(ph, ",")+`) AND (project_id IS NULL OR project_id=$1)`, args...)
 	}
 	if bound > 0 {
 		_, _ = pg.Projects().RecomputeProjectAttribution()
 	}
-	writeJSON(w, 200, map[string]any{"bound": bound, "approved": approved, "pending": pending})
+	writeJSON(w, 200, map[string]any{"bound": bound, "approved": bound, "pending": 0})
 }
