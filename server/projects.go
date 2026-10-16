@@ -320,3 +320,46 @@ func (s *Server) setAssetAuthz(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"ok": true, "updated": len(req.IDs)})
 }
+
+// assetsBind 手工批量认领:把未归属(或本项目)的存量资产绑到指定项目。
+// 语义与手工认领一致:只认领未归属资产(不抢他项目),授权随范围判定
+// (命中范围 approved、范围外 pending 待审批)。
+func (s *Server) assetsBind(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	var in struct {
+		ProjectID int64   `json:"project_id"`
+		IDs       []int64 `json:"ids"`
+	}
+	if err := decode(r, &in); err != nil || in.ProjectID <= 0 || len(in.IDs) == 0 {
+		writeErr(w, 400, "project_id 与 ids 必填")
+		return
+	}
+	if in.ProjectID > 0 {
+		if _, err := pg.Projects().GetProject(in.ProjectID); err != nil {
+			writeErr(w, 404, "项目不存在")
+			return
+		}
+	}
+	bound, approved, pending := 0, 0, 0
+	as := pg.Assets()
+	for _, id := range in.IDs {
+		authz, err := as.StampDiscoveredAsset(id, in.ProjectID)
+		if err != nil {
+			continue
+		}
+		bound++
+		switch authz {
+		case "approved":
+			approved++
+		case "pending":
+			pending++
+		}
+	}
+	if bound > 0 {
+		_, _ = pg.Projects().RecomputeProjectAttribution()
+	}
+	writeJSON(w, 200, map[string]any{"bound": bound, "approved": approved, "pending": pending})
+}

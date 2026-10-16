@@ -759,6 +759,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/assets", s.insertAssets)
 	mux.HandleFunc("DELETE /api/assets", s.deleteAssets)
 	// 资产授权状态(项目围栏的待审批队列)
+	mux.HandleFunc("POST /api/assets/bind", s.assetsBind)
 	mux.HandleFunc("GET /api/assets/pending", s.listPendingAssets)
 	mux.HandleFunc("POST /api/assets/authz", s.setAssetAuthz)
 	// 项目管理(授权根:范围/归属)

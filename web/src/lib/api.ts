@@ -1218,6 +1218,8 @@ export const api = {
   },
   createConnection: (c: Partial<Connection>) => post<{ id: number }>("/connections", c),
   deleteConnection: (id: number) => del<{ deleted: number }>(`/connections/${id}`),
+  bindAssets: (projectId: number, ids: number[]) =>
+    post<{ bound: number; approved: number; pending: number }>("/assets/bind", { project_id: projectId, ids }),
   connSSHExec: (id: number, command: string) =>
     post<{ ok: boolean; output?: string; error?: string; elapsed_ms: number }>(`/connections/${id}/ssh/exec`, { command }),
   connDBQuery: (id: number, query: string) =>

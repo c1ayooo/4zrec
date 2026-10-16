@@ -134,6 +134,8 @@ export default function AssetsPage() {
   const [query, setQuery] = React.useState("");
   // "all" | "-1"(未归属项目) | String(project.id) — 服务端 project_id 过滤;项目=授权根是唯一归属主轴
   const [projectFilter, setProjectFilter] = React.useState("all");
+  // 未归属批量认领:筛选"未归属项目"时勾选行 → 归属到所选项目。
+  const [bindTarget, setBindTarget] = React.useState("");
   const [loaded, setLoaded] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [page, setPage] = React.useState(0);
@@ -347,6 +349,39 @@ export default function AssetsPage() {
           <span className="text-sm text-muted-foreground">
             共 <span className="tabular-nums">{totalAssets}</span> 项资产
           </span>
+          {projectFilter === "-1" && (
+            <div className="flex items-center gap-1.5">
+              <Select value={bindTarget || "none"} onValueChange={setBindTarget}>
+                <SelectTrigger className="h-8 w-40" aria-label="归属到项目">
+                  <SelectValue placeholder="归属到项目" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">选择项目</SelectItem>
+                  {projects.map((p) => (
+                    <SelectItem key={p.id} value={String(p.id)}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                size="sm"
+                disabled={!bindTarget || selected.size === 0}
+                onClick={async () => {
+                  try {
+                    const res = await api.bindAssets(Number(bindTarget), Array.from(selected) as number[]);
+                    toast.success(`已归属 ${res.bound} 条:授权 ${res.approved} · 待审批 ${res.pending}`);
+                    setSelected(new Set());
+                    refresh();
+                  } catch (err) {
+                    toast.error(String(err instanceof Error ? err.message : err));
+                  }
+                }}
+              >
+                归属到项目({selected.size})
+              </Button>
+            </div>
+          )}
           {selected.size > 0 && (
             <Button variant="destructive" size="sm" onClick={() => openDelete(Array.from(selected) as number[])}>
               <Trash2Icon className="size-3.5" /> 删除已选 ({selected.size})

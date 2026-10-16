@@ -2426,6 +2426,9 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       ],
     };
 
+  // ── 资产批量归属（demo）──
+  if (path === "/assets/bind" && m === "POST") return { bound: 2, approved: 1, pending: 1 };
+
   // ── 连接管理（demo）──
   if (path === "/connections" && m === "GET")
     return {
