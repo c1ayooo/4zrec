@@ -47,6 +47,7 @@ func (s *Server) hostTools() ([]actool.CoreTool, map[string][]string) {
 	tools = append(tools, s.atomicTools()...)         // 原子判定:CDN源站/边缘分类/遗留猎人/接管
 	tools = append(tools, s.entTools()...)            // 企业关系采集(BFS+候选池)
 	tools = append(tools, s.credTools()...)           // 凭据验证:云AK/DB/SSH实连+GitHub泄露
+	tools = append(tools, s.webreconTools()...)       // Web侦察:未授权探测+JS侦察
 	custom, err := s.customTools()
 	if err != nil {
 		log.Printf("[custom-tool] 加载失败: %v", err)

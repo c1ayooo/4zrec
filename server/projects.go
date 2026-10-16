@@ -279,7 +279,7 @@ func (s *Server) listPendingAssets(w http.ResponseWriter, r *http.Request) {
 
 type assetAuthzReq struct {
 	IDs       []int64 `json:"ids"`
-	Action    string  `json:"action"`    // approve|reject|pending
+	Action    string  `json:"action"`     // approve|reject|pending
 	ProjectID int64   `json:"project_id"` // approve 时可同时归属项目(可选)
 }
 

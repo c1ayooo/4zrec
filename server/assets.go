@@ -477,7 +477,7 @@ func (s *Server) insertAssets(w http.ResponseWriter, r *http.Request) {
 		// ProjectID 手工资产的项目归属(可选):显式指定即授权,认领进该项目
 		// (只认领未归属的,不抢别项目的)。缺省保持未归属(项目围栏 default-deny)。
 		ProjectID int64 `json:"project_id"`
-		Assets []struct {
+		Assets    []struct {
 			Type string `json:"type"`
 			// root_domain / subdomain
 			Domain      string   `json:"domain"`

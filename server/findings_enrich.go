@@ -86,11 +86,11 @@ func reportEnrichmentFromDB(e *db.FindingEnrichment) *report.Enrichment {
 	obj := map[string]json.RawMessage{
 		"title": mj(e.Name), "target": mj(e.Target), "module": mj(e.Module),
 		"cvss_score": mj(e.CVSSScore), "cvss_vector": mj(e.CVSSVector),
-		"cvss_metrics": rawOrRM(e.CVSSMetrics, "{}"),
-		"description":  rawOrRM(e.Description, "[]"),
-		"test_process": rawOrRM(e.TestProcess, "[]"),
+		"cvss_metrics":  rawOrRM(e.CVSSMetrics, "{}"),
+		"description":   rawOrRM(e.Description, "[]"),
+		"test_process":  rawOrRM(e.TestProcess, "[]"),
 		"risk_analysis": rawOrRM(e.RiskAnalysis, "[]"),
-		"remediation":  rawOrRM(e.Remediation, "[]"),
+		"remediation":   rawOrRM(e.Remediation, "[]"),
 	}
 	b, _ := json.Marshal(obj)
 	var enr report.Enrichment

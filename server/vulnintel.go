@@ -28,9 +28,9 @@ func (s *Server) pgVulnIntelRefresh(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) pgVulnIntelStatus(w http.ResponseWriter, _ *http.Request) {
 	polling, last, res, sources := s.m.vulnIntel.Status()
 	writeJSON(w, 200, map[string]any{
-		"polling":  polling,
-		"last":     last.Format(time.RFC3339),
-		"result":   res,
-		"sources":  sources,
+		"polling": polling,
+		"last":    last.Format(time.RFC3339),
+		"result":  res,
+		"sources": sources,
 	})
 }
