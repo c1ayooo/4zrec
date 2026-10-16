@@ -50,10 +50,10 @@ GROUP BY c.id`)
 // Conversation is one ChatGPT-style chat thread bound to an agent key. It lives
 // independent of the pentest exploration graph — see schema.sql §I.
 type Conversation struct {
-	ID           int64      `json:"id"`
-	AgentKey     string     `json:"agent_key"`
-	Title        string     `json:"title"`
-	LLMProfileID *int64     `json:"llm_profile_id,omitempty"`
+	ID           int64  `json:"id"`
+	AgentKey     string `json:"agent_key"`
+	Title        string `json:"title"`
+	LLMProfileID *int64 `json:"llm_profile_id,omitempty"`
 	// ProjectID 会话归属的项目;nil=未挂项目,资产围栏对该会话不启用。
 	ProjectID *int64     `json:"project_id,omitempty"`
 	Pinned    bool       `json:"pinned"`

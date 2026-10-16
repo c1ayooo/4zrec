@@ -1120,7 +1120,7 @@ func (s *AssetStore) CountByType(typ string) (int, error) {
 // QueryByCompany returns assets for a company, optionally filtered by type.
 // limit <= 0 means no limit.
 func (s *AssetStore) QueryByCompany(companyID int64, typ string, limit, offset int) ([]*Asset, error) {
-	q := ``+assetSelectCols+` WHERE company_id = $1`
+	q := `` + assetSelectCols + ` WHERE company_id = $1`
 	args := []any{companyID}
 	if typ != "" {
 		args = append(args, typ)
@@ -1150,7 +1150,7 @@ func (s *AssetStore) CountByCompany(companyID int64, typ string) (int, error) {
 // QueryUnassigned / CountUnassigned：未归属企业的资产（company_id IS NULL），
 // 资产页「归属企业 = 未归属」筛选项的后端。
 func (s *AssetStore) QueryUnassigned(typ string, limit, offset int) ([]*Asset, error) {
-	q := ``+assetSelectCols+` WHERE company_id IS NULL`
+	q := `` + assetSelectCols + ` WHERE company_id IS NULL`
 	args := []any{}
 	if typ != "" {
 		args = append(args, typ)
@@ -1180,7 +1180,7 @@ func (s *AssetStore) CountUnassigned(typ string) (int, error) {
 // QueryByProject / CountByProject：归属某项目的资产——资产页「归属项目」
 // 筛选的后端(项目=授权根,归属主轴)。
 func (s *AssetStore) QueryByProject(projectID int64, typ string, limit, offset int) ([]*Asset, error) {
-	q := ``+assetSelectCols+` WHERE project_id = $1`
+	q := `` + assetSelectCols + ` WHERE project_id = $1`
 	args := []any{projectID}
 	if typ != "" {
 		args = append(args, typ)
@@ -1210,7 +1210,7 @@ func (s *AssetStore) CountByProject(projectID int64, typ string) (int, error) {
 // QueryNoProject / CountNoProject：未归属任何项目的资产（project_id IS NULL），
 // 资产页「归属项目 = 未归属」筛选项的后端。
 func (s *AssetStore) QueryNoProject(typ string, limit, offset int) ([]*Asset, error) {
-	q := ``+assetSelectCols+` WHERE project_id IS NULL`
+	q := `` + assetSelectCols + ` WHERE project_id IS NULL`
 	args := []any{}
 	if typ != "" {
 		args = append(args, typ)
@@ -1252,7 +1252,7 @@ func pageClause(args *[]any, limit, offset int) string {
 
 // QueryByTask returns assets rows that have a given task_id in task_ids.
 func (s *AssetStore) QueryByTask(taskID int64, typ string, limit, offset int) ([]*Asset, error) {
-	q := ``+assetSelectCols+` WHERE $1 = ANY(task_ids)`
+	q := `` + assetSelectCols + ` WHERE $1 = ANY(task_ids)`
 	args := []any{taskID}
 	if typ != "" {
 		args = append(args, typ)

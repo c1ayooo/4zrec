@@ -1,5 +1,7 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
+
 import * as React from "react";
 import Link from "next/link";
 import {
@@ -67,10 +69,12 @@ const SCOPE_HINT =
   "一行一条，自动识别：根域名(如 example.com，含全部子域) / 单个IP / CIDR网段(如 10.0.0.0/16) / ICP备案号 / 关键词。\n护栏：拒绝裸 TLD 与过宽网段(IPv4 需 >= /16)。域名/CIDR 参与资产围栏判定，ICP/关键词仅作提示。";
 
 export default function ProjectsPage() {
+  const searchParams = useSearchParams();
   const [projects, setProjects] = React.useState<Project[]>([]);
   const [companies, setCompanies] = React.useState<Company[]>([]);
   const [loading, setLoading] = React.useState(true);
-  const [createOpen, setCreateOpen] = React.useState(false);
+  // 支持外部入口带 ?create=1 直达新建弹窗(对话页项目下拉的「新建项目」跳转)。
+  const [createOpen, setCreateOpen] = React.useState(() => searchParams.get("create") === "1");
   const [newName, setNewName] = React.useState("");
   const [newDesc, setNewDesc] = React.useState("");
   // "" = 不绑定企业;String(company.id) = 创建时挂到该企业

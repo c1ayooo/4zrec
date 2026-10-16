@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api";
-import type { SpacemapResultRow } from "@/lib/types";
+import type { Project, SpacemapResultRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 // 空间测绘结果页:五引擎采集入库的资产,按引擎筛选(来源标注写在资产上,
@@ -28,16 +28,32 @@ export default function SpacemapResultsPage() {
   const [rows, setRows] = React.useState<SpacemapResultRow[] | null>(null);
   const [total, setTotal] = React.useState(0);
   const [engines, setEngines] = React.useState<{ provider: string; display: string }[]>([]);
+  const [projects, setProjects] = React.useState<Project[]>([]);
   const [engine, setEngine] = React.useState("");
   const [typ, setTyp] = React.useState("");
+  // 项目为主轴:按项目拆开看,信息收集结果自动归属对话挂载的项目。
+  const [projectID, setProjectID] = React.useState("");
   const [page, setPage] = React.useState(1);
   const [loading, setLoading] = React.useState(false);
   const pageSize = 50;
 
+  React.useEffect(() => {
+    api
+      .projects()
+      .then(setProjects)
+      .catch(() => {});
+  }, []);
+
   const load = React.useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.spacemapResults({ engine, type: typ, page, size: pageSize });
+      const res = await api.spacemapResults({
+        engine,
+        type: typ,
+        projectId: projectID ? Number(projectID) : undefined,
+        page,
+        size: pageSize,
+      });
       setRows(res.results);
       setTotal(res.total);
       if (res.engines.length) setEngines(res.engines);
@@ -46,7 +62,7 @@ export default function SpacemapResultsPage() {
     } finally {
       setLoading(false);
     }
-  }, [engine, typ, page]);
+  }, [engine, typ, projectID, page]);
 
   React.useEffect(() => {
     void load();
@@ -95,6 +111,25 @@ export default function SpacemapResultsPage() {
         ))}
         <div className="ml-auto flex items-center gap-2">
           <Select
+            value={projectID || "all"}
+            onValueChange={(v) => {
+              setProjectID(v === "all" ? "" : v);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="w-44">
+              <SelectValue placeholder="项目" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部项目</SelectItem>
+              {projects.map((p) => (
+                <SelectItem key={p.id} value={String(p.id)}>
+                  {p.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
             value={typ || "all"}
             onValueChange={(v) => {
               setTyp(v === "all" ? "" : v);
@@ -138,6 +173,7 @@ export default function SpacemapResultsPage() {
                     <th className="px-4 py-2 font-medium">标题</th>
                     <th className="px-4 py-2 font-medium">授权</th>
                     <th className="px-4 py-2 font-medium">引擎</th>
+                    <th className="px-4 py-2 font-medium">指纹</th>
                     <th className="px-4 py-2 font-medium">最近更新</th>
                   </tr>
                 </thead>
@@ -153,6 +189,9 @@ export default function SpacemapResultsPage() {
                         <Badge variant="outline" className={cn("font-mono")}>
                           {r.source}
                         </Badge>
+                      </td>
+                      <td className="max-w-48 truncate px-4 py-2 text-muted-foreground">
+                        {(r.technologies ?? []).length ? r.technologies.slice(0, 3).join(", ") : "-"}
                       </td>
                       <td className="text-muted-foreground px-4 py-2 whitespace-nowrap">
                         {new Date(r.last_seen).toLocaleString()}

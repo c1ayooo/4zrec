@@ -9,8 +9,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api";
-import type { EntCandidate, EntJob } from "@/lib/types";
+import type { EntCandidate, EntJob, Project } from "@/lib/types";
 
 // 企业采集页:关联采集任务(BFS 进度)与候选域名池(授权→导入资产库)。
 // 数据源会话配置在 系统管理 → 企业数据源;未配置时仅 ICP 反查路径可用。
@@ -33,16 +34,30 @@ export default function EnterprisePage() {
   const [jobs, setJobs] = React.useState<EntJob[] | null>(null);
   const [candidates, setCandidates] = React.useState<EntCandidate[] | null>(null);
   const [total, setTotal] = React.useState(0);
+  // 项目为主轴:任务与候选都按项目拆开看。
+  const [projects, setProjects] = React.useState<Project[]>([]);
+  const [projectFilter, setProjectFilter] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState("");
   const [page, setPage] = React.useState(1);
   const [projectID, setProjectID] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [importing, setImporting] = React.useState(false);
 
+  React.useEffect(() => {
+    api
+      .projects()
+      .then(setProjects)
+      .catch(() => {});
+  }, []);
+
   const load = React.useCallback(async () => {
     setLoading(true);
     try {
-      const [j, c] = await Promise.all([api.entJobs(), api.entCandidates(statusFilter, page)]);
+      const pf = projectFilter ? Number(projectFilter) : undefined;
+      const [j, c] = await Promise.all([
+        api.entJobs(pf),
+        api.entCandidates(statusFilter, page, pf),
+      ]);
       setJobs(j);
       setCandidates(c.candidates);
       setTotal(c.total);
@@ -51,7 +66,7 @@ export default function EnterprisePage() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, page]);
+  }, [statusFilter, page, projectFilter]);
 
   React.useEffect(() => {
     void load();
@@ -89,7 +104,28 @@ export default function EnterprisePage() {
         <CardContent className="px-0">
           <div className="flex items-center justify-between px-4 pb-2">
             <h2 className="text-sm font-medium">采集任务</h2>
-            {loading ? <Loader2Icon className="text-muted-foreground size-4 animate-spin" /> : null}
+            <div className="flex items-center gap-2">
+              <Select
+                value={projectFilter || "all"}
+                onValueChange={(v) => {
+                  setProjectFilter(v === "all" ? "" : v);
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="h-8 w-44">
+                  <SelectValue placeholder="项目" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部项目</SelectItem>
+                  {projects.map((p) => (
+                    <SelectItem key={p.id} value={String(p.id)}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {loading ? <Loader2Icon className="text-muted-foreground size-4 animate-spin" /> : null}
+            </div>
           </div>
           {jobs === null ? (
             <p className="text-muted-foreground px-4 pb-4 text-sm">加载中…</p>

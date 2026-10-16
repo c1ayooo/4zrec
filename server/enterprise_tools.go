@@ -394,7 +394,14 @@ func (s *Server) entJobsList(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	jobs, err := stk.store.ListRecentJobs(r.Context(), 20)
+	// project_id 查参(项目为主轴的筛选);缺省=最近全部。
+	pid := strings.TrimSpace(r.URL.Query().Get("project_id"))
+	var jobs []enterprise.Job
+	if pid != "" {
+		jobs, err = stk.store.ListJobs(r.Context(), pid, "")
+	} else {
+		jobs, err = stk.store.ListRecentJobs(r.Context(), 20)
+	}
 	if err != nil {
 		writeErr(w, 500, "db: "+err.Error())
 		return
@@ -413,7 +420,8 @@ func (s *Server) entCandidatesList(w http.ResponseWriter, r *http.Request) {
 		page = 1
 	}
 	status := r.URL.Query().Get("status")
-	rows, total, err := stk.store.ListCandidateAssets(r.Context(), "", status, "", page, 50)
+	projectID := strings.TrimSpace(r.URL.Query().Get("project_id"))
+	rows, total, err := stk.store.ListCandidateAssets(r.Context(), projectID, status, "", page, 50)
 	if err != nil {
 		writeErr(w, 500, "db: "+err.Error())
 		return

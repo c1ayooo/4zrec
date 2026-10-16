@@ -1177,20 +1177,22 @@ export const api = {
   saveSpacemapEngine: (body: { provider: string; api_key?: string; base_url?: string }) =>
     post<{ engines: SpacemapEngine[] }>("/spacemap/engines", body).then((r) => arr(r.engines)),
   intelKeys: () => get<{ keys: IntelKey[] }>("/spacemap/intelkeys").then((r) => arr(r.keys)),
-  spacemapResults: (params: { engine?: string; type?: string; page?: number; size?: number }) => {
+  spacemapResults: (params: { engine?: string; type?: string; projectId?: number; page?: number; size?: number }) => {
     const q = new URLSearchParams();
     if (params.engine) q.set("engine", params.engine);
     if (params.type) q.set("type", params.type);
+    if (params.projectId) q.set("project_id", String(params.projectId));
     q.set("page", String(params.page ?? 1));
     q.set("size", String(params.size ?? 50));
     return get<{ results: SpacemapResultRow[]; total: number; page: number; size: number; engines: { provider: string; display: string }[] }>(
       `/spacemap/results?${q.toString()}`,
     );
   },
-  entJobs: () => get<{ jobs: EntJob[] }>("/enterprise/jobs").then((r) => arr(r.jobs)),
-  entCandidates: (status = "", page = 1) =>
+  entJobs: (projectId?: number) =>
+    get<{ jobs: EntJob[] }>(`/enterprise/jobs${projectId ? `?project_id=${projectId}` : ""}`).then((r) => arr(r.jobs)),
+  entCandidates: (status = "", page = 1, projectId?: number) =>
     get<{ candidates: EntCandidate[]; total: number; page: number }>(
-      `/enterprise/candidates?status=${encodeURIComponent(status)}&page=${page}`,
+      `/enterprise/candidates?status=${encodeURIComponent(status)}&page=${page}${projectId ? `&project_id=${projectId}` : ""}`,
     ).then((r) => ({ candidates: arr(r.candidates), total: r.total, page: r.page })),
   entImportCandidates: (projectId: number, domains?: string[]) =>
     post<{ imported: number; total: number }>("/enterprise/import", { project_id: projectId, domains }),

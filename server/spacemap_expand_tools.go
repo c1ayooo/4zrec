@@ -60,7 +60,8 @@ func (s *Server) expandSearch(ctx context.Context, engines []string, queryFor fu
 }
 
 // expandImportDomains 域名候选导入资产库(走 spacemapImport 的范围语义)。
-func (s *Server) expandImportDomains(ctx context.Context, projectID int64, domains []string) (int, int) {
+func (s *Server) expandImportDomains(ctx context.Context, explicit, projectID int64, domains []string) (int, int) {
+	projectID = s.roeProjectID(ctx, explicit)
 	results := make([]*spacemap.Result, 0, len(domains))
 	for _, d := range domains {
 		results = append(results, &spacemap.Result{Domain: d, Host: d})
@@ -199,7 +200,7 @@ func (s *Server) toolIcpExpand() actool.CoreTool {
 				}
 			}
 			if in.ProjectID > 0 {
-				imported, total := s.expandImportDomains(ctx, in.ProjectID, sorted)
+				imported, total := s.expandImportDomains(ctx, in.ProjectID, 0, sorted)
 				fmt.Fprintf(&b, "已导入资产库 %d/%d(范围内自动授权,范围外待审批)\n", imported, total)
 			}
 			b.WriteString("\n人工确认后,带 authorize=true + domains + project_id 写入授权范围。")
@@ -280,7 +281,7 @@ func (s *Server) toolCertExpand() actool.CoreTool {
 				b.WriteString("\n(含全文匹配引擎:结果可能混入签发者/同名词命中,建议用 icp_expand 备案互证)\n")
 			}
 			if in.ProjectID > 0 {
-				imported, total := s.expandImportDomains(ctx, in.ProjectID, sorted)
+				imported, total := s.expandImportDomains(ctx, in.ProjectID, 0, sorted)
 				fmt.Fprintf(&b, "已导入资产库 %d/%d(范围内自动授权,范围外待审批)\n", imported, total)
 			}
 			return actool.Text(b.String()), nil
@@ -377,7 +378,7 @@ func (s *Server) toolAsnExpand() actool.CoreTool {
 				fmt.Fprintf(&b, "…等 %d 个主机\n", len(sortedHosts))
 			}
 			if in.ProjectID > 0 {
-				imported, total := s.expandImportDomains(ctx, in.ProjectID, sortedDomains)
+				imported, total := s.expandImportDomains(ctx, in.ProjectID, 0, sortedDomains)
 				fmt.Fprintf(&b, "已导入资产库 %d/%d(范围内自动授权,范围外待审批)\n", imported, total)
 			}
 			return actool.Text(b.String()), nil

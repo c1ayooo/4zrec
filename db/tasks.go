@@ -28,18 +28,18 @@ type Task struct {
 	LLMProfileID  *int64     `json:"llm_profile_id,omitempty"`
 	// Task-level ordered LLM chain. LLMProfileID remains the compatibility alias
 	// for ActiveLLMProfileID while older API clients still send one profile id.
-	LLMProfileIDs      []int64    `json:"llm_profile_ids,omitempty"`
-	ActiveLLMProfileID *int64     `json:"active_llm_profile_id,omitempty"`
-	LLMChainRevision   int64      `json:"-"`
-	LLMFailoverState   string     `json:"llm_failover_state,omitempty"`
-	LLMFailoverReason  string     `json:"llm_failover_reason,omitempty"`
-	SourceTaskIDs      []int64    `json:"source_task_ids,omitempty"`
-	CompanyIDs         []int64    `json:"company_ids,omitempty"`
+	LLMProfileIDs      []int64 `json:"llm_profile_ids,omitempty"`
+	ActiveLLMProfileID *int64  `json:"active_llm_profile_id,omitempty"`
+	LLMChainRevision   int64   `json:"-"`
+	LLMFailoverState   string  `json:"llm_failover_state,omitempty"`
+	LLMFailoverReason  string  `json:"llm_failover_reason,omitempty"`
+	SourceTaskIDs      []int64 `json:"source_task_ids,omitempty"`
+	CompanyIDs         []int64 `json:"company_ids,omitempty"`
 	// ProjectID 任务归属的项目(授权根);nil=未挂项目,资产围栏对该任务不启用。
-	ProjectID          *int64     `json:"project_id,omitempty"`
-	ParentRef          string     `json:"parent_ref,omitempty"` // 父任务 id(编排 spawn 记录;空=顶层)
-	CreatedAt          time.Time  `json:"created_at"`
-	CompletedAt        *time.Time `json:"completed_at,omitempty"` // 进入终态(done/failed/timeout)的时刻;非终态为 nil
+	ProjectID   *int64     `json:"project_id,omitempty"`
+	ParentRef   string     `json:"parent_ref,omitempty"` // 父任务 id(编排 spawn 记录;空=顶层)
+	CreatedAt   time.Time  `json:"created_at"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"` // 进入终态(done/failed/timeout)的时刻;非终态为 nil
 	// 任务级超时(见 docs/任务级超时与收尾设计.md)。
 	TimeoutSeconds int        `json:"timeout_seconds"`        // 0=不限时
 	FirstRunAt     *time.Time `json:"first_run_at,omitempty"` // 首次真正开始运行的时刻(非 created_at);nil=尚未运行

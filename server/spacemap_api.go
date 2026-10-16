@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/c1ayooo/4zrec/db"
@@ -242,10 +243,14 @@ func (s *Server) toolSpaceSearch() actool.CoreTool {
 			fmt.Fprintf(&b, "引擎 %s 查询成功:命中 %d 条,返回 %d 条候选\n",
 				spacemap.ProviderDisplayName(in.Engine), total, len(results))
 			if in.AutoImport {
-				d, i, sv := s.spacemapImport(ctx, in.ProjectID, 0, results)
+				// 显式参数优先;缺省取会话/任务挂载的项目(信息收集自动归属)。
+				projectID := s.roeProjectID(ctx, in.ProjectID)
+				d, i, sv := s.spacemapImport(ctx, projectID, 0, results)
 				fmt.Fprintf(&b, "已导入资产库: 域名 %d / IP %d / 服务 %d(范围内自动授权,范围外进待审批)\n", d, i, sv)
-				if in.ProjectID > 0 {
-					fmt.Fprintf(&b, "目标项目 %d\n", in.ProjectID)
+				if projectID > 0 {
+					fmt.Fprintf(&b, "目标项目 %d\n", projectID)
+				} else {
+					b.WriteString("未挂项目:结果仅入库,建议在对话页挂载项目后采集以自动归属。\n")
 				}
 			}
 			// 原始行样本(前 50 条,字段裁剪)供 agent 判断数据质量
@@ -287,8 +292,13 @@ func (s *Server) toolSpaceSearchBatch() actool.CoreTool {
 			if err := json.Unmarshal(input, &in); err != nil {
 				return actool.Errorf("参数解析失败: " + err.Error()), nil
 			}
-			if len(in.Targets) == 0 || in.ProjectID <= 0 {
-				return actool.Errorf("targets 与 project_id 必填"), nil
+			if len(in.Targets) == 0 {
+				return actool.Errorf("targets 必填"), nil
+			}
+			// project_id 缺省取会话/任务挂载的项目(信息收集自动归属)。
+			in.ProjectID = s.roeProjectID(ctx, in.ProjectID)
+			if in.ProjectID <= 0 {
+				return actool.Errorf("project_id 必填(可在对话页挂载项目后省略)"), nil
 			}
 			c := s.spacemapClient()
 			engines := in.Engines
@@ -446,7 +456,8 @@ func (s *Server) spacemapResultsList(w http.ResponseWriter, r *http.Request) {
 	if size <= 0 || size > 200 {
 		size = 50
 	}
-	rows, total, err := pg.SpacemapResultsPage(r.Context(), engine, typ, size, (page-1)*size)
+	pid, _ := strconv.ParseInt(q.Get("project_id"), 10, 64)
+	rows, total, err := pg.SpacemapResultsPage(r.Context(), engine, typ, pid, size, (page-1)*size)
 	if err != nil {
 		writeErr(w, 500, "db: "+err.Error())
 		return

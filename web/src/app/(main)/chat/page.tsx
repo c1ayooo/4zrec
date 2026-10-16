@@ -2,6 +2,8 @@
 
 import * as React from "react";
 
+import Link from "next/link";
+
 import {
   ArrowUpIcon,
   Bot,
@@ -357,9 +359,21 @@ function ProjectRow({
           ))}
           {projects.length === 0 && (
             <p className="text-muted-foreground px-2 py-1.5 text-[11px]">
-              还没有项目 — 在「项目」页创建后即可挂载
+              还没有项目 — 点下方按钮创建
             </p>
           )}
+          <div className="border-t pt-1 mt-1">
+            <Link
+              href="/function/projects?create=1"
+              className="flex items-center gap-1.5 rounded px-2 py-1.5 text-sm hover:bg-accent"
+            >
+              <PlusIcon className="size-3.5" />
+              新建项目
+            </Link>
+            <p className="text-muted-foreground px-2 pb-1 text-[11px]">
+              创建后回到本弹窗挂载,信息收集将自动归属该项目。
+            </p>
+          </div>
         </PopoverContent>
       </Popover>
     </div>

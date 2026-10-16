@@ -1238,6 +1238,8 @@ export interface SpacemapResultRow {
   title: string;
   source: string;
   authz?: string | null;
+  technologies: string[];
+  project_id?: number | null;
   last_seen: string;
 }
 

@@ -104,8 +104,10 @@ func (s *Server) toolSubdomainEnum() actool.CoreTool {
 					fmt.Fprintf(&b, "…等 %d 个\n", len(derived))
 				}
 			}
-			if in.ProjectID > 0 {
-				imported := s.importSubdomains(ctx, in.ProjectID, sorted)
+			// 项目缺省取会话/任务挂载(信息收集自动归属)。
+			importProject := s.roeProjectID(ctx, in.ProjectID)
+			if importProject > 0 {
+				imported := s.importSubdomains(ctx, importProject, sorted)
 				fmt.Fprintf(&b, "已导入资产库 %d/%d(范围内自动授权,范围外待审批)\n", imported, len(sorted))
 			}
 			return actool.Text(b.String()), nil
@@ -176,12 +178,13 @@ func (s *Server) toolSubdomainBrute() actool.CoreTool {
 					fmt.Fprintf(&b, "- %s [%s]\n", h.Name, strings.Join(h.IPs, ","))
 				}
 			}
-			if in.ProjectID > 0 && len(hits) > 0 {
+			importProject := s.roeProjectID(ctx, in.ProjectID)
+			if importProject > 0 && len(hits) > 0 {
 				names := make([]string, 0, len(hits))
 				for _, h := range hits {
 					names = append(names, h.Name)
 				}
-				imported := s.importSubdomains(ctx, in.ProjectID, names)
+				imported := s.importSubdomains(ctx, importProject, names)
 				fmt.Fprintf(&b, "已导入资产库 %d/%d(范围内自动授权,范围外待审批)\n", imported, len(names))
 			}
 			return actool.Text(b.String()), nil

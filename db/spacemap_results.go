@@ -4,29 +4,33 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 )
 
 // SpacemapResultRow 结果页一行。
 type SpacemapResultRow struct {
-	ID       int64     `json:"id"`
-	Type     string    `json:"type"`
-	Label    string    `json:"label"`
-	Port     int       `json:"port,omitempty"`
-	Title    string    `json:"title"`
-	Source   string    `json:"source"`
-	Authz    *string   `json:"authz,omitempty"`
-	LastSeen time.Time `json:"last_seen"`
+	ID           int64     `json:"id"`
+	Type         string    `json:"type"`
+	Label        string    `json:"label"`
+	Port         int       `json:"port,omitempty"`
+	Title        string    `json:"title"`
+	Source       string    `json:"source"`
+	Authz        *string   `json:"authz,omitempty"`
+	Technologies []string  `json:"technologies"`
+	ProjectID    *int64    `json:"project_id,omitempty"`
+	LastSeen     time.Time `json:"last_seen"`
 }
 
 const spacemapResultCols = `a.id, a.type,
 	COALESCE(a.url, a.domain, a.ip, a.app_name, a.root_domain, '') AS label,
-	COALESCE(a.port, 0), COALESCE(a.page_title, ''), COALESCE(a.source, ''), a.authz, a.last_seen`
+	COALESCE(a.port, 0), COALESCE(a.page_title, ''), COALESCE(a.source, ''), a.authz,
+	COALESCE(array_to_json(a.technologies)::text, '[]'), a.project_id, a.last_seen`
 
 // SpacemapResultsPage 按引擎筛选(source 精确=引擎展示名)的分页结果。
 // engine 空=全部测绘来源;typ 资产类型可选。
-func (d *DB) SpacemapResultsPage(ctx context.Context, engine, typ string, limit, offset int) ([]SpacemapResultRow, int, error) {
+func (d *DB) SpacemapResultsPage(ctx context.Context, engine, typ string, projectID int64, limit, offset int) ([]SpacemapResultRow, int, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
@@ -39,6 +43,10 @@ func (d *DB) SpacemapResultsPage(ctx context.Context, engine, typ string, limit,
 	if typ != "" {
 		args = append(args, typ)
 		where += ` AND a.type=$` + fmt.Sprintf("%d", len(args))
+	}
+	if projectID > 0 {
+		args = append(args, projectID)
+		where += ` AND a.project_id=$` + fmt.Sprintf("%d", len(args))
 	}
 	var total int
 	if err := d.QueryRowContext(ctx, `SELECT count(*) FROM assets a WHERE `+where, args...).Scan(&total); err != nil {
@@ -55,9 +63,11 @@ func (d *DB) SpacemapResultsPage(ctx context.Context, engine, typ string, limit,
 	out := make([]SpacemapResultRow, 0, limit)
 	for rows.Next() {
 		var r SpacemapResultRow
-		if err := rows.Scan(&r.ID, &r.Type, &r.Label, &r.Port, &r.Title, &r.Source, &r.Authz, &r.LastSeen); err != nil {
+		var techRaw string
+		if err := rows.Scan(&r.ID, &r.Type, &r.Label, &r.Port, &r.Title, &r.Source, &r.Authz, &techRaw, &r.ProjectID, &r.LastSeen); err != nil {
 			return nil, 0, err
 		}
+		_ = json.Unmarshal([]byte(techRaw), &r.Technologies)
 		out = append(out, r)
 	}
 	return out, total, rows.Err()
