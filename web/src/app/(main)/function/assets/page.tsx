@@ -677,7 +677,9 @@ export default function AssetsPage() {
                       })
                     )}
                   </TableCell>
-                  <TableCell className="w-8 pl-0">
+                  
+
+<TableCell className="w-8 pl-0">
                     <Button
                       variant="ghost"
                       size="icon"
