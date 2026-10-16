@@ -918,9 +918,6 @@ CREATE TABLE IF NOT EXISTS recon_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_recon_runs_project ON recon_runs(project_id) WHERE project_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_recon_runs_created ON recon_runs(created_at DESC);
--- 周期采集任务的流水线执行也落运行记录(schedule_id 关联,页面上展开运行历史)。
-ALTER TABLE recon_runs ADD COLUMN IF NOT EXISTS schedule_id BIGINT REFERENCES recon_schedules(id) ON DELETE CASCADE;
-CREATE INDEX IF NOT EXISTS idx_recon_runs_schedule ON recon_runs(schedule_id) WHERE schedule_id IS NOT NULL;
 
 -- 资产侧：侦察优先级(P0-P4,recon/score 计算)——null=未评。排序用部分索引。
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS recon_level TEXT;
@@ -945,6 +942,11 @@ CREATE TABLE IF NOT EXISTS recon_schedules (
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_recon_sched_due ON recon_schedules(next_run_at) WHERE enabled;
+
+-- 周期采集任务的流水线执行也落运行记录(schedule_id 关联,页面上展开运行历史)。
+-- 注意顺序:必须在 recon_schedules 建表之后(外键引用)。
+ALTER TABLE recon_runs ADD COLUMN IF NOT EXISTS schedule_id BIGINT REFERENCES recon_schedules(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_recon_runs_schedule ON recon_runs(schedule_id) WHERE schedule_id IS NOT NULL;
 
 -- Skill 调用账本（见 db/skill_usage.go）。一次 Skill() 调用一行，只记维度不记正文。
 -- 刻意不设外键：任务/会话删除后统计仍要保留（与 llm_usage 同理），skill 本身也只是
