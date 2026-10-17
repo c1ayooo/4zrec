@@ -15,7 +15,7 @@
 #   ZREC_PACKAGE_DIR=dist            Directory for release archives.
 #   ZREC_COMPRESS=off                UPX mode: off, auto, or required.
 #   ZREC_UPX_ARGS="--best --lzma"    Arguments passed to UPX.
-#   ZREC_SKIP_FRONTEND=1             Reuse server/webui/dist (for CI artifact builds).
+#   ZREC_SKIP_FRONTEND=1             Reuse internal/platform/server/webui/dist (for CI artifact builds).
 #   ZREC_SKIP_NPM_CI=1               Skip npm ci while rebuilding the frontend.
 #   ZREC_GOSUMDB=sum.golang.org      Go checksum database.
 set -euo pipefail
@@ -112,7 +112,7 @@ else
 fi
 
 if [ "${ZREC_SKIP_FRONTEND:-0}" = "1" ]; then
-  [ -d server/webui/dist ] || die "ZREC_SKIP_FRONTEND=1 但 server/webui/dist 不存在"
+  [ -d internal/platform/server/webui/dist ] || die "ZREC_SKIP_FRONTEND=1 但 internal/platform/server/webui/dist 不存在"
 else
   command -v npm >/dev/null 2>&1 || die "未检测到 npm（前端静态构建需要 Node.js/npm）"
   command -v rsync >/dev/null 2>&1 || die "未检测到 rsync"
@@ -121,9 +121,9 @@ else
     (cd web && npm ci)
   fi
   (cd web && npm run build:static)
-  info "同步前端资源到 server/webui/dist"
-  mkdir -p server/webui/dist
-  rsync -a --delete web/out/ server/webui/dist/
+  info "同步前端资源到 internal/platform/server/webui/dist"
+  mkdir -p internal/platform/server/webui/dist
+  rsync -a --delete web/out/ internal/platform/server/webui/dist/
 fi
 
 compress_binary() {

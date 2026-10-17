@@ -48,7 +48,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: web-dist
-          path: server/webui/dist
+          path: internal/platform/server/webui/dist
       - name: Build and package with build.sh
         env:
           ZREC_TARGET_OS: ${{ matrix.goos }}

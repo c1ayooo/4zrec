@@ -106,7 +106,7 @@ cp config.example.json config.json   # 填好 database 连接
 # 1) 前端静态导出
 cd web && npm ci && npm run build:static && cd ..
 # 2) 拷进内嵌目录
-cp -r web/out server/webui/dist
+cp -r web/out internal/platform/server/webui/dist
 # 3) 编译（-tags embedui 才内嵌前端）
 CGO_ENABLED=0 go build -tags embedui -o 4zrec ./cmd/4zrec
 ./start.sh
@@ -184,7 +184,7 @@ cp -r <解压目录>/skills ./ && cp <解压目录>/4zrec ./
 ```bash
 git pull
 cd web && npm ci && npm run build:static && cd ..
-cp -r web/out server/webui/dist
+cp -r web/out internal/platform/server/webui/dist
 CGO_ENABLED=0 go build -tags embedui -o 4zrec ./cmd/4zrec
 # 重启 ./start.sh
 ```

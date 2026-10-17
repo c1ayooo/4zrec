@@ -2,7 +2,7 @@
 **/node_modules
 web/.next
 web/out
-server/webui/dist
+internal/platform/server/webui/dist
 /artex
 /artex.*
 /4zrec.pre*

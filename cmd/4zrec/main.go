@@ -16,10 +16,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/c1ayooo/4zrec/agent"
-	"github.com/c1ayooo/4zrec/config"
-	"github.com/c1ayooo/4zrec/selfupdate"
-	"github.com/c1ayooo/4zrec/server"
+	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
+	"github.com/c1ayooo/4zrec/internal/platform/config"
+	"github.com/c1ayooo/4zrec/internal/platform/selfupdate"
+	"github.com/c1ayooo/4zrec/internal/platform/server"
 )
 
 // version is the build version, injected at release time via

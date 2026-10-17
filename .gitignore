@@ -45,7 +45,7 @@ Thumbs.db
 /artex.old
 /artex.failed
 /artex.upgrade.json
-/server/webui/dist/
+/internal/platform/server/webui/dist/
 /dist/
 
 # JWT 签名密钥（运行时生成，存项目根，绝不提交）

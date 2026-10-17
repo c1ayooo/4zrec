@@ -7,7 +7,7 @@
 #
 # 本地手动构建镜像时，先自行准备二进制：
 #   cd web && npm run build:static && cd ..
-#   cp -r web/out server/webui/dist
+#   cp -r web/out internal/platform/server/webui/dist
 #   CGO_ENABLED=0 GOARCH=amd64 go build -tags embedui -o dist/amd64/4zrec ./cmd/4zrec
 #   docker build -t 4zrec:local .
 FROM python:3.12-slim-bookworm
