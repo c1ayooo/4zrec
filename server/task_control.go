@@ -276,6 +276,13 @@ func (s *Server) controlTasksBatch(w http.ResponseWriter, r *http.Request) {
 			items = append(items, item)
 			continue
 		}
+		if scopeProject := scopedProjectID(r.Context()); scopeProject > 0 {
+			if t.ProjectID == nil || *t.ProjectID != scopeProject {
+				item.Error = "task not found"
+				items = append(items, item)
+				continue
+			}
+		}
 		result, err := s.applyTaskControl(t, req.Action)
 		if err != nil {
 			item.Error = err.Error()

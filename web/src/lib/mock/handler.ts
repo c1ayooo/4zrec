@@ -2241,6 +2241,11 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   }
 
   // ── LLM ──
+  if (path === "/llm/pricing" && m === "GET") return { rules: [], models: [] };
+  if (path === "/llm/pricing" && m === "PUT") {
+    const rules = Array.isArray(b.rules) ? (b.rules as unknown[]) : [];
+    return { ok: true, rules: rules.length };
+  }
   if (path === "/llm/records" && m === "GET") return { records: mockLLMRecords, total: mockLLMRecords.length };
   if (path === "/llm/records" && m === "DELETE") return { deleted: 0 };
   if (path === "/llm/records/tasks") {
@@ -2547,7 +2552,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   }
   if (seg[0] === "intercept" && seg[1] === "pending" && seg.length === 3 && m === "GET")
     return mockInterceptPending.find((p) => p.id === Number(seg[2])) ?? null;
-  if (path === "/intercept/history" || (seg[0] === "intercept" && seg[1] === "task")) {
+  if (path === "/intercept/history" || (seg[0] === "intercept" && (seg[1] === "task" || seg[1] === "project"))) {
     const status = q.get("status") || "";
     const decisionSource = q.get("decision_source") || "";
     if (status && !["pending", "allowed", "denied", "timeout"].includes(status)) throw new Error("无效审批状态");

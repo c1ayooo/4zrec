@@ -19,6 +19,7 @@ import { TablePagination } from "@/components/table-pagination";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -262,15 +263,117 @@ function ModelReviewContext({ input }: { input: InterceptReviewInput }) {
   );
 }
 
-type Decide = (id: number, decision: "allowed" | "denied") => Promise<void>;
+type Decide = (id: number, decision: "allowed" | "denied", targets?: string[]) => Promise<void>;
 
-function DecisionActions({ row, busy, decide }: { row: InterceptApprovalRow; busy: boolean; decide: Decide }) {
+// targetList 展开审批记录里的结构化目标:域名与 IP 分列(同一条审批可能混合)。
+function targetList(row: InterceptApprovalRow): { value: string; kind: "域名" | "IP" }[] {
+  const domains = (row.targets?.domains ?? []).map((value) => ({ value, kind: "域名" as const }));
+  const ips = (row.targets?.ips ?? []).map((value) => ({ value, kind: "IP" as const }));
+  return [...domains, ...ips];
+}
+
+// TargetChip 单个目标的可勾选标签(用 label+htmlFor 关联 Radix Checkbox,
+// 点整块都能切换,且每个实例的 id 唯一)。
+function TargetChip({
+  target,
+  checked,
+  onToggle,
+}: {
+  target: { value: string; kind: "域名" | "IP" };
+  checked: boolean;
+  onToggle: () => void;
+}) {
+  const id = React.useId();
+  return (
+    <label
+      htmlFor={id}
+      className={cn(
+        "flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 font-mono text-xs",
+        checked ? "border-primary/40 bg-primary/5" : "text-muted-foreground",
+      )}
+    >
+      <Checkbox id={id} checked={checked} onCheckedChange={onToggle} />
+      <span className="text-[10px] text-muted-foreground">{target.kind}</span>
+      {target.value}
+    </label>
+  );
+}
+
+// FenceTargets 资产围栏审批的逐目标复选:默认全选;取消勾选的目标不会被
+// 登记为 approved(本次调用仍按「允许」执行)。
+function FenceTargets({
+  row,
+  selected,
+  onChange,
+}: {
+  row: InterceptApprovalRow;
+  selected: Set<string>;
+  onChange: (next: Set<string>) => void;
+}) {
+  const targets = targetList(row);
+  if (!targets.length) return null;
+  const allSelected = targets.every((t) => selected.has(t.value));
+  const toggle = (value: string) => {
+    const next = new Set(selected);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    onChange(next);
+  };
+  return (
+    <section className="flex min-w-0 flex-col gap-2" aria-label="授权目标">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-medium text-muted-foreground text-xs">
+          授权目标（已选 {selected.size}/{targets.length}）
+        </h3>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onChange(allSelected ? new Set() : new Set(targets.map((t) => t.value)))}
+          >
+            {allSelected ? "全不选" : "全选"}
+          </Button>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {targets.map((t) => (
+          <TargetChip
+            key={`${t.kind}-${t.value}`}
+            target={t}
+            checked={selected.has(t.value)}
+            onToggle={() => toggle(t.value)}
+          />
+        ))}
+      </div>
+      <p className="text-muted-foreground text-xs">
+        勾选的目标将登记为已批准资产（后续命令不再围栏）；未勾选的保持未授权，但本次调用仍按「允许」执行。
+      </p>
+    </section>
+  );
+}
+
+function DecisionActions({
+  row,
+  busy,
+  decide,
+  selected,
+}: {
+  row: InterceptApprovalRow;
+  busy: boolean;
+  decide: Decide;
+  selected: Set<string>;
+}) {
   if (row.status !== "pending") return null;
+  const hasTargets = targetList(row).length > 0;
   return (
     <div className="flex flex-wrap gap-2">
-      <Button size="sm" disabled={busy} onClick={() => void decide(row.id, "allowed")}>
+      <Button
+        size="sm"
+        disabled={busy}
+        onClick={() => void decide(row.id, "allowed", hasTargets ? [...selected] : undefined)}
+      >
         <CheckIcon data-icon="inline-start" />
-        允许
+        {hasTargets ? "允许并授权勾选目标" : "允许"}
       </Button>
       <Button size="sm" variant="destructive" disabled={busy} onClick={() => void decide(row.id, "denied")}>
         <XIcon data-icon="inline-start" />
@@ -301,6 +404,18 @@ export function ApprovalDetail({
   const [error, setError] = React.useState("");
   const [retry, setRetry] = React.useState(0);
   const [more, setMore] = React.useState(defaultExpanded);
+  // 围栏审批的逐目标授权选择;默认全选,记录变化时重置。用值签名做依赖,
+  // 5s 轮询重建的对象不会把用户已取消的勾选冲掉。
+  const targetsKey = targetList(row)
+    .map((t) => t.value)
+    .join("\u0000");
+  const [selectedTargets, setSelectedTargets] = React.useState<Set<string>>(
+    () => new Set(targetList(row).map((t) => t.value)),
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: row.id/targetsKey 变化才重置勾选。
+  React.useEffect(() => {
+    setSelectedTargets(new Set(targetList(row).map((t) => t.value)));
+  }, [row.id, targetsKey]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: Status, refresh and retry invalidate details without closing the panel.
   React.useEffect(() => {
@@ -396,7 +511,8 @@ export function ApprovalDetail({
               </>
             ) : null}
           </dl>
-          {!readOnly ? <DecisionActions row={current} busy={busy} decide={decide} /> : null}
+          {!readOnly ? <FenceTargets row={current} selected={selectedTargets} onChange={setSelectedTargets} /> : null}
+          {!readOnly ? <DecisionActions row={current} busy={busy} decide={decide} selected={selectedTargets} /> : null}
         </div>
       </div>
       {error ? (
@@ -647,7 +763,28 @@ function ApprovalTable({
   );
 }
 
-export function ApprovalRecords({ taskId }: { taskId?: string }) {
+// approvalsTitle 审批页标题随作用域变化(项目页 / 任务页共用同一组件)。
+function approvalsTitle(taskId?: string, projectId?: number) {
+  if (projectId) return "项目审批";
+  if (taskId) return "拦截审批";
+  return "审批记录";
+}
+
+// fetchHistoryPage 审批历史按作用域取数:项目 → 任务 → 全局。项目页与任务页
+// 读的是同一张 intercept_pending 表,只是聚合范围不同。
+function fetchHistoryPage(
+  taskId: string | undefined,
+  projectId: number | undefined,
+  page: number,
+  pageSize: number,
+  filter: InterceptApprovalFilter,
+) {
+  if (projectId) return api.interceptProjectPage(projectId, page, pageSize, filter);
+  if (taskId) return api.interceptTaskPage(taskId, page, pageSize, filter);
+  return api.interceptHistoryPage(page, pageSize, filter);
+}
+
+export function ApprovalRecords({ taskId, projectId }: { taskId?: string; projectId?: number }) {
   const [rows, setRows] = React.useState<InterceptApprovalRow[]>([]);
   const [pendingRows, setPendingRows] = React.useState<InterceptPending[]>([]);
   const [page, setPage] = React.useState(1);
@@ -667,10 +804,10 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
 
   // A task can stay mounted while the user switches between task details.
   // Reset the cursor so the new scope always starts at its newest records.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: taskId intentionally resets pagination when scope changes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: taskId/projectId intentionally reset pagination when scope changes.
   React.useEffect(() => {
     setPage(1);
-  }, [taskId]);
+  }, [taskId, projectId]);
 
   const load = React.useCallback(
     async (manual = false) => {
@@ -681,8 +818,8 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
         // filter. Older requests must remain actionable even when newer decisions
         // fill the page or a filter would hide them.
         const [history, pending] = await Promise.allSettled([
-          taskId ? api.interceptTaskPage(taskId, page, pageSize, filter) : api.interceptHistoryPage(page, pageSize, filter),
-          api.interceptPending(),
+          fetchHistoryPage(taskId, projectId, page, pageSize, filter),
+          api.interceptPending(projectId),
         ]);
         if (id !== request.current) return;
         if (history.status === "fulfilled") {
@@ -708,7 +845,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
         }
       }
     },
-    [taskId, page, pageSize, filter],
+    [taskId, projectId, page, pageSize, filter],
   );
   const latestLoad = React.useRef(load);
   latestLoad.current = load;
@@ -738,12 +875,12 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
     setLoading(true);
   };
 
-  const decide: Decide = async (id, decision) => {
+  const decide: Decide = async (id, decision, targets) => {
     if (decisionLock.current) return;
     decisionLock.current = true;
     setDeciding(true);
     try {
-      await api.interceptDecide(id, decision);
+      await api.interceptDecide(id, decision, targets);
       // Invalidate a list request started before this decision.
       request.current++;
       // Optimistically drop the decided item from the independent pending queue
@@ -775,7 +912,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
       ...historyById.get(row.id),
       ...row,
     }));
-  const title = taskId ? "拦截审批" : "审批记录";
+  const title = approvalsTitle(taskId, projectId);
   return (
     <div className="flex min-w-0 flex-col gap-5">
       <div className="flex flex-wrap items-center justify-between gap-3">

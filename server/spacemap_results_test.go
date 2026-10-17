@@ -40,7 +40,7 @@ func TestSpacemapResultsPage(t *testing.T) {
 		_ = m.pg.SetSetting("spacemap.key.fofa", "")
 	}()
 
-	d, _, _ := s.spacemapImport(context.Background(), 0, 0, results)
+	d, _, _ := s.spacemapImport(context.Background(), 0, 0, results, "")
 	if d < 1 {
 		t.Fatalf("导入失败: %d", d)
 	}

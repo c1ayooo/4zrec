@@ -23,7 +23,7 @@ func (s *Server) importSubdomains(ctx context.Context, projectID int64, domains 
 	for _, d := range domains {
 		results = append(results, &spacemap.Result{Domain: d, Host: d})
 	}
-	n, _, _ := s.spacemapImport(ctx, projectID, 0, results)
+	n, _, _ := s.spacemapImport(ctx, projectID, 0, results, "")
 	return n
 }
 

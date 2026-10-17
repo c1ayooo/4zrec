@@ -11,12 +11,14 @@ import {
   NetworkIcon,
 } from "lucide-react";
 
+import { ApprovalRecords } from "@/components/approval-records";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
+import { assetProvenance } from "@/lib/asset-provenance";
 import type { Asset, Finding, Project, Task } from "@/lib/types";
 
 function fmtTime(iso?: string): string {
@@ -242,6 +244,7 @@ function ProjectDetail({ id }: { id: number }) {
           <TabsTrigger value="tasks">任务 ({tasks.length})</TabsTrigger>
           <TabsTrigger value="assets">资产 ({assetsTotal})</TabsTrigger>
           <TabsTrigger value="findings">漏洞 ({findingsTotal})</TabsTrigger>
+          <TabsTrigger value="approvals">审批</TabsTrigger>
         </TabsList>
 
         {/* 总览:范围(围栏白名单)+ 说明 */}
@@ -342,6 +345,7 @@ function ProjectDetail({ id }: { id: number }) {
                       <TableRow>
                         <TableHead>目标</TableHead>
                         <TableHead>类型</TableHead>
+                        <TableHead>出处</TableHead>
                         <TableHead>授权状态</TableHead>
                         <TableHead>最后发现</TableHead>
                       </TableRow>
@@ -352,6 +356,12 @@ function ProjectDetail({ id }: { id: number }) {
                           <TableCell className="font-mono text-xs font-medium">{assetTarget(a)}</TableCell>
                           <TableCell>
                             <Badge variant="outline">{TYPE_LABEL[a.type] ?? a.type}</Badge>
+                          </TableCell>
+                          <TableCell
+                            className="text-muted-foreground max-w-48 truncate text-xs"
+                            title={assetProvenance(a)}
+                          >
+                            {assetProvenance(a)}
                           </TableCell>
                           <TableCell>
                             <AuthzBadge authz={a.authz} />
@@ -434,6 +444,12 @@ function ProjectDetail({ id }: { id: number }) {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* 审批:与任务详情里的「拦截审批」是同一个组件、同一份数据——这里按项目
+            聚合该项目下所有任务/会话的审批,目标可逐条勾选授权。 */}
+        <TabsContent value="approvals" className="mt-0">
+          <ApprovalRecords projectId={project.id} />
         </TabsContent>
       </Tabs>
     </div>

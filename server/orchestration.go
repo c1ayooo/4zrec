@@ -1,11 +1,11 @@
 package server
 
 import (
-	"slices"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -516,6 +516,8 @@ func (s *Server) seedOrchestrationTools() {
 	s.seedReporterAgent()             // 预置「报告撰写」agent + 工具绑定 + finding 触发器(一次性)
 	s.seedReconAgent()                // 预置「信息收集」agent + 任务创建触发器(一次性)
 	s.rebindReconToolsV2()            // recon 补绑新增收集工具族(一次性)
+	s.rebindHTTPProbeAgents()         // http_probe 补绑 pentest/planner(一次性)
+	s.mergeHTTPProbeSchema()          // http_probe 新增参数合并进存量工具行(一次性)
 	s.promoteCoreAgentsBuiltin()      // reporter/recon 提升内置角色(一次性)
 	s.upgradeReporterTriggerMessage() // 老库补迁移:让 reporter 回传 evidence_version(一次性)
 	s.seedFindingTrafficTools()       // 增加可选证据参数及只读证据工具，保留用户配置
@@ -821,6 +823,127 @@ func (s *Server) rebindReconToolsV2() {
 		return
 	}
 	log.Printf("[recon] 已补绑新增收集工具族(一次性)")
+}
+
+// rebindHTTPProbeAgents 存量库迁移:把结构化 HTTP 工具 http_probe 补绑给独立
+// 渗透(pentest)与规划(planner)agent——「HTTP 请求优先 http_probe」这条硬规则
+// 的前提是它们真的能调用它。幂等,flag 守卫只做一次。
+func (s *Server) rebindHTTPProbeAgents() {
+	const flag = "http_probe_priority_v1"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	defer func() { _ = s.m.pg.SetSetting(flag, "true") }()
+	for _, key := range []string{"pentest", "planner"} {
+		if a, _ := s.m.pg.GetAgentByKey(key); a == nil {
+			continue // 用户删过/自定义库,不重建
+		}
+		if err := s.m.pg.AddAgentToToolBinding(key, []string{"http_probe"}); err != nil {
+			log.Printf("[http_probe] 绑定 %s 失败: %v", key, err)
+		}
+	}
+	log.Printf("[http_probe] 已补绑 pentest/planner(一次性)")
+}
+
+// mergeHTTPProbeSchema 存量库迁移:工具表是首插播种的,http_probe 新增的
+// extract/cookie_jar/save_to_file 参数不会自动出现在旧行 schema 里,模型也就
+// 看不到。这里把代码 schema 中缺失的顶层参数合并进数据库行(已有参数与用户
+// 改动原样保留)。幂等,flag 守卫只做一次。
+func (s *Server) mergeHTTPProbeSchema() {
+	const flag = "http_probe_schema_v3"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	defer func() { _ = s.m.pg.SetSetting(flag, "true") }()
+	var code map[string]any
+	for _, t := range s.probeTools() {
+		if t.Name() == "http_probe" {
+			code = t.InputSchema()
+			break
+		}
+	}
+	if len(code) == 0 {
+		return
+	}
+	rows, err := s.m.pg.ListTools()
+	if err != nil {
+		log.Printf("[http_probe] 读取工具表失败: %v", err)
+		return
+	}
+	for _, row := range rows {
+		if row.Key != "http_probe" {
+			continue
+		}
+		var cur map[string]any
+		if len(row.Schema) > 0 {
+			_ = json.Unmarshal(row.Schema, &cur)
+		}
+		merged := mergeSchemaProps(cur, code)
+		raw, mErr := json.Marshal(merged)
+		if mErr != nil {
+			log.Printf("[http_probe] schema 序列化失败: %v", mErr)
+			return
+		}
+		if uErr := s.m.pg.UpdateToolSchema("http_probe", raw); uErr != nil {
+			log.Printf("[http_probe] schema 合并失败: %v", uErr)
+			return
+		}
+		log.Printf("[http_probe] 已合并新增参数 schema(一次性)")
+		return
+	}
+}
+
+// mergeSchemaProps 把 code schema 里缺失的顶层 properties/required 补进 cur;
+// 已有属性原样保留(cur 为空或解析失败时直接用 code)。
+func mergeSchemaProps(cur, code map[string]any) map[string]any {
+	if len(cur) == 0 {
+		return code
+	}
+	out := make(map[string]any, len(cur)+1)
+	for k, v := range cur {
+		out[k] = v
+	}
+	if out["type"] == nil {
+		out["type"] = code["type"]
+	}
+	curProps, _ := out["properties"].(map[string]any)
+	if curProps == nil {
+		curProps = map[string]any{}
+		out["properties"] = curProps
+	}
+	if codeProps, ok := code["properties"].(map[string]any); ok {
+		for k, v := range codeProps {
+			if _, exists := curProps[k]; !exists {
+				curProps[k] = v
+			}
+		}
+	}
+	// required 以代码 schema 为准:参数结构是代码所有权的(UI 只允许改描述/
+	// 默认值)。旧库可能残留已不再强制的 required——例如 http_probe 曾要求
+	// url,但批量模式 requests/template 本来就不带 url——不清理会让合法调用
+	// 被 schema 校验直接拒绝(Error: missing required property "url")。
+	if req := schemaRequiredStrings(code["required"]); len(req) > 0 {
+		out["required"] = req
+	} else {
+		delete(out, "required")
+	}
+	return out
+}
+
+func schemaRequiredStrings(v any) []string {
+	switch x := v.(type) {
+	case []string:
+		return append([]string(nil), x...)
+	case []any:
+		out := make([]string, 0, len(x))
+		for _, e := range x {
+			if s, ok := e.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // promoteCoreAgentsBuiltin 存量库迁移:reporter/recon 提升为内置角色

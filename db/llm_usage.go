@@ -3,6 +3,7 @@ package db
 import (
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -45,6 +46,15 @@ CREATE TABLE IF NOT EXISTS llm_usage (
 CREATE INDEX IF NOT EXISTS idx_llm_usage_task  ON llm_usage(task_id);
 CREATE INDEX IF NOT EXISTS idx_llm_usage_model ON llm_usage(task_id, model);
 CREATE INDEX IF NOT EXISTS idx_llm_usage_exp   ON llm_usage(exploration_id);
+CREATE TABLE IF NOT EXISTS llm_pricing (
+    model_pattern        TEXT PRIMARY KEY,
+    input_per_mtok       NUMERIC(14,4) NOT NULL DEFAULT 0,
+    output_per_mtok      NUMERIC(14,4) NOT NULL DEFAULT 0,
+    cache_read_per_mtok  NUMERIC(14,4) NOT NULL DEFAULT 0,
+    cache_write_per_mtok NUMERIC(14,4) NOT NULL DEFAULT 0,
+    currency             TEXT NOT NULL DEFAULT 'CNY',
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 `
 
 // EnsureLLMUsageTable creates the llm_usage metering table if it does not exist.
@@ -107,6 +117,202 @@ ORDER BY SUM(input_tokens) + SUM(output_tokens) DESC, model`, taskID)
 	return out, rows.Err()
 }
 
+// LLMPricing is one editable per-model price row (unit: currency per 1M tokens).
+// model_pattern supports exact model names and a trailing "*" prefix wildcard
+// (e.g. "deepseek-*"). Exact matches win; otherwise the longest wildcard wins.
+type LLMPricing struct {
+	ModelPattern      string  `json:"model_pattern"`
+	InputPerMTok      float64 `json:"input_per_mtok"`       // 未命中缓存的输入
+	OutputPerMTok     float64 `json:"output_per_mtok"`      // 输出
+	CacheReadPerMTok  float64 `json:"cache_read_per_mtok"`  // 缓存命中读
+	CacheWritePerMTok float64 `json:"cache_write_per_mtok"` // 缓存写
+	Currency          string  `json:"currency"`             // CNY / USD ...
+}
+
+// ListLLMPricing returns all price rules ordered by pattern.
+func (d *DB) ListLLMPricing() ([]LLMPricing, error) {
+	rows, err := d.Query(`SELECT model_pattern, input_per_mtok, output_per_mtok,
+		cache_read_per_mtok, cache_write_per_mtok, currency FROM llm_pricing ORDER BY model_pattern`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []LLMPricing{}
+	for rows.Next() {
+		var p LLMPricing
+		if err := rows.Scan(&p.ModelPattern, &p.InputPerMTok, &p.OutputPerMTok,
+			&p.CacheReadPerMTok, &p.CacheWritePerMTok, &p.Currency); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// ReplaceLLMPricing atomically replaces the whole price book (the UI sends the
+// complete list it edited).
+func (d *DB) ReplaceLLMPricing(rules []LLMPricing) error {
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	if _, err := tx.Exec(`DELETE FROM llm_pricing`); err != nil {
+		return err
+	}
+	for _, p := range rules {
+		pattern := strings.TrimSpace(p.ModelPattern)
+		if pattern == "" {
+			continue
+		}
+		currency := strings.TrimSpace(p.Currency)
+		if currency == "" {
+			currency = "CNY"
+		}
+		if _, err := tx.Exec(`
+INSERT INTO llm_pricing(model_pattern, input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_write_per_mtok, currency)
+VALUES ($1,$2,$3,$4,$5,$6)`,
+			pattern, p.InputPerMTok, p.OutputPerMTok, p.CacheReadPerMTok, p.CacheWritePerMTok, currency); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// MatchLLMPricing finds the price rule for a model: exact (case-insensitive)
+// first, then the longest trailing-"*" prefix wildcard.
+func MatchLLMPricing(rules []LLMPricing, model string) (LLMPricing, bool) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return LLMPricing{}, false
+	}
+	for _, r := range rules {
+		if strings.EqualFold(strings.TrimSpace(r.ModelPattern), model) {
+			return r, true
+		}
+	}
+	best := -1
+	bestLen := -1
+	for i, r := range rules {
+		pattern := strings.TrimSpace(r.ModelPattern)
+		if !strings.HasSuffix(pattern, "*") {
+			continue
+		}
+		prefix := strings.TrimSuffix(pattern, "*")
+		if prefix == "" {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(model), strings.ToLower(prefix)) && len(prefix) > bestLen {
+			best, bestLen = i, len(prefix)
+		}
+	}
+	if best >= 0 {
+		return rules[best], true
+	}
+	return LLMPricing{}, false
+}
+
+// ModelUsage is one (model, profile) bucket of the metering ledger.
+type ModelUsage struct {
+	Model        string `json:"model"`
+	ProfileName  string `json:"profile_name"`
+	Calls        int    `json:"calls"`
+	InputTokens  int    `json:"input_tokens"`
+	OutputTokens int    `json:"output_tokens"`
+	CacheRead    int    `json:"cache_read_tokens"`
+	CacheWrite   int    `json:"cache_write_tokens"`
+}
+
+// UsageByModel aggregates the live ledger by model + profile (for cost math;
+// archived aggregates carry no model breakdown).
+func (d *DB) UsageByModel() ([]ModelUsage, error) {
+	rows, err := d.Query(`
+SELECT COALESCE(NULLIF(model,''),''), COALESCE(profile_name,''), COUNT(*),
+       COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+       COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0)
+FROM llm_usage
+GROUP BY model, profile_name
+ORDER BY SUM(input_tokens) + SUM(output_tokens) DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ModelUsage{}
+	for rows.Next() {
+		var m ModelUsage
+		if err := rows.Scan(&m.Model, &m.ProfileName, &m.Calls, &m.InputTokens,
+			&m.OutputTokens, &m.CacheRead, &m.CacheWrite); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// ModelDayUsage is one (model, profile, UTC day) bucket for the daily cost chart.
+type ModelDayUsage struct {
+	Model        string `json:"model"`
+	ProfileName  string `json:"profile_name"`
+	Date         string `json:"date"`
+	InputTokens  int    `json:"input_tokens"`
+	OutputTokens int    `json:"output_tokens"`
+	CacheRead    int    `json:"cache_read_tokens"`
+	CacheWrite   int    `json:"cache_write_tokens"`
+}
+
+// UsageDailyByModel aggregates the live ledger by model + profile + UTC day.
+func (d *DB) UsageDailyByModel(days int) ([]ModelDayUsage, error) {
+	if days <= 0 {
+		days = 365
+	}
+	rows, err := d.Query(`
+SELECT COALESCE(NULLIF(model,''),''), COALESCE(profile_name,''),
+       to_char(ts AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day,
+       COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+       COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0)
+FROM llm_usage
+WHERE ts >= now() - ($1 * interval '1 day')
+GROUP BY model, profile_name, day
+ORDER BY day`, days)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ModelDayUsage{}
+	for rows.Next() {
+		var m ModelDayUsage
+		if err := rows.Scan(&m.Model, &m.ProfileName, &m.Date, &m.InputTokens,
+			&m.OutputTokens, &m.CacheRead, &m.CacheWrite); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// UsageTaskCount returns the number of distinct tasks with metered usage:// live ledger rows plus archived task aggregates (one archive row per task,
+// which also carries the archived ledger's per-profile stats). Used by the
+// dashboard's "全部" tab so it doesn't sum per-profile task counts (a task may
+// have used several profiles).
+func (d *DB) UsageTaskCount() (int, error) {
+	var n int
+	if err := d.QueryRow(`
+SELECT COUNT(DISTINCT task_id) FROM llm_usage
+WHERE NULLIF(task_id,'') IS NOT NULL`).Scan(&n); err != nil {
+		return 0, err
+	}
+	archived, err := d.archivedTaskAggregates()
+	if err != nil {
+		return n, nil // best-effort: token totals already include what we can read
+	}
+	for _, aggregate := range archived {
+		if len(aggregate.TokenProfiles) > 0 {
+			n++
+		}
+	}
+	return n, nil
+}
+
 // ProfileUsage aggregates the whole ledger's token spend for one LLM profile
 // (global, all tasks). Powers the dashboard's per-profile token card (new source).
 type ProfileUsage struct {
@@ -117,6 +323,9 @@ type ProfileUsage struct {
 	OutputTokens     int    `json:"output_tokens"`
 	CacheReadTokens  int    `json:"cache_read_tokens"`
 	CacheWriteTokens int    `json:"cache_write_tokens"`
+	// Cost is filled by the server from llm_pricing (live ledger only; archived
+	// aggregates carry no model breakdown). Currency is reported at the response top level.
+	Cost float64 `json:"cost,omitempty"`
 }
 
 // UsageByProfile returns global token spend grouped by profile name, most-used
@@ -191,6 +400,8 @@ type ProfileDayUsage struct {
 	InputTokens     int    `json:"input_tokens"`
 	OutputTokens    int    `json:"output_tokens"`
 	CacheReadTokens int    `json:"cache_read_tokens"`
+	// Cost is filled by the server from llm_pricing (live ledger only).
+	Cost float64 `json:"cost,omitempty"`
 }
 
 // UsageDaily returns per-(profile, day) token buckets for the past `days` days

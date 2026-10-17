@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
   Dialog,
   DialogContent,
@@ -92,6 +93,15 @@ export default function ReportsPage() {
   const [templates, setTemplates] = React.useState<ReportTemplate[]>([]);
   const [tplOpen, setTplOpen] = React.useState(false);
   const [tplForm, setTplForm] = React.useState<ReportTemplate>(emptyTemplate());
+  // 统一确认弹窗(删除报告/模版,替代 window.confirm)。
+  const [pendingConfirm, setPendingConfirm] = React.useState<{
+    title: string;
+    description: string;
+    confirmText: string;
+    destructive?: boolean;
+    action: () => Promise<void>;
+  } | null>(null);
+  const [confirmBusy, setConfirmBusy] = React.useState(false);
 
   const loadReports = React.useCallback(() => {
     api.reports().then(setReports).catch(() => {});
@@ -106,15 +116,18 @@ export default function ReportsPage() {
         : r.task_desc || "—",
     [tmap],
   );
-  function deleteReport(r: ReportRecord) {
-    if (!window.confirm(t("reports.deleteConfirm", { name: r.filename }))) return;
-    api
-      .deleteReport(r.id)
-      .then(() => {
+  function askDeleteReport(r: ReportRecord) {
+    setPendingConfirm({
+      title: "删除报告",
+      description: t("reports.deleteConfirm", { name: r.filename }),
+      confirmText: t("reports.delete"),
+      destructive: true,
+      action: async () => {
+        await api.deleteReport(r.id);
         toast.success(t("reports.deleted"));
         loadReports();
-      })
-      .catch((e) => toast.error((e as Error).message));
+      },
+    });
   }
   const loadTemplates = React.useCallback(() => {
     api.reportTemplates().then(setTemplates).catch(() => {});
@@ -153,15 +166,18 @@ export default function ReportsPage() {
       loadTemplates();
     }).catch((e) => toast.error((e as Error).message));
   }
-  function delTemplate(id: number) {
-    if (!window.confirm(t("reports.deleteTemplateConfirm"))) return;
-    api
-      .deleteReportTemplate(id)
-      .then(() => {
+  function askDeleteTemplate(id: number) {
+    setPendingConfirm({
+      title: "删除报告模版",
+      description: t("reports.deleteTemplateConfirm"),
+      confirmText: t("reports.delete"),
+      destructive: true,
+      action: async () => {
+        await api.deleteReportTemplate(id);
         toast.success(t("reports.templateDeleted"));
         loadTemplates();
-      })
-      .catch((e) => toast.error((e as Error).message));
+      },
+    });
   }
   function setTplPerson(i: number, patch: Partial<ReportPersonnel>) {
     setTplForm((prev) => ({ ...prev, personnel: prev.personnel.map((p, j) => (j === i ? { ...p, ...patch } : p)) }));
@@ -448,7 +464,7 @@ export default function ReportsPage() {
                     <Button size="icon" variant="ghost" onClick={() => openEditTemplate(tpl)}>
                       <PencilIcon className="text-muted-foreground size-4" />
                     </Button>
-                    <Button size="icon" variant="ghost" onClick={() => delTemplate(tpl.id)}>
+                    <Button size="icon" variant="ghost" onClick={() => askDeleteTemplate(tpl.id)}>
                       <TrashIcon className="text-muted-foreground size-4" />
                     </Button>
                   </TableCell>
@@ -509,7 +525,7 @@ export default function ReportsPage() {
                         size="sm"
                         variant="ghost"
                         className="text-muted-foreground hover:text-destructive"
-                        onClick={() => deleteReport(r)}
+                        onClick={() => askDeleteReport(r)}
                         title={t("reports.delete")}
                       >
                         <TrashIcon />
@@ -752,6 +768,27 @@ export default function ReportsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* 删除确认(统一弹窗) */}
+      <ConfirmDialog
+        open={!!pendingConfirm}
+        onOpenChange={(open) => {
+          if (!open) setPendingConfirm(null);
+        }}
+        title={pendingConfirm?.title ?? ""}
+        description={pendingConfirm?.description}
+        confirmText={pendingConfirm?.confirmText ?? "确认"}
+        destructive={pendingConfirm?.destructive}
+        busy={confirmBusy}
+        onConfirm={() => {
+          if (!pendingConfirm) return;
+          setConfirmBusy(true);
+          pendingConfirm
+            .action()
+            .then(() => setPendingConfirm(null))
+            .catch((e) => toast.error((e as Error).message))
+            .finally(() => setConfirmBusy(false));
+        }}
+      />
     </div>
   );
 }

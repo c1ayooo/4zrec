@@ -3,8 +3,14 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	actool "github.com/c1ayooo/4zrec/tools"
 )
 
 // TestHTTPProbeBatchMatrix template+matrix 差分:两行变量代入,逐包摘要;
@@ -60,4 +66,81 @@ func TestHTTPProbeBatchMatrix(t *testing.T) {
 		t.Fatalf("超限应报错: %q", msg)
 	}
 	_ = context.Background()
+}
+
+// TestHTTPProbeChainingCookieJarAndSave 串行链:第一包从响应体提取 token,
+// cookie_jar 收下 Set-Cookie;第二包用 {token} 回填头、自动带 Cookie,响应体落盘。
+func TestHTTPProbeChainingCookieJarAndSave(t *testing.T) {
+	var gotToken, gotCookie string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			http.SetCookie(w, &http.Cookie{Name: "sid", Value: "abc123", Path: "/"})
+			_, _ = w.Write([]byte(`{"csrf":"tok-xyz"}`))
+		case "/next":
+			gotToken = r.Header.Get("X-CSRF")
+			gotCookie = r.Header.Get("Cookie")
+			_, _ = w.Write([]byte("secret-body"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	workDir := t.TempDir()
+	in := map[string]any{
+		"cookie_jar": true,
+		"requests": []map[string]any{
+			{
+				"label": "login", "url": srv.URL + "/login",
+				"extract": map[string]any{
+					"token": map[string]any{"from": "body", "regex": `"csrf":"([^"]+)"`},
+				},
+			},
+			{
+				"label": "next", "url": srv.URL + "/next",
+				"headers":      map[string]string{"X-CSRF": "{token}"},
+				"save_to_file": "out/next.bin",
+			},
+		},
+	}
+	raw, _ := json.Marshal(in)
+	s := &Server{}
+	res, err := s.toolHTTPProbe().Call(context.Background(), raw, &actool.ToolContext{WorkingDir: workDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := res.Flatten()
+	if res.IsError {
+		t.Fatalf("http_probe 失败: %s", out)
+	}
+	if gotToken != "tok-xyz" {
+		t.Fatalf("第二包应收到回填的 token,got %q\n输出:\n%s", gotToken, out)
+	}
+	if !strings.Contains(gotCookie, "sid=abc123") {
+		t.Fatalf("第二包应自动带 cookie_jar 里的 Cookie,got %q", gotCookie)
+	}
+	if !strings.Contains(out, "提取 token = tok-xyz") || !strings.Contains(out, "已保存 out/next.bin") {
+		t.Fatalf("输出应包含提取/落盘提示: %s", out)
+	}
+	saved, rerr := os.ReadFile(filepath.Join(workDir, "out", "next.bin"))
+	if rerr != nil {
+		t.Fatalf("落盘文件缺失: %v", rerr)
+	}
+	if string(saved) != "secret-body" {
+		t.Fatalf("落盘内容不符: %q", string(saved))
+	}
+}
+
+// TestResolveProbeSavePath 落盘路径限制在工作目录内。
+func TestResolveProbeSavePath(t *testing.T) {
+	for _, bad := range []string{"/etc/passwd", "../x", "a/../../b"} {
+		if _, err := resolveProbeSavePath("/work", bad); err == nil {
+			t.Fatalf("%q 应被拒绝", bad)
+		}
+	}
+	got, err := resolveProbeSavePath("/work", "out/a.txt")
+	if err != nil || got != "/work/out/a.txt" {
+		t.Fatalf("合法路径解析错误: %q %v", got, err)
+	}
 }

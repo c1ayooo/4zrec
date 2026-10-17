@@ -201,7 +201,7 @@ func (t *ToolSet) insertAssets() actool.CoreTool {
 				}, "type"),
 			},
 		}, "assets"),
-		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			if t.as == nil {
 				return actool.Errorf("insert_assets 未启用: AssetStore 未初始化"), nil
 			}
@@ -358,6 +358,9 @@ func (t *ToolSet) insertAssets() actool.CoreTool {
 					continue
 				}
 				results = append(results, result{Index: i, ID: id, Type: typ})
+				// 出处:仅当尚无来源时打 "agent"(空间测绘等更具体的来源优先保留)。
+				// task 侧还有 task_asset_links 的详细来源;chat/auto 侧靠这个字段。
+				t.as.DB().StampAssetSource(ctx, id, "agent")
 				// 授权状态打标:命中项目范围 → approved;范围外 → pending(待审批,
 				// 不可测);无项目上下文 → 不打标(旧行为,视为已授权)。
 				if authz, serr := t.as.StampDiscoveredAsset(id, projectID); serr == nil && authz == "pending" {

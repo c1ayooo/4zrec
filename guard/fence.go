@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"net/url"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -55,13 +53,10 @@ func (t fenceTargets) list() []string {
 
 // reURL 抓取带 scheme 的 URL(含 //host 形态),先于裸 token 提取,避免把
 // URL 的 path/query 误当域名。
-var reURL = regexp.MustCompile(`(?i)(?:[a-z][a-z0-9+.-]*)?://[^\s"'<>()\[\]{}]+`)
 
 // reIPv4 独立提取 IPv4(四组 1-3 位数字,边界由前后字符校验兜底)。
-var reIPv4 = regexp.MustCompile(`(?:[0-9]{1,3}\.){3}[0-9]{1,3}`)
 
 // reToken 裸 token 切分:非 [字母数字.-] 均为分隔符。
-var reToken = regexp.MustCompile(`[a-z0-9.-]+`)
 
 // reQuoted 单引号段:shell 里它们是字面载荷——python -c 代码、awk/sed 脚本、
 // curl -d 的 JSON 数据、解析日志用的正则——里面的裸 token 是代码/数据不是命令
@@ -74,15 +69,17 @@ var reToken = regexp.MustCompile(`[a-z0-9.-]+`)
 // 运行时都会执行并展开——只剔除反引号等于给"把目标藏进替换体"留了一条单
 // 向通道(`dig +short evil.com` 隐身而 $(dig ...) 不隐身)。剔除后的噪音由
 // TLD 白名单与扩展名黑名单兜底。
-var reQuoted = regexp.MustCompile(`'[^']*'`)
 
 // reEmailParam 匹配查询参数位的邮箱(紧邻 =/?/&/双引号),提取时整体剔除。
-var reEmailParam = regexp.MustCompile(`(?i)([=?&"])[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}`)
 
 // reHeredocStart 匹配 heredoc 开始(<<EOF / <<-'EOF';<<< here-string 变体通过
 // 前置字符约束排除:<< 前不能再是 <)。Go 的 RE2 不支持反向引用/环视,结束
 // 标记(单独成行的同名 TAG)由 stripHeredocs 手工扫描。
 var reHeredocStart = regexp.MustCompile(`(?:^|[^<])<<-?[ \t]*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
+
+// reCodePayload 匹配解释器的内联代码参数(python3 -c "…"、node -e "…"):
+// 这类双引号段是代码,里面的裸 token(m.group、re.findall)不是命令行目标。
+// 整体从裸 token 扫描中剔除;段内带 scheme 的 URL 已在第一步全文提取,不丢目标。
 
 // stripHeredocs 把每段 heredoc(开始标记之后到单独成行的同名结束标记)整体
 // 替换为空格:heredoc 是喂给 stdin 的脚本/数据,里面的裸 token 不是命令行
@@ -236,10 +233,14 @@ func inetAtonIP(s string) string {
 
 // suspiciousIPVariant 判定裸 token 是否为"带非十进制特征的 IP 变体":
 //   - 无点形态:≥8 位纯数字(最小公网 1.0.0.0=16777216,端口号/PID 到不了
-//     这个量级)或 0x 十六进制(≤0xFFFFFFFF);
+//     这个量级)或 8 位 0x 十六进制(=完整 32 位地址,如 0x7f000001);
 //   - 有点形态:各段为十进制/0x 十六进制,且带前导零段、十六进制段或非法
 //     四段(某段 >255)——纯十进制三段(1.2.3)刻意不判:它与版本号碎片完全
 //     同形,误报代价高,维持"宁漏勿扰"(已知边界,见 fence.go 头注释)。
+//
+// 无点十六进制必须满 8 位:2~7 位(0x7e/0x27/0xffffff)是 payload 与代码里的
+// 字节/掩码常量,不是地址。SQLi 的 concat(0x7e,version()) 曾被当成单段
+// inet_aton 归一化成 0.0.0.126,把整条已授权命令拖进审批(2026-10-17 实测)。
 //
 // 命中的 token 由调用方归一化后按 IP 提取;归一化失败的仍按目标上报
 // (fail-closed:宁可多一次审批,不给变体形态留静默放行)。
@@ -249,8 +250,12 @@ func suspiciousIPVariant(tok string) bool {
 	}
 	if !strings.Contains(tok, ".") {
 		if len(tok) >= 2 && (tok[:2] == "0x" || tok[:2] == "0X") {
-			_, err := strconv.ParseUint(tok[2:], 16, 64)
-			return err == nil && len(tok[2:]) > 0
+			hex := tok[2:]
+			if len(hex) < 8 {
+				return false // 字节/掩码常量(0x7e、0x27、0xffffff),不是单段地址
+			}
+			n, err := strconv.ParseUint(hex, 16, 64)
+			return err == nil && n <= 0xFFFFFFFF
 		}
 		if len(tok) >= 8 && len(tok) <= 10 {
 			n, err := strconv.ParseUint(tok, 10, 64)
@@ -290,8 +295,8 @@ func suspiciousIPVariant(tok string) bool {
 
 // tldAllowlist 引用 db.TLDAllowlist(单一事实源,范围候选生成器共用同一张
 // 表):代码标识符的尾缀——re.findall 的 findall、os.path 的 path、
-// json.dumps 的 dumps——不在表内,一律不当作目标。URL host 分支不受此表
-// 影响(能被 url.Parse 解析出 host 的可信度高)。扩表直接改 db.TLDAllowlist。
+// json.dumps 的 dumps——不在表内,一律不当作目标。URL host 分支同样走这张
+// 表(见 urlHostIsTarget),只对单段内网短名豁免。扩表直接改 db.TLDAllowlist。
 var tldAllowlist = db.TLDAllowlist
 
 // validFenceDomain 校验裸 token 是否像主机名:≥2 个 label、末 label 在
@@ -325,6 +330,85 @@ func validFenceDomain(s string) bool {
 	return true
 }
 
+// allDigits 判断字符串是否全为十进制数字(空串为 false)。
+func allDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// nonTargetSingleLabelHosts 单段主机名里明显不是目标的名字:本机回环名与
+// 文档/代码里的占位符。真实的单段内网主机名(jira、gitlab、dc01)仍按
+// 目标处理——不因为"没有点"就放行,否则 `curl http://intranet/` 成为
+// 围栏盲区。
+var nonTargetSingleLabelHosts = map[string]bool{
+	"localhost": true, "ip6-localhost": true, "host": true, "hostname": true,
+	"target": true, "example": true, "domain": true, "server": true, "url": true,
+}
+
+// urlHostIsTarget 判定 URL 的 host 是否是值得围栏的目标。URL 分支此前不做
+// 任何校验(占位符/文档文本都会变成目标),现在与裸 token 分支同口径:
+// 带点的主机过 TLD 白名单 + 文件扩展名黑名单;单段主机名保留(内网短名是
+// 真目标),只排除本机名/占位符/单字符伪主机。
+func urlHostIsTarget(host string) bool {
+	h := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	if h == "" {
+		return false
+	}
+	if !strings.Contains(h, ".") {
+		return len(h) >= 2 && !nonTargetSingleLabelHosts[h]
+	}
+	return validFenceDomain(h)
+}
+
+// urlHost 从 URL 提取 host(去用户信息/端口/shell 变量尾巴)。不直接用
+// url.Parse:端口里含变量(host:8000$p)会让它整体失败,目标就此隐身——
+// 手工按 authority 截取更稳。
+func urlHost(u string) string {
+	rest := u
+	if i := strings.Index(rest, "://"); i >= 0 {
+		rest = rest[i+3:]
+	} else if strings.HasPrefix(rest, "//") {
+		rest = rest[2:]
+	}
+	if i := strings.IndexAny(rest, "/?#"); i >= 0 {
+		rest = rest[:i]
+	}
+	if i := strings.LastIndex(rest, "@"); i >= 0 {
+		rest = rest[i+1:]
+	}
+	// 渗透脚本常把 shell 变量拼进 URL(woniuxy.com$2 —— 循环/函数参数拼
+	// 路径是常态),字面 token 会带着 $ 尾巴:剥掉再归类;剥完为空(整个
+	// host 都是变量)或以裸 $ 结尾(变量表达式被 URL 正则截断,如
+	// x.${port}a)都整段丢弃——变量运行时才展开,不可见即宁漏勿扰。
+	if i := strings.Index(rest, "$"); i >= 0 {
+		if i == len(rest)-1 {
+			return ""
+		}
+		rest = rest[:i]
+	}
+	// IPv6 字面量:[::1] → ::1(端口剥离对多冒号地址不适用)。
+	if strings.HasPrefix(rest, "[") {
+		if i := strings.Index(rest, "]"); i > 0 {
+			return rest[1:i]
+		}
+		return ""
+	}
+	// 端口:单冒号且冒号后纯数字才按端口处理。
+	if strings.Count(rest, ":") == 1 {
+		if i := strings.IndexByte(rest, ':'); i > 0 && allDigits(rest[i+1:]) {
+			rest = rest[:i]
+		}
+	}
+	return strings.TrimSpace(rest)
+}
+
 // publicInfraIPs 是公网公共基础设施地址(以公共 DNS 解析器为主):dig/nslookup
 // 拿它们当解析器是正常操作,不是「测试目标」——从围栏提取中直接排除,否则
 // 每条 dig @8.8.8.8 都要弹一次审批(用户拍板:这类地址不应进围栏)。
@@ -340,137 +424,18 @@ var publicInfraIPs = map[string]bool{
 	"114.114.114.114": true, "114.114.115.115": true, // 114DNS
 	"180.76.76.76": true,                    // Baidu
 	"1.2.4.8":      true, "210.2.4.8": true, // CNNIC
+	// IPv6 公共解析器(围栏不提取 IPv6;空间测绘导入过滤复用本表)
+	"2001:4860:4860::8888": true, "2001:4860:4860::8844": true, // Google
+	"2606:4700:4700::1111": true, "2606:4700:4700::1001": true, // Cloudflare
+	"2620:fe::fe": true, "2620:fe::9": true, // Quad9
+	"2400:3200::1": true, "2400:3200:baba::1": true, // AliDNS
+	"2402:4e00::": true, "2400:da00::6666": true, // DNSPod / Baidu
 }
 
-// ExtractFenceTargets 从任意文本提取字面目标(IPv4 + 域名,URL 的 host 归类)。
-// 提取顺序:URL(全文,引号内外一视同仁——带 scheme 的是明确请求形态)→
-// 剔除单引号/反引号载荷段(代码与数据,不是命令行目标)→ IPv4 → 裸域名
-// token(仅命令参数区)。导出供测试与后续网络层兜底复用。
-func ExtractFenceTargets(text string) fenceTargets {
-	var t fenceTargets
-	seen := map[string]bool{}
-	addDomain := func(d string) {
-		d = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(d)), ".")
-		if d != "" && !seen["d:"+d] {
-			seen["d:"+d] = true
-			t.Domains = append(t.Domains, d)
-		}
-	}
-	addIP := func(ip string) {
-		if ip == "" || publicInfraIPs[ip] {
-			return // 公共基础设施地址不是渗透目标,直接排除
-		}
-		if !seen["i:"+ip] {
-			seen["i:"+ip] = true
-			t.IPs = append(t.IPs, ip)
-		}
-	}
-	rest := text
-	// 1) URL:取 host(去端口),按 IP/域名归类后从剩余文本剔除整段 URL。
-	for _, m := range reURL.FindAllString(text, -1) {
-		u := m
-		if !strings.Contains(u, "://") {
-			u = "http:" + u
-		}
-		if parsed, err := url.Parse(u); err == nil && parsed.Host != "" {
-			host := parsed.Hostname()
-			// 渗透脚本常把 shell 变量拼进 URL(woniuxy.com$2 —— 循环/函数参数
-			// 拼路径是常态),字面 token 会带着 $ 尾巴:剥掉再归类;剥完为空
-			// (整个 host 都是变量)或以裸 $ 结尾(变量表达式被 URL 正则截断,
-			// 如 x.${port}a)都整段丢弃——变量运行时才展开,不可见即宁漏勿扰。
-			if i := strings.Index(host, "$"); i >= 0 {
-				if i == len(host)-1 {
-					continue
-				}
-				host = host[:i]
-				if host == "" {
-					continue
-				}
-			}
-			if pip := net.ParseIP(host); pip != nil {
-				if pip.To4() != nil && validFenceIPv4(pip.String()) {
-					addIP(pip.String())
-				}
-			} else {
-				addDomain(host)
-			}
-		}
-		rest = strings.ReplaceAll(rest, m, " ")
-	}
-	// heredoc 段先于单引号剔除:<<'EOF' 的引号会被 reQuoted 当成一段单引号,
-	// 与载荷内配对引号错误拼段、破坏 heredoc 结构——顺序不可换。
-	rest = stripHeredocs(rest)
-	// 引号载荷段(代码/数据)整段剔除:只对剩余的命令参数区做裸 token 扫描。
-	for _, m := range reQuoted.FindAllString(rest, -1) {
-		rest = strings.ReplaceAll(rest, m, " ")
-	}
-	// 邮箱查询参数剔除:?to=a@b.com 这类接口参数里的邮箱不是连接目标,@ 后段
-	// 却会被裸 token 扫描误当主机(2026-10-15 b.com 误报)。只剔参数位(紧邻
-	// =/?/&/双引号)的邮箱;命令行凭据/登录名(user@host)不紧邻这些字符,
-	// 保留提取——宁误报勿漏拦。
-	rest = reEmailParam.ReplaceAllString(rest, "$1")
-	lower := strings.ToLower(rest)
-	// 2) IPv4(边界校验:前后不能是数字或点,避免版本号 1.2.3.4.5 的截断误报)。
-	for _, loc := range reIPv4.FindAllStringIndex(lower, -1) {
-		s, e := loc[0], loc[1]
-		if s > 0 {
-			c := lower[s-1]
-			if (c >= '0' && c <= '9') || c == '.' {
-				continue
-			}
-		}
-		if e < len(lower) {
-			c := lower[e]
-			if (c >= '0' && c <= '9') || c == '.' {
-				continue
-			}
-		}
-		cand := lower[s:e]
-		if validFenceIPv4(cand) {
-			addIP(cand)
-		}
-	}
-	// 3) 裸域名 token(跳过 URL 段,已剔除)。
-	for _, tok := range reToken.FindAllString(lower, -1) {
-		if !strings.Contains(tok, ".") {
-			// 无点的 IP 变体(16909060 / 0x7f000001)没有别的分支能接住。
-			if suspiciousIPVariant(tok) {
-				addIPVariant(tok, addIP)
-			}
-			continue
-		}
-		// 纯数字/点已由 IPv4 分支处理
-		if validFenceIPv4(tok) || net.ParseIP(tok) != nil {
-			continue
-		}
-		// IP 变体(前导零/十六进制段/非法四段):归一化后按 IP 判定,不静默丢。
-		if suspiciousIPVariant(tok) {
-			addIPVariant(tok, addIP)
-			continue
-		}
-		if validFenceDomain(tok) {
-			addDomain(tok)
-		}
-	}
-	sort.Strings(t.Domains)
-	sort.Strings(t.IPs)
-	// 不在此截断:授权/黑名单/登记必须用完整目标列表——曾经有"提取阶段截到
-	// 32 条"的实现,排序靠后的未授权目标被静默丢弃,审批文案里也看不到。
-	// 展示层截断见 displayList。
-	return t
-}
-
-// addIPVariant 把一个可疑 IP 变体 token 归一化后计入目标;归一化失败(解析
-// 不出的怪形态)也按原始 token 计入——fail-closed,交由审批裁决。
-func addIPVariant(tok string, addIP func(string)) {
-	if ip := net.ParseIP(inetAtonIP(tok)); ip != nil {
-		if ip.IsLoopback() || ip.IsUnspecified() {
-			return // 与点分十进制同待遇:回环/未指定地址不是渗透目标
-		}
-		addIP(ip.String())
-		return
-	}
-	addIP(tok)
+// IsPublicInfraIP 报告 ip 是否是公共基础设施地址(公共 DNS 解析器等)。
+// 空间测绘导入等旁路复用它过滤噪音;围栏提取仍直接查 publicInfraIPs。
+func IsPublicInfraIP(ip string) bool {
+	return publicInfraIPs[strings.TrimSpace(ip)]
 }
 
 // displayList 供审批文案使用的目标清单:超过 32 条截断并标注总数。只影响
@@ -493,11 +458,24 @@ func NewAssetFence(dbh *db.DB) *AssetFence { return &AssetFence{dbh: dbh} }
 
 // fenceDecision 是一次围栏判定的结果。
 type fenceDecision struct {
-	ProjectID int64
-	Targets   fenceTargets
-	Allow     bool   // true=放行(已授权或无目标/无项目)
-	HardBlock bool   // true=命中黑名单,直接阻断
-	Reason    string // HardBlock 或 Ask 的说明
+	ProjectID    int64
+	Targets      fenceTargets // 本次提取到的全部目标
+	Unauthorized fenceTargets // 其中未获授权的子集(审批/展示/登记只认它)
+	Allow        bool         // true=放行(已授权或无目标/无项目)
+	HardBlock    bool         // true=命中黑名单,直接阻断
+	Reason       string       // HardBlock 或 Ask 的说明
+}
+
+// fenceTargetPayload 是审批记录里持久化的结构化目标(domains/ips 分列,
+// 前端按类型渲染复选框,批准时按勾选子集登记授权)。
+type fenceTargetPayload struct {
+	Domains []string `json:"domains,omitempty"`
+	IPs     []string `json:"ips,omitempty"`
+}
+
+func (t fenceTargets) payload() json.RawMessage {
+	raw, _ := json.Marshal(fenceTargetPayload{Domains: t.Domains, IPs: t.IPs})
+	return raw
 }
 
 // evaluate 执行判定:黑名单 → 未授权(ask) → 放行。
@@ -534,11 +512,30 @@ func (f *AssetFence) evaluate(ctx context.Context, toolName string, input []byte
 	if f.dbh.AuthorizedTarget(projectID, targets.Domains, targets.IPs) {
 		return fenceDecision{Allow: true, ProjectID: projectID, Targets: targets}
 	}
+	// 只把未授权的目标放进审批:文案与登记都用子集——已授权目标不再列进
+	// 「不在授权范围内」,批准也不会把范围内目标重复写成资产。
+	unauth := f.unauthorized(projectID, targets)
 	return fenceDecision{
-		ProjectID: projectID, Targets: targets,
-		Reason: "目标资产不在项目授权范围内：" + targets.displayList() +
+		ProjectID: projectID, Targets: targets, Unauthorized: unauth,
+		Reason: "目标资产不在项目授权范围内：" + unauth.displayList() +
 			"。若确属本次委托范围，请批准；否则请拒绝并改测授权内资产。",
 	}
+}
+
+// unauthorized 逐目标判定授权状态,返回未授权子集(ALL 语义的补集)。
+func (f *AssetFence) unauthorized(projectID int64, targets fenceTargets) fenceTargets {
+	var out fenceTargets
+	for _, dom := range targets.Domains {
+		if !f.dbh.AuthorizedTarget(projectID, []string{dom}, nil) {
+			out.Domains = append(out.Domains, dom)
+		}
+	}
+	for _, ip := range targets.IPs {
+		if !f.dbh.AuthorizedTarget(projectID, nil, []string{ip}) {
+			out.IPs = append(out.IPs, ip)
+		}
+	}
+	return out
 }
 
 // resolveProject 从上下文解析项目:任务优先,其次会话。
@@ -579,6 +576,46 @@ func (f *AssetFence) authorize(projectID int64, targets fenceTargets) {
 	}
 }
 
+// PendingProject 解析一条审批记录的归属项目:任务优先,其次会话;0=无项目。
+func (f *AssetFence) PendingProject(p db.InterceptPending) int64 {
+	if f == nil || f.dbh == nil {
+		return 0
+	}
+	projectID := int64(0)
+	if p.TaskID != nil {
+		if tid := parseTaskID(*p.TaskID); tid > 0 {
+			projectID, _ = f.dbh.TaskProjectID(tid)
+		}
+	}
+	if projectID <= 0 && p.ConversationID != nil {
+		projectID, _ = f.dbh.ConvProjectID(*p.ConversationID)
+	}
+	return projectID
+}
+
+// PendingTargets 返回一条围栏审批的目标清单:优先读记录里的结构化 targets
+// (新记录);旧记录没有该列,退回从工具输入重新提取(按全部目标处理)。
+func (f *AssetFence) PendingTargets(p db.InterceptPending) (domains, ips []string) {
+	if len(p.Targets) > 0 {
+		var payload fenceTargetPayload
+		if json.Unmarshal(p.Targets, &payload) == nil &&
+			(len(payload.Domains) > 0 || len(payload.IPs) > 0) {
+			return payload.Domains, payload.IPs
+		}
+	}
+	if !strings.Contains(p.Reason, "【资产围栏】") {
+		return nil, nil
+	}
+	targets := ExtractFenceTargets(fenceCommandText(p.ToolName, p.ToolInput))
+	return targets.Domains, targets.IPs
+}
+
+// Authorize 把人工批准的目标登记为 approved 资产(批准即授权)。供审批
+// 决定接口按勾选子集调用。
+func (f *AssetFence) Authorize(projectID int64, domains, ips []string) {
+	f.authorize(projectID, fenceTargets{Domains: domains, IPs: ips})
+}
+
 // AskAuthorized 报告一条挂起的审批记录是否已因「资产获批」而可以放行——
 // 资产批准联动的谓词(配合 intercept.ReleaseAsks):仅认【资产围栏】消息的
 // 记录;从审批记录的归属(任务→项目,会话→项目)解析项目,对工具输入重提
@@ -591,15 +628,7 @@ func (f *AssetFence) AskAuthorized(p db.InterceptPending) bool {
 	if !strings.Contains(p.Reason, "【资产围栏】") {
 		return false
 	}
-	projectID := int64(0)
-	if p.TaskID != nil {
-		if tid := parseTaskID(*p.TaskID); tid > 0 {
-			projectID, _ = f.dbh.TaskProjectID(tid)
-		}
-	}
-	if projectID <= 0 && p.ConversationID != nil {
-		projectID, _ = f.dbh.ConvProjectID(*p.ConversationID)
-	}
+	projectID := f.PendingProject(p)
 	if projectID <= 0 {
 		return false
 	}
@@ -623,15 +652,19 @@ func (g *Guard) applyFence(ctx context.Context, ev askernel.Event) (askernel.Res
 		return g.block(ev.ToolName, systemBlockMessage("目标资产命中拦截规则："+d.Reason), ""), true
 	}
 	// 未授权 → 合成 ask 审批(无限等待,与「审批长阻塞」不变量一致)。
+	// 结构化目标随记录落库:审批页按目标复选(全选/部分),决定接口只把
+	// 勾选的目标登记为 approved。
 	dec := intercept.Decision{
 		Action:  "ask",
 		Message: "【资产围栏】" + d.Reason,
+		Targets: d.Unauthorized.payload(),
 	}
 	convID := intercept.ConvIDFromContext(ctx)
 	if !g.interceptor.HandleAsk(ctx, convID, dec, ev.ToolName, ev.Input) {
 		return g.block(ev.ToolName, systemBlockMessage("目标资产未获项目授权（人工拒绝或工作已取消）"), ""), true
 	}
-	// 人工批准:目标登记为 approved,后续不再询问;本次放行,继续走规则判定。
-	g.fence.authorize(d.ProjectID, d.Targets)
+	// 批准后的登记动作在审批决定接口里按勾选子集完成(见 server.interceptDecide);
+	// 这里不再无条件把全部目标写成 approved——旧实现会把范围内目标与
+	// 未勾选目标一并登记。
 	return askernel.Result{}, false
 }

@@ -11,15 +11,52 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"os"
 	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/c1ayooo/4zrec/db"
+	"github.com/c1ayooo/4zrec/guard"
 	"github.com/c1ayooo/4zrec/spacemap"
 	actool "github.com/c1ayooo/4zrec/tools"
 )
+
+// noiseNetworks 公共测绘导入必须丢弃的保留/文档/基准/组播网段。
+var noiseNetworks = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("192.0.2.0/24"),    // TEST-NET-1
+	netip.MustParsePrefix("198.51.100.0/24"), // TEST-NET-2
+	netip.MustParsePrefix("203.0.113.0/24"),  // TEST-NET-3
+	netip.MustParsePrefix("198.18.0.0/15"),   // benchmark
+	netip.MustParsePrefix("240.0.0.0/4"),     // reserved
+	netip.MustParsePrefix("255.255.255.255/32"),
+}
+
+// isNoiseSpacemapIP 公共测绘结果的噪音 IP:公共 DNS/基础设施、私网/回环、
+// 组播/链路本地、保留/文档/基准网段。它们不是授权面目标,不该进资产库。
+// (仅用于公共测绘导入;内网侦察/任务手工登记的私网资产不受影响。)
+func isNoiseSpacemapIP(raw string) bool {
+	addr, err := netip.ParseAddr(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	addr = addr.Unmap()
+	if addr.IsLoopback() || addr.IsUnspecified() || addr.IsMulticast() ||
+		addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() || addr.IsPrivate() {
+		return true
+	}
+	if guard.IsPublicInfraIP(addr.String()) {
+		return true
+	}
+	for _, p := range noiseNetworks {
+		if p.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
 
 // spacemapClient 惰性构造的引擎客户端(key resolver 每次 resolving,改 key 即生效)。
 func (s *Server) spacemapClient() *spacemap.Client {
@@ -109,24 +146,30 @@ func (s *Server) spacemapEnginesSet(w http.ResponseWriter, r *http.Request) {
 //   - 域名 → subdomain 资产;IP → ip 资产;host+port → service 资产(http 形态带 title);
 //   - projectID>0 时逐资产 StampDiscoveredAsset:命中项目范围 → approved,
 //     范围外 → pending 待人工审批(不静默丢,不抢授权);
+//   - sourceQuery 记录本批结果的测绘查询语法(如 cert:"huya.com"),审批页展示出处;
 //   - 幂等:全部走 AssetStore 的 upsert 通道。
-func (s *Server) spacemapImport(ctx0 context.Context, projectID int64, taskID int64, results []*spacemap.Result) (domains, ips, services int) {
+func (s *Server) spacemapImport(ctx0 context.Context, projectID int64, taskID int64, results []*spacemap.Result, sourceQuery string) (domains, ips, services int) {
 	as := s.m.Assets()
 	for _, r := range results {
 		var ids []int64
 		if d := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(r.Domain), ".")); d != "" && strings.Contains(d, ".") {
-			if id, err := as.UpsertSubdomain(db.UpsertSubdomainReq{Domain: d, TaskID: taskID}); err == nil {
-				ids = append(ids, id)
-				domains++
+			// 引擎偶尔把 IP 塞进 domain 字段:交给下面的 IP 分支,别建成子域名。
+			if _, ipErr := netip.ParseAddr(d); ipErr != nil {
+				if id, err := as.UpsertSubdomain(db.UpsertSubdomainReq{Domain: d, TaskID: taskID}); err == nil {
+					ids = append(ids, id)
+					domains++
+				}
 			}
 		}
-		if r.IP != "" {
+		// 纯噪音 IP(公共 DNS/基础设施、私网、保留/文档/组播网段)直接丢弃,
+		// 不产生 pending 资产——1.1.1.1 / 8.8.8.8 这类永远不是授权目标。
+		if r.IP != "" && !isNoiseSpacemapIP(r.IP) {
 			if id, err := as.UpsertIP(db.UpsertIPReq{IP: r.IP, TaskID: taskID}); err == nil {
 				ids = append(ids, id)
 				ips++
 			}
 		}
-		if h := r.Host; h != "" && r.Port > 0 {
+		if h := r.Host; h != "" && r.Port > 0 && !isNoiseSpacemapIP(h) {
 			if r.Protocol == "http" || r.Protocol == "https" || (r.Protocol == "" && r.Title != "") {
 				scheme := r.Protocol
 				if scheme == "" {
@@ -145,10 +188,15 @@ func (s *Server) spacemapImport(ctx0 context.Context, projectID int64, taskID in
 				_, _ = as.StampDiscoveredAsset(id, projectID)
 			}
 		}
-		// 来源标注:空间测绘结果页按引擎筛选的数据依据。
+		// 来源标注:空间测绘结果页按引擎筛选的数据依据 + 查询语法(审批页判断范围)。
 		if r.Source != "" {
 			for _, id := range ids {
 				s.m.pg.StampAssetSource(ctx0, id, r.Source)
+				s.m.pg.StampAssetSourceQuery(ctx0, id, sourceQuery)
+			}
+		} else if sourceQuery != "" {
+			for _, id := range ids {
+				s.m.pg.StampAssetSourceQuery(ctx0, id, sourceQuery)
 			}
 		}
 	}
@@ -245,7 +293,7 @@ func (s *Server) toolSpaceSearch() actool.CoreTool {
 			if in.AutoImport {
 				// 显式参数优先;缺省取会话/任务挂载的项目(信息收集自动归属)。
 				projectID := s.roeProjectID(ctx, in.ProjectID)
-				d, i, sv := s.spacemapImport(ctx, projectID, 0, results)
+				d, i, sv := s.spacemapImport(ctx, projectID, 0, results, in.Query)
 				fmt.Fprintf(&b, "已导入资产库: 域名 %d / IP %d / 服务 %d(范围内自动授权,范围外进待审批)\n", d, i, sv)
 				if projectID > 0 {
 					fmt.Fprintf(&b, "目标项目 %d\n", projectID)
@@ -326,7 +374,7 @@ func (s *Server) toolSpaceSearchBatch() actool.CoreTool {
 						fmt.Fprintf(&b, "- %s %s: %v\n", spacemap.ProviderDisplayName(engine), target, err)
 						continue
 					}
-					d, i, sv := s.spacemapImport(ctx, in.ProjectID, 0, results)
+					d, i, sv := s.spacemapImport(ctx, in.ProjectID, 0, results, q)
 					totDomains += d
 					fmt.Fprintf(&b, "- %s %s: 命中 %d,导入 域名%d/IP%d/服务%d\n",
 						spacemap.ProviderDisplayName(engine), target, total, d, i, sv)
@@ -538,7 +586,7 @@ func (s *Server) spacemapSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.AutoImport {
 		projectID := s.roeProjectID(r.Context(), in.ProjectID)
-		d, i, sv := s.spacemapImport(r.Context(), projectID, 0, results)
+		d, i, sv := s.spacemapImport(r.Context(), projectID, 0, results, in.Query)
 		resp["imported"] = map[string]any{"domains": d, "ips": i, "services": sv, "project_id": projectID}
 	}
 	writeJSON(w, 200, resp)

@@ -82,8 +82,14 @@ func chatWorkDirSpec(workDir string) string {
 
 // chatSystem renders the DB-managed prompt body for agentKey. Custom agents have
 // no per-key in-code default, so DefaultAssistantPrompt is the render fallback.
+// 渗透类 chat agent(pentest/recon/auto)额外注入代码固定的 HTTP 工具优先级,
+// 页面改提示词也删不掉。
 func chatSystem(agentKey, dataDir, workDir string) string {
-	return renderSystem(agentKey, DefaultAssistantPrompt, chatVars{DataDir: dataDir, Now: nowStr()}) + chatWorkDirSpec(workDir)
+	body := renderSystem(agentKey, DefaultAssistantPrompt, chatVars{DataDir: dataDir, Now: nowStr()}) + chatWorkDirSpec(workDir)
+	if httpProbePriorityAgents[agentKey] {
+		body += httpToolPolicyBlock()
+	}
+	return body
 }
 
 // chatVars carries the runtime variables a custom agent's prompt may reference.

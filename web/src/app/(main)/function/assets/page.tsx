@@ -61,6 +61,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
+import { assetProvenance } from "@/lib/asset-provenance";
 import type { Asset, Project } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -455,7 +456,7 @@ export default function AssetsPage() {
         <TabsContent value="ip" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
           {toolbar}
           <AssetCard
-            cols={["", "IP", "C段", "绑定域名", "开放端口", "归属项目", "授权", ""]}
+            cols={["", "IP", "C段", "绑定域名", "出处", "开放端口", "归属项目", "授权", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -476,6 +477,7 @@ export default function AssetsPage() {
                 <TableCell>
                   <Chips items={a.bound_domains ?? []} mono />
                 </TableCell>
+                <TableCell className="text-muted-foreground text-xs">{assetProvenance(a)}</TableCell>
                 <TableCell>
                   <Chips
                     items={(a.open_ports ?? []).map((p) => (p.service ? `${p.port}/${p.service}` : String(p.port)))}

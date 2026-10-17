@@ -141,13 +141,37 @@ func (s *Server) pgDeleteTask(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid JSON: "+err.Error())
 		return
 	}
-	if !s.beginTaskDelete(id) {
-		writeErr(w, http.StatusConflict, "任务正在删除")
+	result, err := s.deleteTaskInternal(r.Context(), id, opts)
+	if err != nil {
+		if errors.Is(err, errTaskDeleting) {
+			writeErr(w, http.StatusConflict, "任务正在删除")
+			return
+		}
+		var committed *taskDeleteCommittedError
+		if errors.As(err, &committed) {
+			writeCommittedTaskDelete(w, result, err)
+			return
+		}
+		writeErr(w, 500, err.Error())
 		return
 	}
-	deleted := false
+	writeJSON(w, 200, result)
+}
+
+// errTaskDeleting 表示该任务已有一次删除在途(project 批量删除时复用)。
+var errTaskDeleting = errors.New("任务正在删除")
+
+// deleteTaskInternal cancels/quiesces a task's runtime, deletes it from PG and
+// tears down in-memory state. Shared by the task-delete endpoint and project
+// batch deletion (delete_tasks). A committed DB deletion still returns the
+// typed *taskDeleteCommittedError so callers can report cleanup warnings.
+func (s *Server) deleteTaskInternal(ctx context.Context, id string, opts DeleteTaskOptions) (DeleteTaskResult, error) {
+	if !s.beginTaskDelete(id) {
+		return DeleteTaskResult{}, errTaskDeleting
+	}
+	committed := false
 	defer func() {
-		if !deleted {
+		if !committed {
 			s.abortTaskDelete(id)
 		}
 	}()
@@ -155,33 +179,28 @@ func (s *Server) pgDeleteTask(w http.ResponseWriter, r *http.Request) {
 	// Main-agent runs use a separate context from planner/workers. Cancel it, then
 	// wait until both execution domains have returned before removing transcripts.
 	s.cancelTaskChat(id, agent.AbortTaskDeleted)
-	drainCtx, cancelDrain := context.WithTimeout(r.Context(), taskDeleteDrainTimeout)
+	drainCtx, cancelDrain := context.WithTimeout(ctx, taskDeleteDrainTimeout)
 	defer cancelDrain()
 	if err := s.waitTaskQuiescent(drainCtx, id); err != nil {
-		writeErr(w, http.StatusConflict, "任务仍有运行中的 Agent，删除已取消")
-		return
+		return DeleteTaskResult{}, fmt.Errorf("任务仍有运行中的 Agent，删除已取消: %w", err)
 	}
-
 	if err := s.drainTaskSideQuestions(drainCtx, id); err != nil {
-		writeErr(w, http.StatusConflict, err.Error())
-		return
+		return DeleteTaskResult{}, err
 	}
 	result, err := s.m.DeleteTask(id, opts)
 	if err != nil {
-		var committed *taskDeleteCommittedError
-		if errors.As(err, &committed) {
+		var committedErr *taskDeleteCommittedError
+		if errors.As(err, &committedErr) {
 			// PostgreSQL is already gone. Complete runtime teardown and return the
 			// auditable counts together with the post-commit cleanup warning.
 			s.engine.StopTask(id)
 			s.taskAgentMu.Lock()
 			delete(s.taskAgents, id)
 			s.taskAgentMu.Unlock()
-			deleted = true
-			writeCommittedTaskDelete(w, result, err)
-			return
+			committed = true
+			return result, err
 		}
-		writeErr(w, 500, err.Error())
-		return
+		return result, err
 	}
 	// Manager has removed the task from the registry, so no new API operation can
 	// resolve it. Now stop and join every task-owned Engine goroutine and clear its
@@ -190,8 +209,8 @@ func (s *Server) pgDeleteTask(w http.ResponseWriter, r *http.Request) {
 	s.taskAgentMu.Lock()
 	delete(s.taskAgents, id)
 	s.taskAgentMu.Unlock()
-	deleted = true
-	writeJSON(w, 200, result)
+	committed = true
+	return result, nil
 }
 
 func writeCommittedTaskDelete(w http.ResponseWriter, result DeleteTaskResult, err error) {

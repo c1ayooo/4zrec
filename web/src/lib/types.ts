@@ -252,6 +252,8 @@ export interface Asset {
   method?: string;
   params?: Record<string, unknown>[];
   extra?: Record<string, unknown>;
+  /** 资产出处:空间测绘引擎(Quake/FOFA...)、agent、manual 等 */
+  source?: string;
   last_seen: string;
   task_source?: string;
   task_source_summary?: string;
@@ -259,6 +261,21 @@ export interface Asset {
   project_id?: number;
   /** 授权状态:approved|pending|rejected;空=未打标(视为已授权) */
   authz?: string;
+}
+
+// 待审批资产轻量探活结果(POST /api/assets/probe)。
+export interface AssetProbeResult {
+  id: number;
+  alive: boolean;
+  ports?: number[];
+  ptr?: string[];
+  cert_names?: string[];
+  http_status?: number;
+  server?: string;
+  title?: string;
+  /** 像是本项目授权面的线索:PTR/证书 SAN 命中授权域 */
+  ownership?: string[];
+  error?: string;
 }
 
 export interface IntentAsset {
@@ -866,6 +883,8 @@ export interface ProfileUsage {
   output_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  // 费用(按 llm_pricing 单价算;仅在线账本,归档聚合无 model 维度不计价)
+  cost?: number;
 }
 
 // One (profile, UTC day) token bucket for the dashboard's daily chart (new source).
@@ -875,12 +894,60 @@ export interface ProfileDayUsage {
   input_tokens: number;
   output_tokens: number;
   cache_read_tokens: number;
+  cost?: number;
+}
+
+// 模型单价(每 1M tokens);model_pattern 支持精确名与 "prefix*" 通配。
+export interface LLMPricing {
+  model_pattern: string;
+  input_per_mtok: number;
+  output_per_mtok: number;
+  cache_read_per_mtok: number;
+  cache_write_per_mtok: number;
+  currency: string;
+}
+
+// 账本里实际出现的模型(用于单价编辑弹窗预填)。
+export interface ModelUsageLite {
+  model: string;
+  profile_name: string;
+  calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+}
+
+// Response of GET /api/llm/pricing.
+export interface LLMPricingBook {
+  rules: LLMPricing[];
+  models: ModelUsageLite[];
 }
 
 // Response of GET /api/tokens/usage — the dashboard's "new" (llm_usage) token view.
 export interface UsageStats {
   by_profile: ProfileUsage[];
   daily: ProfileDayUsage[];
+  // 全局去重任务数(命中 llm_usage 账本 + 归档聚合);「全部」Tab 用它,
+  // 不能把各 profile 的 tasks 相加(同一任务可能用过多个 profile)。
+  tasks: number;
+  // 费用合计与币种;unpriced_models 是账本里有消耗但没配单价的模型。
+  cost: number;
+  currency: string;
+  unpriced_models: string[];
+}
+
+// 持久 API Key(元数据,不含明文;明文只在创建响应里出现一次)。
+export interface APIKeyRecord {
+  id: number;
+  name: string;
+  prefix: string;
+  scope: "global" | "project";
+  project_id?: number;
+  enabled: boolean;
+  expires_at?: string;
+  last_used_at?: string;
+  created_at: string;
 }
 
 // Per-model token usage for one task (GET /api/llm/records/by-model), from the
@@ -1528,6 +1595,8 @@ export interface InterceptPending {
   tool_input: Record<string, any>;
   status: "pending" | "allowed" | "denied" | "timeout";
   reason: string; // 规则 message 或模型判定理由(模型判定带 [模型] 前缀)
+  // 资产围栏审批的结构化目标;规则/模型审批为空。
+  targets?: { domains?: string[]; ips?: string[] } | null;
   decided_at?: string;
   created_at: string;
 }

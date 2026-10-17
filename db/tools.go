@@ -42,6 +42,17 @@ ON CONFLICT (key) DO NOTHING`, key, desc, schema, agents)
 	return err
 }
 
+// UpdateToolSchema replaces one tool row's schema. Used by code-owned schema
+// migrations that add new optional parameters to an already-seeded tool (the
+// row's description and bindings are left untouched).
+func (d *DB) UpdateToolSchema(key string, schema json.RawMessage) error {
+	if len(schema) == 0 {
+		return nil
+	}
+	_, err := d.Exec(`UPDATE tools SET schema=$2 WHERE key=$1`, key, schema)
+	return err
+}
+
 // AddAgentToToolBinding adds an agent key to the given tools' `agents` arrays if
 // not already present (idempotent). Used to give the built-in Auto agent its
 // default toolset on existing DBs.

@@ -9,15 +9,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 
-	"github.com/c1ayooo/4zrec/db"
 	actool "github.com/c1ayooo/4zrec/tools"
 	"github.com/c1ayooo/4zrec/webrecon"
 )
 
-// webreconRoE 主动 Web 探测的 RoE:目标主机过项目范围。返回拒绝说明(空=通过)。
+// webreconRoE 主动 Web 探测的 RoE:目标主机过项目授权(范围 ∪ approved 资产)。
+// 返回拒绝说明(空=通过)。
 func (s *Server) webreconRoE(ctx context.Context, explicitProject int64, targetURL string) string {
 	u, err := url.Parse(strings.TrimSpace(targetURL))
 	if err != nil || u.Hostname() == "" {
@@ -27,16 +28,19 @@ func (s *Server) webreconRoE(ctx context.Context, explicitProject int64, targetU
 	if projectID <= 0 {
 		return "" // 无项目上下文:人工确认为门(权限层)
 	}
-	rules, rerr := s.m.pg.ProjectScopeRules(projectID)
-	if rerr != nil {
-		return "RoE 校验失败(读取项目范围): " + rerr.Error()
-	}
 	host := u.Hostname()
-	if _, ok := db.MatchProjectScope(rules, host, ""); !ok {
-		// 主机不是域名形态时按 IP 再试(裸 IP 目标)。
-		if _, ok := db.MatchProjectScope(rules, "", host); !ok {
-			return fmt.Sprintf("【RoE 拒绝】目标 %s 不在项目 %d 授权范围内", host, projectID)
-		}
+	// 与资产围栏共用同一套授权判定:项目范围 ∪ 本项目 approved 资产。
+	// 此前这里只查范围条目,目标自身解析出的 IP(approved 资产)会被拒,
+	// 平台自带的 http_probe/port_scan 反而比 raw curl 更不宽容,agent 只能
+	// 退回 Bash 手写脚本(2026-10-17 实测)。
+	var domains, ips []string
+	if net.ParseIP(host) != nil {
+		ips = []string{host}
+	} else {
+		domains = []string{host}
+	}
+	if !s.m.pg.AuthorizedTarget(projectID, domains, ips) {
+		return fmt.Sprintf("【RoE 拒绝】目标 %s 不在项目 %d 授权范围内", host, projectID)
 	}
 	return ""
 }

@@ -35,6 +35,9 @@ type InterceptPending struct {
 	AgentName      string          `json:"agent_name"`
 	ToolName       string          `json:"tool_name"`
 	ToolInput      json.RawMessage `json:"tool_input"`
+	// Targets 是资产围栏类审批的结构化目标 {"domains":[...],"ips":[...]};
+	// 规则/模型审批为 NULL。审批页据此渲染逐目标复选框。
+	Targets        json.RawMessage `json:"targets,omitempty"`
 	Status         string          `json:"status"`
 	DecisionSource string          `json:"decision_source"`
 	Reason         string          `json:"reason"` // 规则 message 或模型判定理由(前缀 [模型])
@@ -171,16 +174,44 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, $10) RETURNING id`,
 	return id, err
 }
 
-const interceptPendingCols = `id, rule_id, conversation_id, task_id, agent_name, tool_name, tool_input, status, reason, decided_at, created_at, decision_source`
-
-func scanInterceptPending(s interface{ Scan(...any) error }, p *InterceptPending) error {
-	return s.Scan(&p.ID, &p.RuleID, &p.ConversationID, &p.TaskID, &p.AgentName,
-		&p.ToolName, &p.ToolInput, &p.Status, &p.Reason, &p.DecidedAt, &p.CreatedAt, &p.DecisionSource)
+// SetInterceptTargets attaches the structured target list to an existing
+// pending record (asset-fence asks only). Best-effort: a failure must not
+// change the ask's outcome.
+func (d *DB) SetInterceptTargets(id int64, targets []byte) error {
+	if id <= 0 || len(targets) == 0 {
+		return nil
+	}
+	_, err := d.Exec(`UPDATE intercept_pending SET targets=$2::jsonb WHERE id=$1`, id, string(targets))
+	return err
 }
 
-// ListPendingIntercepts returns all unresolved approval requests, newest first.
-func (d *DB) ListPendingIntercepts() ([]InterceptPending, error) {
-	rows, err := d.Query(`SELECT ` + interceptPendingCols + ` FROM intercept_pending WHERE status='pending' ORDER BY created_at DESC`)
+const interceptPendingCols = `id, rule_id, conversation_id, task_id, agent_name, tool_name, tool_input, targets, status, reason, decided_at, created_at, decision_source`
+
+func scanInterceptPending(s interface{ Scan(...any) error }, p *InterceptPending) error {
+	// targets 可空(规则/模型审批没有结构化目标):json.RawMessage 直接接
+	// NULL 会报 unsupported Scan,先落 []byte 再转换。
+	var targets []byte
+	err := s.Scan(&p.ID, &p.RuleID, &p.ConversationID, &p.TaskID, &p.AgentName,
+		&p.ToolName, &p.ToolInput, &targets, &p.Status, &p.Reason, &p.DecidedAt, &p.CreatedAt, &p.DecisionSource)
+	p.Targets = targets
+	return err
+}
+
+// InterceptPendingFilter narrows the pending queue. ProjectID>0 keeps only asks
+// whose owning task or conversation belongs to that project (one approval
+// surface for both project and task views).
+type InterceptPendingFilter struct {
+	ProjectID int64
+}
+
+func (d *DB) listPendingIntercepts(filter InterceptPendingFilter) ([]InterceptPending, error) {
+	where := `status='pending'`
+	args := []any{}
+	if filter.ProjectID > 0 {
+		args = append(args, filter.ProjectID)
+		where += ` AND ` + projectScopeCondition(len(args))
+	}
+	rows, err := d.Query(`SELECT `+interceptPendingCols+` FROM intercept_pending ip WHERE `+where+` ORDER BY created_at DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -194,6 +225,24 @@ func (d *DB) ListPendingIntercepts() ([]InterceptPending, error) {
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// projectScopeCondition renders "ask belongs to project $n" (task first, then
+// conversation), reusing the same ownership semantics as the asset fence.
+func projectScopeCondition(argIndex int) string {
+	n := fmt.Sprint(argIndex)
+	return `(EXISTS (SELECT 1 FROM tasks t WHERE t.id::text = ip.task_id AND t.project_id=$` + n + `)
+	       OR EXISTS (SELECT 1 FROM conversations pc WHERE pc.id = ip.conversation_id AND pc.project_id=$` + n + `))`
+}
+
+// ListPendingIntercepts returns all unresolved approval requests, newest first.
+func (d *DB) ListPendingIntercepts() ([]InterceptPending, error) {
+	return d.listPendingIntercepts(InterceptPendingFilter{})
+}
+
+// ListPendingInterceptsByProject returns pending asks owned by one project.
+func (d *DB) ListPendingInterceptsByProject(projectID int64) ([]InterceptPending, error) {
+	return d.listPendingIntercepts(InterceptPendingFilter{ProjectID: projectID})
 }
 
 // GetInterceptPending returns one pending record (nil if absent).
@@ -218,11 +267,14 @@ type InterceptApprovalRow struct {
 }
 
 func scanInterceptApprovalRow(rows interface{ Scan(...any) error }, r *InterceptApprovalRow) error {
-	return rows.Scan(
+	var targets []byte
+	err := rows.Scan(
 		&r.ID, &r.RuleID, &r.ConversationID, &r.TaskID, &r.AgentName,
-		&r.ToolName, &r.ToolInput, &r.Status, &r.Reason, &r.DecidedAt, &r.CreatedAt,
+		&r.ToolName, &r.ToolInput, &targets, &r.Status, &r.Reason, &r.DecidedAt, &r.CreatedAt,
 		&r.DecisionSource, &r.ConvTitle, &r.ConvAgentKey, &r.RuleName,
 	)
+	r.Targets = targets
+	return err
 }
 
 // Keep legacy rows without decision_source consistent with their displayed source.
@@ -231,7 +283,7 @@ const approvalDecisionSource = `COALESCE(NULLIF(ip.decision_source,''), CASE
  WHEN ip.reason LIKE '[模型]%' THEN 'model' ELSE 'unknown' END)`
 
 const approvalRowColumns = `ip.id, ip.rule_id, ip.conversation_id, ip.task_id, ip.agent_name,
-       ip.tool_name, ip.tool_input, ip.status, ip.reason, ip.decided_at, ip.created_at, ` + approvalDecisionSource + `,
+       ip.tool_name, ip.tool_input, ip.targets, ip.status, ip.reason, ip.decided_at, ip.created_at, ` + approvalDecisionSource + `,
        COALESCE(c.title,'') AS conv_title,
        COALESCE(c.agent_key,'') AS conv_agent_key,
        COALESCE(ir.name,'') AS rule_name`
@@ -284,11 +336,12 @@ func (d *DB) ListAllIntercepts(limit int) ([]InterceptApprovalRow, error) {
 	return out, rows.Err()
 }
 
-// InterceptApprovalFilter combines exact status and decision-source filters.
-// Empty fields include all values.
+// InterceptApprovalFilter combines exact status, decision-source and project
+// filters. Empty fields include all values.
 type InterceptApprovalFilter struct {
 	Status         string
 	DecisionSource string
+	ProjectID      int64
 }
 
 // ListAllInterceptsPage returns one 1-based page and the total matching count.
@@ -319,6 +372,15 @@ func (d *DB) ListTaskInterceptsPage(taskID string, page, size int, filter Interc
 	return d.listInterceptsPage(taskID, page, size, filter)
 }
 
+// ListProjectInterceptsPage returns one page of approval history owned by a
+// project (task or conversation attached to it). The project detail page and the
+// task intercept tab render the same rows — the task view is just this queue
+// scoped to one task.
+func (d *DB) ListProjectInterceptsPage(projectID int64, page, size int, filter InterceptApprovalFilter) ([]InterceptApprovalRow, int, error) {
+	filter.ProjectID = projectID
+	return d.listInterceptsPage("", page, size, filter)
+}
+
 func (d *DB) listInterceptsPage(taskID string, page, size int, filter InterceptApprovalFilter) ([]InterceptApprovalRow, int, error) {
 	if page < 1 {
 		page = 1
@@ -342,6 +404,10 @@ func (d *DB) listInterceptsPage(taskID string, page, size int, filter InterceptA
 	add("ip.task_id", taskID)
 	add("ip.status", filter.Status)
 	add(approvalDecisionSource, filter.DecisionSource)
+	if filter.ProjectID > 0 {
+		args = append(args, filter.ProjectID)
+		conditions = append(conditions, projectScopeCondition(len(args)))
+	}
 	where := ""
 	if len(conditions) > 0 {
 		where = " WHERE " + strings.Join(conditions, " AND ")

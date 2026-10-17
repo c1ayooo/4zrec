@@ -45,6 +45,7 @@ func findingFilterFromQuery(q url.Values) db.FindingFilter {
 // findingAssetTree serves the「按资产」view's left-hand tree: every asset that
 // carries at least one matching finding, plus the ancestors needed to place it.
 func (s *Server) findingAssetTree(w http.ResponseWriter, r *http.Request) {
+	forceProjectQuery(r, scopedProjectID(r.Context()))
 	tree, err := s.m.pg.BuildFindingAssetTree(findingFilterFromQuery(r.URL.Query()))
 	if err != nil {
 		writeErr(w, 500, err.Error())
@@ -58,6 +59,7 @@ func (s *Server) findingAssetTree(w http.ResponseWriter, r *http.Request) {
 // preserving dashboard/export clients and giving every expanded group its own
 // independent page cursor.
 func (s *Server) findingGroups(w http.ResponseWriter, r *http.Request) {
+	forceProjectQuery(r, scopedProjectID(r.Context()))
 	q := r.URL.Query()
 	page := findingPaginationParam(q.Get("page"), 1, 0)
 	limit := findingPaginationParam(q.Get("limit"), 10, 100)

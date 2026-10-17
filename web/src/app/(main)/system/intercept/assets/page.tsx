@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -96,6 +97,9 @@ export default function AssetInterceptPage() {
   const [editing, setEditing] = React.useState<AssetInterceptRule | null>(null);
   const [form, setForm] = React.useState<RuleForm>(defaultForm());
   const [saving, setSaving] = React.useState(false);
+  // 删除确认(统一弹窗)。
+  const [deleteTarget, setDeleteTarget] = React.useState<AssetInterceptRule | null>(null);
+  const [deleting, setDeleting] = React.useState(false);
 
   const load = React.useCallback(async () => {
     try {
@@ -153,13 +157,21 @@ export default function AssetInterceptPage() {
   }
 
   async function handleDelete(rule: AssetInterceptRule) {
-    if (!window.confirm(`确定删除资产拦截规则「${rule.pattern}」？`)) return;
+    setDeleteTarget(rule);
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      await api.deleteAssetInterceptRule(rule.id);
+      await api.deleteAssetInterceptRule(deleteTarget.id);
       toast.success("规则已删除");
+      setDeleteTarget(null);
       load();
     } catch (e) {
       toast.error((e as Error).message);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -255,7 +267,7 @@ export default function AssetInterceptPage() {
                           size="icon"
                           variant="ghost"
                           className="h-7 w-7 text-destructive hover:text-destructive"
-                          onClick={() => handleDelete(rule)}
+                          onClick={() => void handleDelete(rule)}
                         >
                           <Trash2Icon className="h-3.5 w-3.5" />
                         </Button>
@@ -347,6 +359,20 @@ export default function AssetInterceptPage() {
           </SheetFooter>
         </SheetContent>
       </Sheet>
+
+      {/* 删除确认(统一弹窗) */}
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title="删除资产拦截规则"
+        description={`确定删除规则「${deleteTarget?.pattern ?? ""}」？删除后该黑名单立即失效。`}
+        confirmText="删除"
+        destructive
+        busy={deleting}
+        onConfirm={() => void confirmDelete()}
+      />
     </div>
   );
 }

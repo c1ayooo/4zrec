@@ -672,6 +672,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/login", s.authLogin)
 	mux.HandleFunc("POST /api/auth/change-password", s.authChangePassword)
 
+	// 持久 API Key(全局/项目两级;仅全局凭据可管理)
+	mux.HandleFunc("GET /api/api-keys", s.apiKeysList)
+	mux.HandleFunc("POST /api/api-keys", s.apiKeysCreate)
+	mux.HandleFunc("DELETE /api/api-keys/{id}", s.apiKeysDelete)
+
 	mux.HandleFunc("GET /api/health", s.health)
 	mux.HandleFunc("GET /api/stats", s.stats)
 	mux.HandleFunc("GET /api/logs", s.getLogs)
@@ -762,6 +767,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/assets/bind", s.assetsBind)
 	mux.HandleFunc("GET /api/assets/pending", s.listPendingAssets)
 	mux.HandleFunc("POST /api/assets/authz", s.setAssetAuthz)
+	mux.HandleFunc("POST /api/assets/probe", s.assetsProbe) // 待审批资产轻量探活/归属线索
 	// 项目管理(授权根:范围/归属)
 	mux.HandleFunc("GET /api/projects", s.listProjects)
 	mux.HandleFunc("POST /api/projects", s.createProject)
@@ -851,6 +857,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/llm/records/tasks", s.pgLLMTasks)
 	mux.HandleFunc("GET /api/llm/records/by-model", s.pgTokenByModel) // 按模型聚合本任务 token 用量
 	mux.HandleFunc("GET /api/llm/records/{id}", s.pgGetLLMRecord)
+	mux.HandleFunc("GET /api/llm/pricing", s.llmPricingGet) // 模型单价(费用校准)
+	mux.HandleFunc("PUT /api/llm/pricing", s.llmPricingPut)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
 	// 漏洞 IM 推送。渠道是「多实例 + 各自过滤规则」的资源，因此独立成一组
@@ -1009,6 +1017,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/intercept/history/{id}", s.interceptDetail)
 	mux.HandleFunc("GET /api/intercept/history/{id}/execution", s.interceptExecution)
 	mux.HandleFunc("GET /api/intercept/task/{taskID}", s.interceptListTaskItems)
+	mux.HandleFunc("GET /api/intercept/project/{projectID}", s.interceptListProjectItems)
 	mux.HandleFunc("GET /api/intercept/tool-config", s.interceptGetToolConfig)
 	mux.HandleFunc("PUT /api/intercept/tool-config", s.interceptSetToolConfig)
 	mux.HandleFunc("GET /api/intercept/judge", s.interceptGetJudgeConfig)
@@ -1125,7 +1134,12 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	metrics, _ := s.m.PG().TaskListMetricsAll()
 	archiveBlockers, _ := s.m.PG().TaskArchiveBlockers()
 	dtos := make([]TaskDTO, 0, len(list))
+	scopeProject := scopedProjectID(r.Context())
 	for _, t := range list {
+		// 项目级 API Key 只看到本项目任务。
+		if scopeProject > 0 && (t.ProjectID == nil || *t.ProjectID != scopeProject) {
+			continue
+		}
 		dto := taskDTO(t, s.resolvedTaskStatus(t))
 		applyTaskArchiveBlocker(&dto, archiveBlockers)
 		metric := metrics[t.ExpID]
@@ -1549,6 +1563,14 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, "bad json: "+err.Error())
 		return
+	}
+	// 项目级 API Key:只能在本项目建任务(请求里指向别的项目直接拒绝)。
+	if scopeProject := scopedProjectID(r.Context()); scopeProject > 0 {
+		if req.ProjectID != nil && *req.ProjectID != scopeProject {
+			writeErr(w, 403, "项目级 API Key 只能在本项目创建任务")
+			return
+		}
+		req.ProjectID = &scopeProject
 	}
 	if strings.TrimSpace(req.Description) == "" {
 		req.Description = "未命名任务"
@@ -2006,6 +2028,21 @@ func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
 	// 带 task 参数 → 仅该任务（任务概览/发现 Tab 用），从 exploration_nodes 读（任务在则节点在）。
 	q := r.URL.Query()
 	taskParam := q.Get("task")
+	// 项目级 API Key:按任务访问时校验归属;全局列表强制项目过滤(并走分页分支,
+	// 避免无 page/limit 的裸数组分支绕过筛选)。
+	if scopeProject := scopedProjectID(r.Context()); scopeProject > 0 {
+		if taskParam != "" {
+			if !s.checkTaskScope(w, r, taskParam) {
+				return
+			}
+		} else {
+			q.Set("project_id", strconv.FormatInt(scopeProject, 10))
+			if q.Get("page") == "" && q.Get("limit") == "" {
+				q.Set("limit", "500")
+			}
+			r.URL.RawQuery = q.Encode()
+		}
+	}
 	if taskParam == "" {
 		// 带 page/limit → 服务端分页 {items,total,...}；不带 → 裸数组（dashboard 汇总用，
 		// 与 intents 端点的兼容策略一致）。筛选/排序统一下推到 SQL。
@@ -2138,6 +2175,10 @@ func (s *Server) resolveAssetIDs(ids []int64) map[int64]*db.Asset {
 // findingStats serves the whole-table aggregates (stat cards + vuln-class filter)
 // for the paginated 发现 page.
 func (s *Server) findingStats(w http.ResponseWriter, r *http.Request) {
+	if !APIScopeFrom(r.Context()).Global {
+		writeErr(w, 403, "项目级 API Key 无权访问全局漏洞统计")
+		return
+	}
 	st, err := s.m.pg.FindingStats()
 	if err != nil {
 		writeErr(w, 500, err.Error())
@@ -2152,6 +2193,9 @@ func (s *Server) getFinding(w http.ResponseWriter, r *http.Request) {
 	id := int64(atoiDefault(r.PathValue("id"), 0))
 	if id <= 0 {
 		writeErr(w, 400, "bad finding id")
+		return
+	}
+	if !s.checkFindingScope(w, r, id) {
 		return
 	}
 	f, err := s.m.pg.GetFinding(id)
@@ -2221,6 +2265,16 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeErr(w, 400, "bad scope: "+scope)
 		return
+	}
+	// 项目级 API Key:勾选导出逐条校验归属;按筛选/全部导出强制项目过滤。
+	if sc := APIScopeFrom(r.Context()); !sc.Global {
+		if scope == "selected" {
+			if !s.checkFindingScope(w, r, ids...) {
+				return
+			}
+		} else {
+			filter.ProjectID = sc.ProjectID
+		}
 	}
 
 	fs, err := s.m.pg.ListFindingsForExport(filter, ids)

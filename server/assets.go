@@ -323,6 +323,17 @@ func (s *Server) listAssets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
+	// 项目级 API Key:强制只看本项目,且禁用跨项目的 dsl/company 筛选。
+	if scopeProject := scopedProjectID(r.Context()); scopeProject > 0 {
+		if q.Get("dsl") != "" || q.Get("company_id") != "" {
+			writeErr(w, 403, "项目级 API Key 不支持 dsl/company_id 筛选")
+			return
+		}
+		if taskID := q.Get("task_id"); taskID != "" && !s.checkTaskScope(w, r, taskID) {
+			return
+		}
+		q.Set("project_id", strconv.FormatInt(scopeProject, 10))
+	}
 	typ := q.Get("type")
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
@@ -454,6 +465,17 @@ func (s *Server) deleteAssets(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "ids required")
 		return
 	}
+	if scopeProject := scopedProjectID(r.Context()); scopeProject > 0 {
+		outside, err := as.DB().AssetsOutsideProject(req.IDs, scopeProject)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		if len(outside) > 0 {
+			writeErr(w, 403, "ids 包含其他项目的资产")
+			return
+		}
+	}
 	deleted, err := as.DeleteByIDs(req.IDs)
 	if err != nil {
 		writeErr(w, 500, err.Error())
@@ -515,6 +537,16 @@ func (s *Server) insertAssets(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid JSON: "+err.Error())
 		return
 	}
+	if scopeProject := scopedProjectID(r.Context()); scopeProject > 0 {
+		if req.ProjectID > 0 && req.ProjectID != scopeProject {
+			writeErr(w, 403, "项目级 API Key 只能写入绑定项目")
+			return
+		}
+		req.ProjectID = scopeProject
+		if req.TaskID > 0 && !s.checkTaskScope(w, r, strconv.FormatInt(req.TaskID, 10)) {
+			return
+		}
+	}
 
 	type result struct {
 		Index int    `json:"index"`
@@ -567,6 +599,8 @@ func (s *Server) insertAssets(w http.ResponseWriter, r *http.Request) {
 		if req.TaskID > 0 {
 			_ = as.SetTaskAssetSource(req.TaskID, id, "api", "通过资产 API 登记", nil)
 		}
+		// 出处:API 批量登记默认记为 manual(已有更具体来源时不覆盖)。
+		as.DB().StampAssetSource(r.Context(), id, "manual")
 		if req.ProjectID > 0 {
 			if _, cerr := as.ClaimAssetToProject(id, req.ProjectID); cerr != nil {
 				errs = append(errs, errEntry{Index: i, Error: "资产已登记但归属项目失败: " + cerr.Error()})
