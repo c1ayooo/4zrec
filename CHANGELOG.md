@@ -2,6 +2,12 @@
 
 本项目的重要变更记录在此文件中，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.5.2] - 2026-10-17
+
+### 修复
+
+- **GHCR 镜像构建失败**：Dockerfile 的 `COPY dist/<arch>/artex` 未跟上二进制改名，buildx 报 `"dist/arm64/artex": not found`；改为复制 CI 实际产物 `4zrec`。
+
 ## [0.5.1] - 2026-10-17
 
 ### 持续集成

@@ -31,7 +31,7 @@ RUN npm install -g @playwright/mcp@latest @playwright/cli@latest playwright@late
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 # 预编译好的对应架构二进制（dist/amd64/4zrec 或 dist/arm64/4zrec）
-COPY dist/${TARGETARCH}/artex /app/4zrec
+COPY dist/${TARGETARCH}/4zrec /app/4zrec
 # 守护启动脚本：进程退出后按退出码决定是否重新拉起，页面一键更新靠它完成换装。
 # 它同时负责把 SIGTERM 转发给 4zrec —— docker stop 只把信号发给 PID 1，
 # 不转发的话 4zrec 收不到、做不了优雅关闭，10 秒后被 SIGKILL 硬杀。
