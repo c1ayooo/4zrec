@@ -2,21 +2,18 @@
 
 本项目的重要变更记录在此文件中，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
-## [0.5.2] - 2026-10-17
+## [0.4.2] - 2026-10-17
 
-### 修复
-
-- **GHCR 镜像构建失败**：Dockerfile 的 `COPY dist/<arch>/artex` 未跟上二进制改名，buildx 报 `"dist/arm64/artex": not found`；改为复制 CI 实际产物 `4zrec`。
-
-## [0.5.1] - 2026-10-17
+本版完成「信息收集平台原生化」全量落地：删除外部 4zrecon 资产同步，五引擎测绘/反查/子域/端口/流水线/周期采集全链原生，预置内置信息收集 agent；围栏改命令感知提取；连接管理上线（凭据台账/SSH 终端/DB 制台）；去企业概念以项目为主轴。
 
 ### 持续集成
 
 - **Docker 镜像发布到 GHCR**：release 工作流新增 `packages: write` 权限，镜像推送到 `ghcr.io/c1ayooo/4zrec`（tag + latest，linux/amd64/arm64），使用仓库自带 `GITHUB_TOKEN`，无需 Docker Hub 账号或其他 secret。
 
-## [0.5.0] - 2026-10-17
+### 修复
 
-本版完成「信息收集平台原生化」全量落地：删除外部 4zrecon 资产同步，五引擎测绘/反查/子域/端口/流水线/周期采集全链原生，预置内置信息收集 agent；围栏改命令感知提取；连接管理上线（凭据台账/SSH 终端/DB 制台）；去企业概念以项目为主轴。
+- **GHCR 镜像构建失败**：Dockerfile 的 `COPY dist/<arch>/artex` 未跟上二进制改名，buildx 报 `"dist/arm64/artex": not found`；改为复制 CI 实际产物 `4zrec`。
+- **围栏 DNS/证书命令误判**：`dig +short $d CNAME`、`dig TXT x.origin.asn.cymru.com`、`openssl x509 -ext subjectAltName` 里的查询类型（CNAME/TXT/NS/IN 等）与 openssl 子命令、扩展名曾被当成目标域名送审。dig/host/nslookup 现跳过记录类型与类；openssl 只从 `-connect`/`-servername` 等连接类旗标取值，子命令与文件路径不再参与提取。
 
 #### 新增的功能
 

@@ -114,6 +114,18 @@ func TestExtractFenceTargets(t *testing.T) {
 			domains: []string{"sub.example.com", "x.com"},
 		},
 		{
+			// 用户实测形态:dig 的记录类型/类(CNAME/TXT/NS/IN)曾被当成域名送审。
+			name:    "dig 查询类型与类不当作目标",
+			cmd:     `d="target.example.com"; dig +short "$d" CNAME; dig TXT x.origin.asn.cymru.com +short; dig IN NS example.com`,
+			domains: []string{"example.com", "target.example.com", "x.origin.asn.cymru.com"},
+		},
+		{
+			// 用户实测形态:openssl x509 -ext subjectAltName 的子命令/扩展名/证书路径曾被当成目标。
+			name:    "openssl 只取连接类旗标的值",
+			cmd:     `openssl x509 -ext subjectAltName -noout -text -in cert.pem; openssl s_client -connect api.example.com:443 -servername api.example.com </dev/null`,
+			domains: []string{"api.example.com"},
+		},
+		{
 			name:    "单引号载荷(代码/数据)里的裸 token 不是目标",
 			cmd:     `dig +short sub.example.com | awk '{print $1}' && python3 -c 'x="other.evil.com"; print(len(x))'`,
 			domains: []string{"sub.example.com"},
