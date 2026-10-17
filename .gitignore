@@ -67,3 +67,5 @@ Thumbs.db
 /bench/
 /Dockerfile.bench
 /Dockerfile.bench.v2
+# ZCode 本地会话产物（计划/上下文，仅本机）
+.zcode/
