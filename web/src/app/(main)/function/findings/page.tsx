@@ -128,6 +128,8 @@ const EMPTY_STATS: FindingStats = {
   tasks: [],
 };
 
+type ChainWarning = { chain: string; missing: { id: string; name: string }[] };
+
 export default function FindingsPage() {
   const [view, setView] = React.useState<FindingView>("flat");
   const [severity, setSeverity] = React.useState<"all" | Severity>("all");
@@ -251,8 +253,10 @@ export default function FindingsPage() {
   // 导出弹窗状态:范围(当前筛选/全部/选中) × 格式(md 单文件/md 分文件 zip/csv/json)。
   const [exportOpen, setExportOpen] = React.useState(false);
   const [exportScope, setExportScope] = React.useState<"filtered" | "all" | "selected">("filtered");
-  const [exportFormat, setExportFormat] = React.useState<"md-single" | "md-zip" | "csv" | "json">("md-single");
+  const [exportFormat, setExportFormat] = React.useState<"md-single" | "md-zip" | "csv" | "json" | "src-md" | "src-docx" | "src-pdf">("md-single");
   const [exporting, setExporting] = React.useState(false);
+  const [chainWarnings, setChainWarnings] = React.useState<ChainWarning[]>([]);
+  const [chainOpen, setChainOpen] = React.useState(false);
 
   const toggleSelected = React.useCallback((id: string, checked: boolean) => {
     setSelectedIds((prev) => {
@@ -280,14 +284,14 @@ export default function FindingsPage() {
     setExportOpen(true);
   }
 
-  async function doExport() {
+  async function doExport(extraIds: string[] = []) {
     setExporting(true);
     try {
       await api.exportFindings({
         format: exportFormat,
         scope: exportScope,
         filters: { severity, status, vulnclass, task, query, sort },
-        ids: [...selectedIds],
+        ids: [...new Set([...selectedIds, ...extraIds])],
       });
       setExportOpen(false);
       toast.success("已开始下载导出文件");
@@ -296,6 +300,35 @@ export default function FindingsPage() {
     } finally {
       setExporting(false);
     }
+  }
+
+  async function requestExport() {
+    // SRC 汇总导出前检查：勾选的是否只是某条利用链的一部分。
+    if (exportScope === "selected" && exportFormat.startsWith("src-")) {
+      try {
+        const warnings = await api.checkFindingChains([...selectedIds]);
+        if (warnings.length > 0) {
+          setChainWarnings(warnings);
+          setExportOpen(false);
+          setChainOpen(true);
+          return;
+        }
+      } catch {
+        // 预检失败不阻塞正常导出。
+      }
+    }
+    await doExport();
+  }
+
+  async function exportWithChain() {
+    const extra = chainWarnings.flatMap((w) => w.missing.map((m) => m.id));
+    setChainOpen(false);
+    await doExport(extra);
+  }
+
+  async function exportSelectedOnly() {
+    setChainOpen(false);
+    await doExport();
   }
 
   const flatRequest = React.useRef(0);
@@ -1238,6 +1271,15 @@ export default function FindingsPage() {
                 <label htmlFor="export-format-md-zip" className="flex items-center gap-2 text-sm">
                   <RadioGroupItem id="export-format-md-zip" value="md-zip" /> Markdown 分文件（一漏洞一 .md,打包 .zip）
                 </label>
+                <label htmlFor="export-format-src-pdf" className="flex items-center gap-2 text-sm">
+                  <RadioGroupItem id="export-format-src-pdf" value="src-pdf" /> SRC 汇总报告（PDF，多漏洞合并）
+                </label>
+                <label htmlFor="export-format-src-docx" className="flex items-center gap-2 text-sm">
+                  <RadioGroupItem id="export-format-src-docx" value="src-docx" /> SRC 汇总报告（Word，多漏洞合并）
+                </label>
+                <label htmlFor="export-format-src-md" className="flex items-center gap-2 text-sm">
+                  <RadioGroupItem id="export-format-src-md" value="src-md" /> SRC 汇总报告（Markdown）
+                </label>
                 <label htmlFor="export-format-csv" className="flex items-center gap-2 text-sm">
                   <RadioGroupItem id="export-format-csv" value="csv" /> CSV 表格（.csv）
                 </label>
@@ -1252,8 +1294,43 @@ export default function FindingsPage() {
             <Button variant="outline" onClick={() => setExportOpen(false)} disabled={exporting}>
               取消
             </Button>
-            <Button onClick={doExport} disabled={exporting || (exportScope === "selected" && selectedIds.size === 0)}>
+            <Button onClick={requestExport} disabled={exporting || (exportScope === "selected" && selectedIds.size === 0)}>
               <DownloadIcon /> {exporting ? "导出中…" : "导出"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={chainOpen} onOpenChange={setChainOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>这条利用链上还有其他漏洞</DialogTitle>
+            <DialogDescription>
+              当前勾选只覆盖了利用链的一部分。建议一并导出，否则报告会缺少链路中的关键环节。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex max-h-[50vh] flex-col gap-3 overflow-auto py-1">
+            {chainWarnings.map((w, i) => (
+              <div key={`${w.chain}-${i}`} className="rounded-md border p-3 text-sm">
+                <div className="font-medium">{w.chain}</div>
+                <div className="mt-1 text-xs text-muted-foreground">未选中的链上漏洞：</div>
+                <ul className="mt-1 list-disc pl-5">
+                  {w.missing.map((m) => (
+                    <li key={m.id}>{m.name}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setChainOpen(false)} disabled={exporting}>
+              取消
+            </Button>
+            <Button variant="outline" onClick={exportSelectedOnly} disabled={exporting}>
+              只导出所选
+            </Button>
+            <Button onClick={exportWithChain} disabled={exporting}>
+              一并导出（+{chainWarnings.reduce((n, w) => n + w.missing.length, 0)}）
             </Button>
           </DialogFooter>
         </DialogContent>

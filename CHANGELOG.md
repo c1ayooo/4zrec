@@ -2,6 +2,12 @@
 
 本项目的重要变更记录在此文件中，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.5.1] - 2026-10-17
+
+### 持续集成
+
+- **Docker 镜像发布到 GHCR**：release 工作流新增 `packages: write` 权限，镜像推送到 `ghcr.io/c1ayooo/4zrec`（tag + latest，linux/amd64/arm64），使用仓库自带 `GITHUB_TOKEN`，无需 Docker Hub 账号或其他 secret。
+
 ## [0.5.0] - 2026-10-17
 
 本版完成「信息收集平台原生化」全量落地：删除外部 4zrecon 资产同步，五引擎测绘/反查/子域/端口/流水线/周期采集全链原生，预置内置信息收集 agent；围栏改命令感知提取；连接管理上线（凭据台账/SSH 终端/DB 制台）；去企业概念以项目为主轴。

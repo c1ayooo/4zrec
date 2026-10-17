@@ -792,6 +792,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/exploration/findings/asset-tree", s.findingAssetTree)
 	mux.HandleFunc("GET /api/exploration/findings/stats", s.findingStats)
 	mux.HandleFunc("GET /api/exploration/findings/export", s.findingsExport)
+	mux.HandleFunc("GET /api/exploration/findings/export/chain-check", s.findingsChainCheck)
 	s.registerFindingTraffic(mux)
 	mux.HandleFunc("GET /api/exploration/findings/{id}", s.getFinding)
 	mux.HandleFunc("GET /api/exploration/findings/{id}/export", s.exportFinding)
@@ -2335,9 +2336,203 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(out)
+	case "src-md", "src-docx", "src-pdf":
+		title := strings.TrimSpace(q.Get("title"))
+		if title == "" {
+			title = "SRC 漏洞挖掘报告"
+		}
+		assets, flow := s.srcReportContext(fs)
+		assetTypes := s.srcAssetTypes(fs)
+		assetLabels := s.srcAssetLabels(fs)
+		chains := report.GenerateSRCChainsWithAssets(r.Context(), s.m.pg, fs, assetTypes, assetLabels)
+		md := report.BuildSRCMarkdownWithChains(fs, title, assets, flow, chains)
+		switch format {
+		case "src-md":
+			setDownload("text/markdown; charset=utf-8", "src-report-"+stamp+".md")
+			_, _ = w.Write([]byte(md))
+		case "src-docx":
+			in := &report.GenInput{
+				ProjectName: title, ReportTitle: title, Locale: "zh-CN", CVSSVersion: "3.1",
+				Findings: []report.FindingInput{{Name: title, PageMarkdown: md, CreatedAt: now}},
+				SkillDir: s.skillDir, DataDir: s.dataDir, NoAI: true, PageOnly: true,
+			}
+			path, err := report.GenerateDocx(r.Context(), s.m.pg, in, stage, "src")
+			if err != nil {
+				writeErr(w, 500, "docx 生成失败:"+err.Error())
+				return
+			}
+			file, err := os.Open(path)
+			if err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
+			defer file.Close()
+			setDownload("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "src-report-"+stamp+".docx")
+			http.ServeContent(w, r, filepath.Base(path), now, file)
+		case "src-pdf":
+			path, err := report.GeneratePDF(r.Context(), &report.PDFInput{
+				Title: title, Report: md, DataDir: s.dataDir,
+			}, stage)
+			if err != nil {
+				writeErr(w, 500, "pdf 生成失败:"+err.Error())
+				return
+			}
+			file, err := os.Open(path)
+			if err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
+			defer file.Close()
+			setDownload("application/pdf", "src-report-"+stamp+".pdf")
+			http.ServeContent(w, r, filepath.Base(path), now, file)
+		}
 	default:
 		writeErr(w, 400, "bad format: "+format)
 	}
+}
+
+type chainWarning struct {
+	Chain   string         `json:"chain"`
+	Missing []chainMissing `json:"missing"`
+}
+
+type chainMissing struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// findingsChainCheck tells the export UI whether a selected set covers only part
+// of an exploit chain, so the user can include the missing findings.
+func (s *Server) findingsChainCheck(w http.ResponseWriter, r *http.Request) {
+	var ids []int64
+	for _, part := range strings.Split(r.URL.Query().Get("ids"), ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		id, err := strconv.ParseInt(part, 10, 64)
+		if err != nil || id <= 0 {
+			writeErr(w, 400, "bad finding id: "+part)
+			return
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		writeJSON(w, 200, map[string]any{"warnings": []chainWarning{}})
+		return
+	}
+	if !s.checkFindingScope(w, r, ids...) {
+		return
+	}
+	selected, err := s.m.pg.ListFindingsForExport(db.FindingFilter{}, ids)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	selectedSet := map[int64]bool{}
+	taskIDs := map[string]bool{}
+	all := make([]*db.DBFinding, 0, len(selected))
+	seen := map[int64]bool{}
+	for _, f := range selected {
+		selectedSet[f.ID] = true
+		seen[f.ID] = true
+		all = append(all, f)
+		if f.TaskID != nil {
+			taskIDs[strconv.FormatInt(*f.TaskID, 10)] = true
+		}
+	}
+	for tid := range taskIDs {
+		more, err := s.m.pg.ListFindingsForExport(db.FindingFilter{TaskID: tid}, nil)
+		if err != nil {
+			continue
+		}
+		for _, f := range more {
+			if !seen[f.ID] {
+				seen[f.ID] = true
+				all = append(all, f)
+			}
+		}
+	}
+	chains := report.DetectSRCChains(all, s.srcAssetTypes(all), s.srcAssetLabels(all))
+	nameByID := map[int64]string{}
+	byID := map[int64]*db.DBFinding{}
+	for _, f := range all {
+		byID[f.ID] = f
+		n := strings.TrimSpace(f.Name)
+		if n == "" {
+			n = strings.TrimSpace(f.VulnClass)
+		}
+		if n == "" {
+			n = "漏洞 #" + strconv.FormatInt(f.ID, 10)
+		}
+		nameByID[f.ID] = n
+	}
+	warnings := make([]chainWarning, 0)
+	seenWarn := map[string]bool{}
+	for _, ch := range chains {
+		var selectedInChain []*db.DBFinding
+		for _, id := range ch.FindingIDs {
+			if selectedSet[id] && byID[id] != nil {
+				selectedInChain = append(selectedInChain, byID[id])
+			}
+		}
+		if len(selectedInChain) == 0 {
+			continue
+		}
+		roleSet := map[int]bool{}
+		var roleLabels []string
+		assetSet := map[int64]bool{}
+		for _, f := range selectedInChain {
+			p, role := report.FindingRole(f)
+			if !roleSet[p] {
+				roleSet[p] = true
+				roleLabels = append(roleLabels, role)
+			}
+			for _, aid := range f.AssetIDs {
+				assetSet[aid] = true
+			}
+		}
+		missing := make([]chainMissing, 0)
+		seenMissing := map[int64]bool{}
+		for _, f := range all {
+			if selectedSet[f.ID] || seenMissing[f.ID] {
+				continue
+			}
+			p, _ := report.FindingRole(f)
+			if !roleSet[p] {
+				continue
+			}
+			shared := false
+			for _, aid := range f.AssetIDs {
+				if assetSet[aid] {
+					shared = true
+					break
+				}
+			}
+			if !shared {
+				continue
+			}
+			seenMissing[f.ID] = true
+			missing = append(missing, chainMissing{ID: strconv.FormatInt(f.ID, 10), Name: nameByID[f.ID]})
+		}
+		if len(missing) > 0 {
+			ids := make([]string, 0, len(missing))
+			for _, m := range missing {
+				ids = append(ids, m.ID)
+			}
+			sort.Strings(ids)
+			key := strings.Join(ids, ",")
+			if seenWarn[key] {
+				continue
+			}
+			seenWarn[key] = true
+			warnings = append(warnings, chainWarning{
+				Chain:   "关联利用链：" + strings.Join(roleLabels, " → "),
+				Missing: missing,
+			})
+		}
+	}
+	writeJSON(w, 200, map[string]any{"warnings": warnings})
 }
 
 func findingProvenanceInTask(contextTask *Task, findingTaskID *int64) (sourceTaskID string, inherited, allowed bool) {
@@ -2411,13 +2606,14 @@ func (s *Server) patchFinding(w http.ResponseWriter, r *http.Request) {
 		Severity  *string `json:"severity"`
 		Name      *string `json:"name"`
 		VulnClass *string `json:"vulnclass"`
+		Report    *string `json:"report"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, 400, "bad json: "+err.Error())
 		return
 	}
-	if body.Status == nil && body.Severity == nil && body.Name == nil && body.VulnClass == nil {
-		writeErr(w, 400, "nothing to update: provide status/severity/name/vulnclass")
+	if body.Status == nil && body.Severity == nil && body.Name == nil && body.VulnClass == nil && body.Report == nil {
+		writeErr(w, 400, "nothing to update: provide status/severity/name/vulnclass/report")
 		return
 	}
 	if body.Status != nil {
@@ -2469,6 +2665,17 @@ func (s *Server) patchFinding(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.VulnClass != nil {
 		n, err := s.m.pg.SetFindingVulnClass(id, strings.TrimSpace(*body.VulnClass))
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		if n == 0 {
+			writeErr(w, 404, "finding not found")
+			return
+		}
+	}
+	if body.Report != nil {
+		n, err := s.m.pg.SetFindingReport(id, *body.Report)
 		if err != nil {
 			writeErr(w, 500, err.Error())
 			return

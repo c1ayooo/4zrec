@@ -4,18 +4,19 @@ package report
 // the keys the Python builder reads.
 
 type reportDoc struct {
-	Meta             docMeta           `json:"meta"`
-	Personnel        []person          `json:"personnel"`
-	MethodologyIntro string            `json:"methodology_intro"`
-	Methodology      []nameDesc        `json:"methodology"`
-	Checklist        []checkRow        `json:"checklist"`
-	Tools            []nameDesc        `json:"tools"`
-	Standards        []string          `json:"standards"`
-	Summary          summarySection    `json:"summary"`
-	FindingsIntro    string            `json:"findings_intro"`
-	VulnList         []vulnListRow     `json:"vuln_list"`
-	SystemsDetail    []systemDetail    `json:"systems_detail"`
-	OverallConcl     string            `json:"overall_conclusion"`
+	PageOnly         bool           `json:"page_only,omitempty"`
+	Meta             docMeta        `json:"meta"`
+	Personnel        []person       `json:"personnel"`
+	MethodologyIntro string         `json:"methodology_intro"`
+	Methodology      []nameDesc     `json:"methodology"`
+	Checklist        []checkRow     `json:"checklist"`
+	Tools            []nameDesc     `json:"tools"`
+	Standards        []string       `json:"standards"`
+	Summary          summarySection `json:"summary"`
+	FindingsIntro    string         `json:"findings_intro"`
+	VulnList         []vulnListRow  `json:"vuln_list"`
+	SystemsDetail    []systemDetail `json:"systems_detail"`
+	OverallConcl     string         `json:"overall_conclusion"`
 }
 
 type docMeta struct {
@@ -49,11 +50,11 @@ type checkRow struct {
 }
 
 type summarySection struct {
-	Background            []string      `json:"background"`
-	ServiceResult         string        `json:"service_result"`
-	Systems               []sysRow      `json:"systems"`
-	RemediationConclusion string        `json:"remediation_conclusion"`
-	RemediationItems      []remedyRow   `json:"remediation_items"`
+	Background            []string    `json:"background"`
+	ServiceResult         string      `json:"service_result"`
+	Systems               []sysRow    `json:"systems"`
+	RemediationConclusion string      `json:"remediation_conclusion"`
+	RemediationItems      []remedyRow `json:"remediation_items"`
 }
 
 type sysRow struct {
@@ -101,11 +102,18 @@ type vulnDetail struct {
 	RiskAnalysis []string          `json:"risk_analysis"`
 	Remediation  []string          `json:"remediation"`
 	FixStatus    string            `json:"fix_status"`
+	// PageContent is the finding detail page's Markdown report rendered into
+	// document blocks. When set (single-finding export), the docx/PDF renderers
+	// use it as the vulnerability body so the export matches the page display,
+	// including images and tables.
+	PageContent []procBlock `json:"page_content,omitempty"`
 }
 
 type procBlock struct {
-	Type    string `json:"type"` // text | code | image
-	Content string `json:"content,omitempty"`
-	Path    string `json:"path,omitempty"`
-	Caption string `json:"caption,omitempty"`
+	Type    string     `json:"type"` // text | code | image | heading | table | quote | bullet | numbered
+	Content string     `json:"content,omitempty"`
+	Path    string     `json:"path,omitempty"`
+	Caption string     `json:"caption,omitempty"`
+	Level   int        `json:"level,omitempty"`
+	Rows    [][]string `json:"rows,omitempty"`
 }

@@ -758,6 +758,17 @@ func (d *DB) SetFindingName(id int64, name string) (int64, error) {
 	return d.setFindingCol(id, "name", "name", name)
 }
 
+// SetFindingReport replaces the editable Markdown report. The report adopts the
+// current evidence version so the UI does not flag it stale after a manual edit;
+// subsequent evidence changes still bump evidence_version and re-flag it.
+func (d *DB) SetFindingReport(id int64, report string) (int64, error) {
+	res, err := d.Exec(`UPDATE findings SET report=$1, report_evidence_version=evidence_version WHERE id=$2`, report, id)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // SetFindingVulnClass updates one finding's 漏洞类别 (+ node payload sync).
 func (d *DB) SetFindingVulnClass(id int64, vulnclass string) (int64, error) {
 	return d.setFindingCol(id, "vulnclass", "vulnclass", vulnclass)

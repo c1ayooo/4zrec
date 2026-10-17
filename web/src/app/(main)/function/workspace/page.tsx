@@ -16,6 +16,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -74,6 +75,9 @@ export default function WorkspacePage() {
   const [edit, setEdit] = React.useState<EditState | null>(null);
   const [mkdirOpen, setMkdirOpen] = React.useState(false);
   const [mkdirName, setMkdirName] = React.useState("");
+  // 删除确认(统一弹窗,替代 window.confirm)。
+  const [deleteTarget, setDeleteTarget] = React.useState<WorkspaceEntry | null>(null);
+  const [deleting, setDeleting] = React.useState(false);
   const uploadRef = React.useRef<HTMLInputElement>(null);
 
   const load = React.useCallback(
@@ -130,14 +134,22 @@ export default function WorkspacePage() {
   };
 
   const del = (e: WorkspaceEntry) => {
-    if (!window.confirm(`确认删除 ${e.dir ? "目录" : "文件"} “${e.name}”？${e.dir ? "（含其下所有内容）" : ""}`)) return;
-    api
-      .workspaceDelete(e.path)
-      .then(() => {
-        toast.success("已删除");
-        load(path);
-      })
-      .catch((err) => toast.error(`删除失败：${(err as Error).message}`));
+    setDeleteTarget(e);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await api.workspaceDelete(deleteTarget.path);
+      toast.success("已删除");
+      setDeleteTarget(null);
+      load(path);
+    } catch (err) {
+      toast.error(`删除失败：${(err as Error).message}`);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const doUpload = (files: FileList | null) => {
@@ -268,8 +280,7 @@ export default function WorkspacePage() {
                         size="icon"
                         className="text-destructive size-7"
                         title="删除"
-                        onClick={() => del(e)}
-                      >
+                        onClick={() => del(e)}                      >
                         <Trash2Icon className="size-3.5" />
                       </Button>
                     </div>
@@ -359,6 +370,20 @@ export default function WorkspacePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 删除确认(统一弹窗) */}
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title={`删除${deleteTarget?.dir ? "目录" : "文件"}`}
+        description={`确认删除「${deleteTarget?.name ?? ""}」？${deleteTarget?.dir ? "该目录下的所有内容会一并删除。" : ""}此操作不可撤销。`}
+        confirmText="删除"
+        destructive
+        busy={deleting}
+        onConfirm={() => void confirmDelete()}
+      />
     </div>
   );
 }

@@ -154,13 +154,18 @@ function Row({
             {f.finding_id && (
               <div className="flex items-center gap-1.5">
                 <Button asChild variant="outline" size="sm">
-                  <a href={api.findingExportUrl(f.finding_id, "md")}>
-                    <DownloadIcon data-icon="inline-start" /> MD
+                  <a href={api.findingExportUrl(f.finding_id, "pdf")}>
+                    <DownloadIcon data-icon="inline-start" /> PDF
                   </a>
                 </Button>
                 <Button asChild variant="outline" size="sm">
                   <a href={api.findingExportUrl(f.finding_id, "docx")}>
                     <DownloadIcon data-icon="inline-start" /> DOCX
+                  </a>
+                </Button>
+                <Button asChild variant="outline" size="sm">
+                  <a href={api.findingExportUrl(f.finding_id, "md")}>
+                    <DownloadIcon data-icon="inline-start" /> MD
                   </a>
                 </Button>
               </div>

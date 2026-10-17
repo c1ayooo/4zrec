@@ -508,6 +508,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     category_id    BIGINT REFERENCES task_categories(id) ON DELETE SET NULL,
     description    TEXT NOT NULL,
     goal           TEXT NOT NULL,
+    nature         TEXT NOT NULL DEFAULT 'pentest',
     exploration_id BIGINT NOT NULL UNIQUE
                      REFERENCES explorations(id) ON DELETE RESTRICT,
     status         TEXT NOT NULL DEFAULT 'created'
@@ -546,6 +547,8 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS queued BOOLEAN NOT NULL DEFAULT false
 -- 给 agent 开放 add_task_scope/list_untested_assets;false=全部关闭(见 task_scope.go)。
 -- 存量任务默认 true 保持原行为;company 关联(task_scope kind=company)不受此开关影响。
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS coverage_enabled BOOLEAN NOT NULL DEFAULT true;
+-- 任务性质决定漏洞报告口径：src=SRC 漏洞挖掘，pentest=授权渗透测试。
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS nature TEXT NOT NULL DEFAULT 'pentest';
 -- queued_at makes admission FIFO reflect the actual enqueue order rather than the
 -- task creation order. queue_mode distinguishes first bootstrap from resuming an
 -- exploration that already owns goals/history.

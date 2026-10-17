@@ -5,7 +5,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
-import { ArrowLeftIcon, ArrowUpRightIcon, DownloadIcon, ShieldAlertIcon } from "lucide-react";
+import { ArrowLeftIcon, ArrowUpRightIcon, DownloadIcon, PencilIcon, ShieldAlertIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { CopyButton } from "@/components/copy-button";
@@ -19,6 +19,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -28,6 +36,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { statusMeta } from "@/lib/status";
 import type { Finding, FindingStatus, Severity } from "@/lib/types";
@@ -68,6 +77,9 @@ function FindingDetailInner() {
   const [finding, setFinding] = React.useState<Finding | null>(null);
   const [loaded, setLoaded] = React.useState(false);
   const [tab, setTab] = React.useState("overview");
+  const [reportOpen, setReportOpen] = React.useState(false);
+  const [reportDraft, setReportDraft] = React.useState("");
+  const [reportSaving, setReportSaving] = React.useState(false);
 
   const load = React.useCallback(() => {
     if (!id) {
@@ -118,6 +130,21 @@ function FindingDetailInner() {
     [finding, id],
   );
 
+  const saveReport = React.useCallback(async () => {
+    if (!finding || finding.inherited) return;
+    setReportSaving(true);
+    try {
+      const updated = await api.updateFinding(finding.id, { report: reportDraft });
+      setFinding(updated);
+      setReportOpen(false);
+      toast.success("报告已保存，Word / PDF 导出将使用修改后的 Markdown");
+    } catch (e) {
+      toast.error("保存失败：" + (e as Error).message);
+    } finally {
+      setReportSaving(false);
+    }
+  }, [finding, reportDraft]);
+
   if (!finding) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 p-10 text-center">
@@ -167,10 +194,13 @@ function FindingDetailInner() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem asChild>
-                  <a href={api.findingExportUrl(finding.id, "md")}>Markdown(.md)</a>
+                  <a href={api.findingExportUrl(finding.id, "pdf")}>PDF 报告(.pdf)</a>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
                   <a href={api.findingExportUrl(finding.id, "docx")}>Word 报告(.docx)</a>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <a href={api.findingExportUrl(finding.id, "md")}>Markdown(.md)</a>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -222,7 +252,21 @@ function FindingDetailInner() {
               <Card>
                 <CardHeader className="flex-row items-center justify-between">
                   <CardTitle className="text-sm">详细报告</CardTitle>
-                  {finding.report && <CopyButton text={finding.report} successMessage="已复制详细报告" />}
+                  <div className="flex items-center gap-1">
+                    {finding.report && !finding.inherited && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setReportDraft(finding.report || "");
+                          setReportOpen(true);
+                        }}
+                      >
+                        <PencilIcon data-icon="inline-start" /> 编辑
+                      </Button>
+                    )}
+                    {finding.report && <CopyButton text={finding.report} successMessage="已复制详细报告" />}
+                  </div>
                 </CardHeader>
                 <CardContent>
                   {finding.report_stale ? (
@@ -354,6 +398,31 @@ function FindingDetailInner() {
           <FindingLineageView findingId={finding.id} />
         </TabsContent>
       </div>
+
+      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>编辑详细报告（Markdown）</DialogTitle>
+            <DialogDescription>
+              保存后，Word / PDF 导出会直接使用这份修改后的 Markdown（包括图片、表格与四段 SRC 结构）。
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={reportDraft}
+            onChange={(e) => setReportDraft(e.target.value)}
+            className="min-h-[60vh] resize-y font-mono text-xs leading-relaxed"
+            spellCheck={false}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReportOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={saveReport} disabled={reportSaving}>
+              {reportSaving ? "保存中…" : "保存"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Tabs>
   );
 }
