@@ -479,6 +479,8 @@ function DraftChat({
 }) {
   const [agentKey, setAgentKey] = React.useState("");
   const [llmProfileId, setLlmProfileId] = React.useState<number | null>(null);
+  // 草稿态也允许先选项目：会话创建后立即 PATCH project_id，首条消息就在围栏下执行。
+  const [projectId, setProjectId] = React.useState<number | null>(null);
   const [input, setInput] = React.useState("");
   const [sending, setSending] = React.useState(false);
   const [uploading, setUploading] = React.useState(false);
@@ -496,8 +498,13 @@ function DraftChat({
     setSending(true);
     try {
       const c = await api.createConversation(agentKey, "", llmProfileId);
+      let started = c;
+      if (projectId != null) {
+        // 挂项目必须先于首条消息：否则第一轮命令在无围栏状态下执行。
+        started = await api.updateConversation(c.id, { project_id: projectId });
+      }
       await api.sendConversationMessage(c.id, msg);
-      onStarted(c);
+      onStarted(started);
     } catch (e) {
       toast.error("发送失败：" + (e as Error).message);
       setSending(false);
@@ -514,8 +521,12 @@ function DraftChat({
     setUploading(true);
     try {
       const c = await api.createConversation(agentKey, "", llmProfileId);
+      let started = c;
+      if (projectId != null) {
+        started = await api.updateConversation(c.id, { project_id: projectId });
+      }
       const r = await api.chatUpload("session", `conv-${c.id}`, files);
-      onStarted(c, { input, attachments: r.attachments });
+      onStarted(started, { input, attachments: r.attachments });
     } catch (e) {
       toast.error("上传失败：" + (e as Error).message);
       setUploading(false);
@@ -568,12 +579,15 @@ function DraftChat({
         onPickFiles={pickFiles}
         uploading={uploading}
       />
-      <LLMProfileRow
-        profiles={profiles}
-        selected={llmProfileId}
-        onChange={setLlmProfileId}
-        disabled={sending || uploading}
-      />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <LLMProfileRow
+          profiles={profiles}
+          selected={llmProfileId}
+          onChange={setLlmProfileId}
+          disabled={sending || uploading}
+        />
+        <ProjectRow projectId={projectId} onChange={setProjectId} />
+      </div>
     </>
   );
 }

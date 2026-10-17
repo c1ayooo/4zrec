@@ -54,6 +54,7 @@ type Asset struct {
 	Params []map[string]any `json:"params,omitempty"`
 	// meta
 	Extra             map[string]any `json:"extra,omitempty"`
+	Source            string         `json:"source,omitempty"` // 资产出处(Quake/FOFA/agent/manual...)
 	LastSeen          string         `json:"last_seen"`
 	TaskSource        string         `json:"task_source,omitempty"`
 	TaskSourceSummary string         `json:"task_source_summary,omitempty"`
@@ -1450,7 +1451,7 @@ const assetSelectCols = `SELECT id, type, company_id, array_to_json(task_ids)::t
        COALESCE(favicon_mmh3,''), status_code, content_length,
        COALESCE(page_title,''), array_to_json(technologies)::text, array_to_json(auth)::text,
        COALESCE(method,''), array_to_json(params)::text, extra, last_seen::text,
-       project_id, COALESCE(authz,'')
+       project_id, COALESCE(authz,''), COALESCE(source,'')
 FROM assets`
 
 // GetByIDs returns assets with the given ids (order preserved by id array order).
@@ -1515,6 +1516,7 @@ RETURNING type`, h)
 }
 
 // DeleteByIDs hard-deletes assets by their IDs. Returns the number of rows deleted.
+// DeleteByIDs removes assets by id (no-op for empty input).
 func (s *AssetStore) DeleteByIDs(ids []int64) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
@@ -1526,6 +1528,19 @@ func (s *AssetStore) DeleteByIDs(ids []int64) (int64, error) {
 		args[i] = id
 	}
 	res, err := s.db.Exec("DELETE FROM assets WHERE id IN ("+strings.Join(placeholders, ",")+")", args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// DeleteByProject removes every asset owned by a project (project deletion's
+// optional "delete assets" step). Returns the deleted row count.
+func (s *AssetStore) DeleteByProject(projectID int64) (int64, error) {
+	if projectID <= 0 {
+		return 0, nil
+	}
+	res, err := s.db.Exec(`DELETE FROM assets WHERE project_id=$1`, projectID)
 	if err != nil {
 		return 0, err
 	}
@@ -1574,7 +1589,7 @@ func scanAssets(rows *sql.Rows) ([]*Asset, error) {
 			&a.FaviconMMH3, &statusCode, &contentLength,
 			&a.PageTitle, &techsRaw, &authRaw,
 			&a.Method, &paramsRaw, &extraRaw, &a.LastSeen,
-			&projectID, &a.Authz,
+			&projectID, &a.Authz, &a.Source,
 		); err != nil {
 			return nil, err
 		}

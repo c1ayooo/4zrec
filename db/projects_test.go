@@ -125,6 +125,65 @@ func TestProjectFenceLifecycle(t *testing.T) {
 	}
 }
 
+// TestRecomputeApprovesOwnedPendingAfterScopeAdd 项目先有 pending 资产、后追加
+// 域名范围:本项目已有的子域名 pending 应翻成 approved(只升不降);他项目的
+// 同根 pending 资产不受影响(项目隔离)。
+func TestRecomputeApprovesOwnedPendingAfterScopeAdd(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v)", err)
+	}
+	defer d.Close()
+
+	pa, err := d.Projects().CreateProject("范围追加-A", nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Projects().DeleteProject(pa.ID)
+	pb, err := d.Projects().CreateProject("范围追加-B", nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Projects().DeleteProject(pb.ID)
+
+	ownID, err := d.Assets().UpsertSubdomain(UpsertSubdomainReq{Domain: "pending.late-scope.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer deleteAsset(d, ownID)
+	foreignID, err := d.Assets().UpsertSubdomain(UpsertSubdomainReq{Domain: "foreign.late-scope.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer deleteAsset(d, foreignID)
+	// 模拟范围录入前入库:已归属项目但 authz=pending。
+	if _, err := d.Exec(`UPDATE assets SET project_id=$1, authz='pending' WHERE id=$2`, pa.ID, ownID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`UPDATE assets SET project_id=$1, authz='pending' WHERE id=$2`, pb.ID, foreignID); err != nil {
+		t.Fatal(err)
+	}
+
+	if added, _, invalid, msgs := d.Projects().AddProjectScope(pa.ID, []string{"late-scope.example"}, "追加范围"); added != 1 || invalid != 0 {
+		t.Fatalf("scope 录入 added=%d invalid=%d msgs=%v", added, invalid, msgs)
+	}
+	if _, err := d.Projects().RecomputeProjectAttribution(); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := d.Assets().GetByIDs([]int64{ownID})
+	if err != nil || len(got) != 1 || got[0].AuthzState() != "approved" {
+		t.Fatalf("本项目已有的 pending 子域应随追加范围自动批准: %+v", got)
+	}
+	gotB, err := d.Assets().GetByIDs([]int64{foreignID})
+	if err != nil || len(gotB) != 1 || gotB[0].AuthzState() != "pending" {
+		t.Fatalf("他项目的 pending 不应被他项目范围批准: %+v", gotB)
+	}
+	t.Cleanup(func() {
+		_, _ = d.Exec(`DELETE FROM assets WHERE root_domain='late-scope.example'`)
+	})
+}
+
 // TestRetestConversationInheritsProject 复测会话必须从漏洞所属任务继承项目
 // (围栏的授权语义随任务走);任务未挂项目时会话 project_id 为空。
 func TestRetestConversationInheritsProject(t *testing.T) {

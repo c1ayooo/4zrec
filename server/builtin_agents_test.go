@@ -1,8 +1,82 @@
 package server
 
 import (
+	"encoding/json"
 	"testing"
 )
+
+// TestHTTPProbePriorityBindings 验证「HTTP 请求优先 http_probe」的绑定前提:
+// 独立渗透(pentest)与规划(planner)也能调用结构化 HTTP 工具。
+func TestHTTPProbePriorityBindings(t *testing.T) {
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Skipf("postgres unavailable (%v)", err)
+	}
+	defer m.Close()
+	s := &Server{m: m}
+
+	// 生产启动序:工具行播种 → 一次性补绑。重置 flag 以验证迁移可重跑。
+	s.seedSpacemapTools()
+	_ = m.pg.SetSetting("http_probe_priority_v1", "")
+	s.rebindHTTPProbeAgents()
+
+	tools, err := m.pg.ListTools()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bound map[string]bool
+	for _, tl := range tools {
+		if tl.Key != "http_probe" {
+			continue
+		}
+		bound = map[string]bool{}
+		for _, ag := range tl.Agents {
+			bound[ag] = true
+		}
+	}
+	if bound == nil {
+		t.Fatal("http_probe 工具行不存在")
+	}
+	for _, want := range []string{"pentest", "planner", "worker", "recon"} {
+		if !bound[want] {
+			t.Fatalf("http_probe 应绑定 %s;实绑: %v", want, bound)
+		}
+	}
+
+	// schema 合并:模拟旧库只带 url 参数(用户改过描述),迁移后应补齐新参数
+	// 且保留旧参数原样。
+	old := `{"type":"object","properties":{"url":{"type":"string","description":"user-edited"}}}`
+	if err := m.pg.UpdateToolSchema("http_probe", []byte(old)); err != nil {
+		t.Fatal(err)
+	}
+	_ = m.pg.SetSetting("http_probe_schema_v2", "")
+	s.mergeHTTPProbeSchema()
+
+	tools, err = m.pg.ListTools()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var props map[string]any
+	for _, tl := range tools {
+		if tl.Key == "http_probe" {
+			var schema map[string]any
+			_ = json.Unmarshal(tl.Schema, &schema)
+			props, _ = schema["properties"].(map[string]any)
+		}
+	}
+	if props == nil {
+		t.Fatal("http_probe schema 缺失")
+	}
+	for _, want := range []string{"url", "extract", "cookie_jar", "save_to_file", "requests", "template"} {
+		if _, ok := props[want]; !ok {
+			t.Fatalf("schema 应包含参数 %s;现有: %v", want, props)
+		}
+	}
+	urlProp, _ := props["url"].(map[string]any)
+	if d, _ := urlProp["description"].(string); d != "user-edited" {
+		t.Fatalf("迁移不应覆盖用户改过的参数描述, got %q", d)
+	}
+}
 
 // TestReconRebindAndBuiltin ①recon 补绑新增工具族(fingerprint_scan 等);②reporter/recon
 // 提升内置后不可删(DeleteAgent 拒);③枚举幂等。真连 PG。

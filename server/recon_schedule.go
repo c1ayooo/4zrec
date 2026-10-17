@@ -117,8 +117,8 @@ func (s *Server) executeEngineSchedule(sched *db.ReconSchedule) (string, int, bo
 			continue
 		}
 		for _, domain := range cfg.Domains {
-			results, _, total, err := c.SearchEngineAssets(context.Background(), engine,
-				spacemap.DomainQuery(engine, strings.TrimSpace(domain)), 100, 1)
+			q := spacemap.DomainQuery(engine, strings.TrimSpace(domain))
+			results, _, total, err := c.SearchEngineAssets(context.Background(), engine, q, 100, 1)
 			if err != nil {
 				notes = append(notes, fmt.Sprintf("%s %s: %v", spacemap.ProviderDisplayName(engine), domain, err))
 				continue
@@ -134,7 +134,7 @@ func (s *Server) executeEngineSchedule(sched *db.ReconSchedule) (string, int, bo
 					newCount++
 				}
 				// 复用统一入库路径(域名+IP+服务,范围认领)。
-				s.spacemapImport(context.Background(), projectID, 0, []*spacemap.Result{r})
+				s.spacemapImport(context.Background(), projectID, 0, []*spacemap.Result{r}, q)
 			}
 		}
 	}

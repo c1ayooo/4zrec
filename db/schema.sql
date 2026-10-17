@@ -1154,6 +1154,9 @@ ALTER TABLE intercept_pending ADD COLUMN IF NOT EXISTS reason TEXT NOT NULL DEFA
 -- Detail payloads are lazy-loaded; NULL preserves the meaning of legacy history.
 ALTER TABLE intercept_pending ADD COLUMN IF NOT EXISTS audit JSONB;
 ALTER TABLE intercept_pending ADD COLUMN IF NOT EXISTS decision_source TEXT NOT NULL DEFAULT '';
+-- 资产围栏审批的结构化目标 {"domains":[...],"ips":[...]};规则/模型审批为 NULL。
+-- 审批页按目标复选(全选/部分),决定接口只把勾选的目标登记为 approved 资产。
+ALTER TABLE intercept_pending ADD COLUMN IF NOT EXISTS targets JSONB;
 UPDATE intercept_pending SET decision_source=CASE WHEN rule_id IS NOT NULL THEN 'rule'
  WHEN reason LIKE '[模型]%' THEN 'model' ELSE 'unknown' END WHERE decision_source='';
 
@@ -1639,6 +1642,27 @@ CREATE TABLE IF NOT EXISTS project_scope (
 );
 CREATE INDEX IF NOT EXISTS idx_project_scope_project ON project_scope(project_id);
 CREATE INDEX IF NOT EXISTS idx_project_scope_domain ON project_scope(domain) WHERE domain IS NOT NULL;
+
+-- 持久 API Key(给 Hermes 等外部 agent):只存 SHA-256,明文仅在创建时返回一次。
+-- scope=global 全平台;scope=project 只能访问绑定项目的任务/资产/漏洞/审批。
+CREATE TABLE IF NOT EXISTS api_keys (
+    id           BIGSERIAL PRIMARY KEY,
+    name         TEXT NOT NULL,
+    token_prefix TEXT NOT NULL,
+    token_hash   TEXT NOT NULL UNIQUE,
+    scope        TEXT NOT NULL CHECK (scope IN ('global','project')),
+    project_id   BIGINT REFERENCES projects(id) ON DELETE CASCADE,
+    enabled      BOOLEAN NOT NULL DEFAULT true,
+    expires_at   TIMESTAMPTZ,
+    last_used_at TIMESTAMPTZ,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_api_keys_scope CHECK (
+        (scope = 'global' AND project_id IS NULL)
+        OR (scope = 'project' AND project_id IS NOT NULL)
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_api_keys_project ON api_keys(project_id) WHERE project_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(token_hash);
 CREATE INDEX IF NOT EXISTS idx_project_scope_net ON project_scope(net) WHERE net IS NOT NULL;
 
 -- LLM 范围建议池:worker/planner 收尾(带着会话完整上下文)通过 suggest_scope

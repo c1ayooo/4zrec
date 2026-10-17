@@ -132,6 +132,7 @@ export const sidebarItems: NavGroup[] = [
           { id: "mcp", title: "MCP", url: "/system/mcp", icon: Plug },
           { id: "skills", title: "Skill", url: "/system/skills", icon: Sparkles },
           { id: "tools", title: "工具", url: "/system/tools", icon: Wrench },
+          { id: "api-keys", title: "API 密钥", url: "/system/api-keys", icon: KeyRound },
         ],
       },
       {

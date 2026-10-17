@@ -16,6 +16,8 @@ import type {
   Asset,
   AssetInterceptRule,
   AssetInterceptRuleInput,
+  AssetProbeResult,
+  APIKeyRecord,
   Audit,
   BatchCategoryItem,
   BatchControlItem,
@@ -57,6 +59,8 @@ import type {
   JudgeConfig,
   JudgeUsage,
   LLMPoolStatus,
+  LLMPricing,
+  LLMPricingBook,
   LLMProfile,
   LLMRecordDetail,
   LLMRecordItem,
@@ -146,6 +150,7 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
     if (typeof window !== "undefined") {
       localStorage.removeItem("artex_token");
       document.cookie = "artex_token=; path=/; max-age=0";
+      document.cookie = "4zrec_token=; path=/; max-age=0";
       window.location.href = "/login";
     }
     throw new Error("未授权");
@@ -268,6 +273,16 @@ export const api = {
       new_password: newPassword,
       new_username: newUsername || undefined,
     }),
+
+  // ---- 持久 API Key(全局/项目级;仅全局凭据可管理) ----
+  apiKeys: () => get<{ keys: APIKeyRecord[] }>("/api-keys").then((r) => arr(r.keys)),
+  createAPIKey: (input: {
+    name: string;
+    scope: "global" | "project";
+    project_id?: number;
+    expires_in_days?: number;
+  }) => post<{ key: APIKeyRecord; token: string }>("/api-keys", input),
+  deleteAPIKey: (id: number) => del<{ ok: boolean }>(`/api-keys/${id}`),
 
   // ---- tasks ----
   tasks: () =>
@@ -408,6 +423,9 @@ export const api = {
   taskCoverageGraph: (id: string) => get<CoverageGraphData>(`/tasks/${id}/coverage-graph`),
   // 全局 llm_usage 聚合（仪表盘新版 token 视图）：按 profile 总量 + 按天分桶。
   usageStats: (days = 365) => get<UsageStats>(`/tokens/usage?days=${days}`),
+  // 模型单价（费用校准）：GET 返回规则 + 账本里出现的模型；PUT 整体替换规则表。
+  llmPricing: () => get<LLMPricingBook>("/llm/pricing"),
+  saveLLMPricing: (rules: LLMPricing[]) => put<{ ok: boolean; rules: number }>("/llm/pricing", { rules }),
   // ---- 目标管理（总览）----
   // 本任务全部目标（text/vulnclass/state）。
   taskGoals: (id: string) =>
@@ -550,7 +568,11 @@ export const api = {
     post<Project>("/projects", { name, company_id, description }),
   updateProject: (id: number, patch: { name: string; company_id: number | null; description: string; status?: string }) =>
     http<Project>(`/projects/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
-  deleteProject: (id: number) => http<{ ok: boolean }>(`/projects/${id}`, { method: "DELETE" }),
+  deleteProject: (id: number, opts: { deleteTasks?: boolean; deleteAssets?: boolean } = {}) =>
+    http<{ ok: boolean; deleted_tasks?: number; deleted_assets?: number }>(
+      `/projects/${id}?delete_tasks=${opts.deleteTasks ? 1 : 0}&delete_assets=${opts.deleteAssets ? 1 : 0}`,
+      { method: "DELETE" },
+    ),
   addProjectScope: (id: number, scope: string, reason = "") =>
     post<{ added: number; skipped: number; invalid: number; errors: string[]; project: Project; claimed: number }>(
       `/projects/${id}/scope`,
@@ -575,6 +597,9 @@ export const api = {
     ).then((r) => ({ assets: arr(r.assets), total: r.total })),
   setAssetAuthz: (ids: number[], action: "approve" | "reject" | "pending", projectId = 0) =>
     post<{ ok: boolean; updated: number }>("/assets/authz", { ids, action, project_id: projectId }),
+  // 待审批资产轻量探活(PTR/证书 SAN/TCP/GET /),用于批准前判断归属。
+  probeAssets: (ids: number[], projectId = 0) =>
+    post<{ results: AssetProbeResult[] }>("/assets/probe", { ids, project_id: projectId }).then((r) => arr(r.results)),
 
   // ---- companies (企业 + 资产范围；归属唯一来源) ----
   companies: () => get<Company[]>("/companies").then(arr),
@@ -1337,10 +1362,14 @@ export const api = {
     post<{ ok: boolean; enabled: boolean }>(`/asset-intercept/rules/${id}/toggle`, { enabled }),
 
   // ---- intercept pending (ask) ----
-  interceptPending: () => get<{ pending: InterceptPending[] }>("/intercept/pending").then((r) => arr(r.pending)),
+  interceptPending: (projectId?: number) =>
+    get<{ pending: InterceptPending[] }>(
+      `/intercept/pending${projectId ? `?project_id=${projectId}` : ""}`,
+    ).then((r) => arr(r.pending)),
   interceptGetOne: (id: number) => get<InterceptPending>(`/intercept/pending/${id}`),
-  interceptDecide: (id: number, decision: "allowed" | "denied") =>
-    post<{ ok: boolean }>(`/intercept/pending/${id}/decide`, { decision }),
+  // targets: 围栏审批里勾选要授权的目标;省略=全部(兼容旧调用)。
+  interceptDecide: (id: number, decision: "allowed" | "denied", targets?: string[]) =>
+    post<{ ok: boolean }>(`/intercept/pending/${id}/decide`, { decision, targets }),
   interceptExecution: (id: number, conversationId?: number) =>
     get<import("@/lib/types").InterceptExecution>(
       `/intercept/history/${id}/execution${conversationId ? `?conversation=${conversationId}` : ""}`,
@@ -1359,6 +1388,14 @@ export const api = {
   interceptTaskPage: (taskId: string, page = 1, size = 20, filter: InterceptApprovalFilter = {}) =>
     get<{ items: InterceptApprovalRow[]; total?: number }>(
       `/intercept/task/${encodeURIComponent(taskId)}?${interceptPageQuery(page, size, filter)}`,
+    ).then((r) => ({
+      items: arr(r.items),
+      total: r.total ?? r.items?.length ?? 0,
+    })),
+  // 项目维度的审批记录:与任务页同一份数据(任务/会话归属项目),只是聚合范围不同。
+  interceptProjectPage: (projectId: number, page = 1, size = 20, filter: InterceptApprovalFilter = {}) =>
+    get<{ items: InterceptApprovalRow[]; total?: number }>(
+      `/intercept/project/${projectId}?${interceptPageQuery(page, size, filter)}`,
     ).then((r) => ({
       items: arr(r.items),
       total: r.total ?? r.items?.length ?? 0,

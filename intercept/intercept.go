@@ -298,9 +298,12 @@ type Decision struct {
 	Action           string // "allow" | "deny" | "ask"
 	Message          string
 	RuleID           int64
-	TimeoutEnabled   bool
-	TimeoutSeconds   int
-	TimeoutAction    string // "deny" | "allow"
+	// Targets 是资产围栏类 ask 的结构化目标 {"domains":[...],"ips":[...]};
+	// 规则/模型判定为 nil。审批页据此逐目标复选,决定时按勾选子集授权。
+	Targets        json.RawMessage
+	TimeoutEnabled bool
+	TimeoutSeconds int
+	TimeoutAction  string // "deny" | "allow"
 }
 
 // --- LLM fallback judge ---
@@ -599,6 +602,10 @@ func (i *Interceptor) HandleAsk(ctx context.Context, convID int64, dec Decision,
 	}
 
 	i.bindResult(ctx, pendingID, audit)
+	if len(dec.Targets) > 0 {
+		// 结构化目标(资产围栏 ask)落库:审批页按目标复选。
+		_ = i.db.SetInterceptTargets(pendingID, dec.Targets)
+	}
 	ch := i.pending.add(pendingID)
 	defer i.pending.remove(pendingID)
 	// Polling clients can decide after INSERT commits but before the channel is

@@ -63,6 +63,10 @@ type Request struct {
 	// client.Timeout 必须跟随该值：只放大 ctx 超时而不放大 client.Timeout 时，
 	// 慢目标在 20s 处依旧被 client 掐断（timeout_seconds 参数形同虚设）。
 	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
+	// BodySink 非空时把响应体完整流式写入该 writer（大文件/二进制落盘），
+	// 内存里的报文捕获仍按 maxBodyCapture 截断。writer 由调用方负责关闭；
+	// 写失败会让本次请求返回错误（与 curl -o 落盘失败同语义）。
+	BodySink io.Writer `json:"-"`
 }
 
 type Result struct {
@@ -78,6 +82,8 @@ type Result struct {
 	FinalURL     string      `json:"final_url,omitempty"`  // 实际取到响应的 URL（未跟随时=原始 URL）
 	// Redirects 30x 跳转链（含未跟随/被拦截的跳转），供用户决定下一轮是否测试
 	Redirects []redirectguard.Hop `json:"redirects,omitempty"`
+	// BodyBytes 是响应体实际读到的总字节数（BodySink 未设时也统计，供落盘/截断提示）。
+	BodyBytes int64 `json:"body_bytes,omitempty"`
 }
 
 // DoRequest 执行探测并生成完整报文。
@@ -238,7 +244,10 @@ func DoRequest(ctx context.Context, req Request) (*Result, error) {
 	defer resp.Body.Close()
 	duration := time.Since(start)
 
-	respBodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, maxBodyCapture))
+	respBodyBytes, totalBytes, readErr := readResponseBody(resp.Body, req.BodySink)
+	if readErr != nil {
+		return nil, fmt.Errorf("读取响应体失败: %w", readErr)
+	}
 	respBody := printable(respBodyBytes)
 
 	// 响应报文：状态行 + 头 + body
@@ -274,7 +283,41 @@ func DoRequest(ctx context.Context, req Request) (*Result, error) {
 		Transcript:   RequestMarker + "\n" + string(reqDump) + "\n" + ResponseMarker + "\n" + respText,
 		FinalURL:     finalURL,
 		Redirects:    redirects,
+		BodyBytes:    totalBytes,
 	}, nil
+}
+
+// readResponseBody 读取响应体:内存捕获截断到 maxBodyCapture(证据/快照用),
+// sink 非空时把完整字节流式写入(大文件/二进制落盘)。返回(截断后的快照,
+// 实际读到的总字节数,错误)。
+func readResponseBody(r io.Reader, sink io.Writer) ([]byte, int64, error) {
+	var capture bytes.Buffer
+	buf := make([]byte, 32*1024)
+	var total int64
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			total += int64(n)
+			if sink != nil {
+				if _, werr := sink.Write(buf[:n]); werr != nil {
+					return capture.Bytes(), total, werr
+				}
+			}
+			if remain := maxBodyCapture - capture.Len(); remain > 0 {
+				if n > remain {
+					capture.Write(buf[:remain])
+				} else {
+					capture.Write(buf[:n])
+				}
+			}
+		}
+		if err == io.EOF {
+			return capture.Bytes(), total, nil
+		}
+		if err != nil {
+			return capture.Bytes(), total, err
+		}
+	}
 }
 
 // egressKindForURL 出口 kind 判据（URL 键）：按注册 URL 精确匹配 netproxy 动态出口表

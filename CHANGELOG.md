@@ -197,6 +197,8 @@
 
 - **项目保存 SQL 报错修复 + 详情入口显性化**：编辑项目保存发 `company_id: 0` 撞 projects 外键约束（企业概念移除后的残留）——改为不携带（null）。项目卡片操作区新增「详情」按钮（眼睛图标）——详情页聚合项目名下全部内容（总览/任务(N)/资产(N)/漏洞(N) 四个 tab，支持多任务），原来只有项目名是可点链接，入口不显眼。
 
+- **围栏提取器重构为命令感知解析（用户口径）**：不再扫描全命令文本——**只解析实际发起连接的部分**：curl/wget 的 URL 与位置参数（含 `--resolve host`，`-H/-d/-u/-x` 等旗标值不当作目标）、nc/ncat 的 host、ssh/scp/sftp/ping/dig/host/nslookup/nmap/masscan/nikto/nuclei/httpx/sqlmap/hydra/smbclient/redis-cli/psql/mysql/mongo/telnet/ftp/whois/openssl 等白名单命令的位置参数、`/dev/tcp|udp/<host>/<port>` 重定向（含 `$var` 从命令内赋值代入）、`$(...)`/反引号子命令递归解析。**grep/cat/jq/awk/sed/echo/sort/head/tail/python/node 等数据加工与脚本执行命令、heredoc 体一律跳过**——样本分析不再因正文里的域名/IP 触发审批。IP 变体（整数/八进制/十六进制）与回环/公共 DNS 排除语义保留；旧语义用例（python -c 内容、grep 参数、凭据参数主机）同步改为新口径。
+
 #### 修复
 
 - **资产管理去企业概念（第一批：资产页）**：资产页移除「企业」tab、企业筛选、六型资产表的企业列、新增/删除企业对话框与相关状态逻辑——**项目成为唯一归属主轴**（项目筛选保留）。企业概念在任务绑定/项目绑定与 AssetSummary 侧的项目化改造为下一批（数据层 companies 表暂留待最终物理清理）。

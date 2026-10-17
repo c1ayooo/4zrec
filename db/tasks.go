@@ -590,6 +590,29 @@ UPDATE tasks
 	return deadline, err
 }
 
+// TaskIDsByProject returns live (non-deleted) task ids attached to a project.
+// Used by project deletion to optionally cascade-delete its tasks.
+func (d *DB) TaskIDsByProject(projectID int64) ([]int64, error) {
+	if projectID <= 0 {
+		return nil, nil
+	}
+	rows, err := d.Query(`SELECT id FROM tasks
+WHERE project_id=$1 AND deleted_at IS NULL ORDER BY id`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // DeleteTask preserves the historical behavior: remove the task and its
 // exploration subgraph while retaining global assets.
 func (d *DB) DeleteTask(id int64) error {

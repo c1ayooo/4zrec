@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -79,4 +80,18 @@ func (d *DB) StampAssetSource(ctx context.Context, id int64, source string) {
 		return
 	}
 	_, _ = d.ExecContext(ctx, `UPDATE assets SET source=$2 WHERE id=$1 AND (source IS NULL OR source='')`, id, source)
+}
+
+// StampAssetSourceQuery 记录资产来自哪条测绘查询(如 Quake 的 cert:"huya.com")。
+// 存在 extra.source_query 里,已有值不覆盖(更早的具体查询优先)。审批页据此
+// 展示出处,人工才能判断该资产是否落在授权范围。
+func (d *DB) StampAssetSourceQuery(ctx context.Context, id int64, query string) {
+	query = strings.TrimSpace(query)
+	if query == "" || id <= 0 {
+		return
+	}
+	_, _ = d.ExecContext(ctx, `
+UPDATE assets
+SET extra = COALESCE(extra, '{}'::jsonb) || jsonb_build_object('source_query', $2::text)
+WHERE id=$1 AND NOT (COALESCE(extra, '{}'::jsonb) ? 'source_query')`, id, query)
 }

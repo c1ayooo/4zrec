@@ -8,7 +8,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -23,10 +28,13 @@ import (
 func (s *Server) toolHTTPProbe() actool.CoreTool {
 	return actool.Build(actool.Spec{
 		Name: "http_probe",
-		Description: "结构化 HTTP 请求(主动探测,替代手写 curl 脚本):完整请求/响应报文捕获、30x 默认不跟随" +
+		Description: "结构化 HTTP 请求(**HTTP/HTTPS 请求的首选工具**,替代手写 curl 脚本):完整请求/响应报文捕获、30x 默认不跟随" +
 			"(跳转链带目标/跨域分析返回,不丢证据)、UA 指纹随机化防 WAF 画像、multipart 上传。" +
 			"越权/遍历/A-B 差分用批量模式:requests 数组或 template+matrix/range 一次发多包(上限 50,别写脚本逐发)。" +
-			"挂项目上下文时目标必须在授权范围内。",
+			"串行链用 extract 从响应提取变量(如登录 token/Set-Cookie),后续请求用 {变量名} 回填;cookie_jar 在批量内自动传递 Cookie。" +
+			"大响应/二进制用 save_to_file 落盘(工作目录内相对路径)。" +
+			"只有流式/原始报文/需要任意本地脚本处理等本工具明确覆盖不了的场景才退回 curl,并在 fact 里写明原因。" +
+			"挂项目上下文时目标必须在授权范围内(逐请求校验,含变量回填后的 URL)。",
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -46,12 +54,15 @@ func (s *Server) toolHTTPProbe() actool.CoreTool {
 				"snapshot_max":       map[string]any{"type": "integer", "description": "响应体快照上限 KB(默认 64;批量模式自动收紧)"},
 				"requests": map[string]any{
 					"type":        "array",
-					"description": "批量模式①:完整请求数组,每项 {method,url,headers,body,label,upload_file,upload_field,form_fields}(上限 50)。",
+					"description": "批量模式①:完整请求数组,每项 {method,url,headers,body,label,upload_file,upload_field,form_fields,extract,save_to_file}(上限 50)。extract 提取的变量可在后续请求里用 {变量名} 回填。",
 				},
-				"template":   map[string]any{"type": "object", "description": "批量模式②:请求模板(同 requests 单项结构),字段里用 {var} 占位"},
-				"matrix":     map[string]any{"type": "array", "description": "template 变量行数组(zip 语义):如 [{id:\"1\"},{id:\"2\"}];A/B 差分放两行(身份放 headers)"},
-				"range":      map[string]any{"type": "object", "description": "template 数值边界 {var,from,to,step}(如遍历 id 1..20;总请求上限 50)"},
-				"project_id": map[string]any{"type": "integer", "description": "项目上下文(挂项目任务自动取)"},
+				"template":     map[string]any{"type": "object", "description": "批量模式②:请求模板(同 requests 单项结构),字段里用 {var} 占位;extract 提取的变量同样可回填"},
+				"matrix":       map[string]any{"type": "array", "description": "template 变量行数组(zip 语义):如 [{id:\"1\"},{id:\"2\"}];A/B 差分放两行(身份放 headers)"},
+				"range":        map[string]any{"type": "object", "description": "template 数值边界 {var,from,to,step}(如遍历 id 1..20;总请求上限 50)"},
+				"project_id":   map[string]any{"type": "integer", "description": "项目上下文(挂项目任务自动取)"},
+				"cookie_jar":   map[string]any{"type": "boolean", "description": "批量内自动传递 Cookie(Set-Cookie → 后续请求);默认关。显式 Cookie 头优先"},
+				"save_to_file": map[string]any{"type": "string", "description": "单发模式便捷字段:响应体完整写入工作目录内的相对路径(大文件/二进制)"},
+				"extract":      extractSchema(),
 			},
 		},
 		Permissions: func(_ context.Context, input json.RawMessage, _ actool.Context) actool.Decision {
@@ -73,7 +84,7 @@ func (s *Server) toolHTTPProbe() actool.CoreTool {
 			}
 			return actool.AskUser("HTTP 请求(" + method + ")目标: " + target)
 		},
-		Run: func(ctx context.Context, input json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
+		Run: func(ctx context.Context, input json.RawMessage, tc *actool.ToolContext) (actool.Result, error) {
 			var in httpProbeInput
 			if err := json.Unmarshal(input, &in); err != nil {
 				return actool.Errorf("参数解析失败: " + err.Error()), nil
@@ -81,12 +92,6 @@ func (s *Server) toolHTTPProbe() actool.CoreTool {
 			specs, errMsg := expandProbeSpecs(&in)
 			if errMsg != "" {
 				return actool.Errorf(errMsg), nil
-			}
-			// RoE:逐个目标过项目范围。
-			for _, sp := range specs {
-				if msg := s.webreconRoE(ctx, in.ProjectID, sp.URL); msg != "" {
-					return actool.Errorf(msg), nil
-				}
 			}
 			batch := len(specs) > 1
 			snapKB := in.SnapshotMax
@@ -96,11 +101,19 @@ func (s *Server) toolHTTPProbe() actool.CoreTool {
 			if batch && snapKB > 8 {
 				snapKB = 8 // 批量收紧,逐包摘要为主
 			}
+			workDir := ""
+			if tc != nil {
+				workDir = tc.WorkingDir
+			}
+			// 串行链状态:vars 由 extract 填充,后续请求 {var} 回填;jar 是批量内
+			// 的 Cookie 罐(cookie_jar=true 且显式 Cookie 头缺席时注入)。
+			vars := map[string]string{}
+			jar := map[string]string{}
 			var b strings.Builder
 			if batch {
 				fmt.Fprintf(&b, "批量请求 %d 包(30x 不跟随;逐包摘要):\n\n", len(specs))
 			}
-			for i, sp := range specs {
+			for i, base := range specs {
 				if ctx.Err() != nil {
 					break
 				}
@@ -110,12 +123,49 @@ func (s *Server) toolHTTPProbe() actool.CoreTool {
 					case <-time.After(300 * time.Millisecond):
 					}
 				}
+				sp := applyProbeVars(base, vars)
+				// RoE 逐请求校验(变量回填后):extract 可能把后续目标换到范围外,
+				// 不能只在展开阶段检查一次。
+				if msg := s.webreconRoE(ctx, in.ProjectID, sp.URL); msg != "" {
+					return actool.Errorf(strings.TrimSpace(b.String() + "\n" + msg)), nil
+				}
+				if in.CookieJar && len(jar) > 0 {
+					if _, ok := headerLookup(sp.Headers, "Cookie"); !ok {
+						sp.Headers["Cookie"] = cookieHeaderValue(jar)
+					}
+				}
+				var sink *os.File
+				var bodySink io.Writer // 避免 nil *os.File 装进非 nil interface
+				if strings.TrimSpace(sp.SaveToFile) != "" {
+					path, perr := resolveProbeSavePath(workDir, sp.SaveToFile)
+					if perr != nil {
+						fmt.Fprintf(&b, "【%s】落盘失败: %v\n", sp.Label, perr)
+						continue
+					}
+					if mkErr := os.MkdirAll(filepath.Dir(path), 0o755); mkErr != nil {
+						fmt.Fprintf(&b, "【%s】落盘失败: %v\n", sp.Label, mkErr)
+						continue
+					}
+					f, oerr := os.Create(path)
+					if oerr != nil {
+						fmt.Fprintf(&b, "【%s】落盘失败: %v\n", sp.Label, oerr)
+						continue
+					}
+					sink = f
+					bodySink = f
+				}
 				res, err := httpprobe.DoRequest(ctx, httpprobe.Request{
 					Method: sp.Method, URL: sp.URL, Headers: sp.Headers, Body: sp.Body,
 					Proxy: in.Proxy, TimeoutSeconds: in.TimeoutSeconds,
 					RandomFingerprint: in.RandomFingerprint,
 					UploadFile:        sp.UploadFile, UploadField: sp.UploadField, FormFields: sp.FormFields,
+					BodySink: bodySink,
 				})
+				if sink != nil {
+					if cerr := sink.Close(); err == nil && cerr != nil {
+						err = cerr
+					}
+				}
 				if err != nil {
 					fmt.Fprintf(&b, "【%s】%s %s → 失败: %v\n", sp.Label, sp.Method, sp.URL, err)
 					continue
@@ -127,9 +177,20 @@ func (s *Server) toolHTTPProbe() actool.CoreTool {
 						fmt.Fprintf(&b, "  ↳ #%d %s → %s [%d]%s\n", h.Index, h.FromURL, h.ToURL, h.Status, crossTag(h.CrossDomain))
 					}
 				}
+				if in.CookieJar {
+					mergeSetCookies(jar, res.RespHeaders)
+				}
+				if len(sp.Extract) > 0 {
+					for _, note := range applyProbeExtracts(sp.Extract, res, vars) {
+						fmt.Fprintf(&b, "  ↳ %s\n", note)
+					}
+				}
+				if strings.TrimSpace(sp.SaveToFile) != "" {
+					fmt.Fprintf(&b, "  ↳ 已保存 %s(%d 字节)\n", sp.SaveToFile, res.BodyBytes)
+				}
 				body := res.RespBody
 				if len(body) > snapKB*1024 {
-					body = body[:snapKB*1024] + fmt.Sprintf("\n…[截断,全量 %d 字节]", len(res.RespBody))
+					body = body[:snapKB*1024] + fmt.Sprintf("\n…[截断,全量 %d 字节]", res.BodyBytes)
 				}
 				if batch {
 					b.WriteString("  " + strings.TrimSpace(strings.SplitN(body, "\n", 2)[0]))
@@ -175,18 +236,57 @@ type httpProbeInput struct {
 		Step int    `json:"step"`
 	} `json:"range"`
 	ProjectID int64 `json:"project_id"`
+	// CookieJar 批量内自动传递 Cookie(Set-Cookie → 后续请求);显式 Cookie 头优先。
+	CookieJar bool `json:"cookie_jar"`
+	// SaveToFile / Extract 是单发模式的便捷字段(等价于写进该请求 spec)。
+	SaveToFile string                      `json:"save_to_file"`
+	Extract    map[string]httpProbeExtract `json:"extract"`
+}
+
+// httpProbeExtract 从响应提取一个变量,供后续请求用 {变量名} 回填(串行链)。
+//   - from=body:在 RespBody 上跑 regex;
+//   - from=header:在响应头(可用 name 限定单个头,典型 Set-Cookie)上跑 regex;
+//   - from=status:直接取状态码(忽略 regex)。
+//
+// regex 有捕获组时默认取第 1 组(group 可改);无捕获组取整个匹配。
+type httpProbeExtract struct {
+	From  string `json:"from"`
+	Name  string `json:"name"`
+	Regex string `json:"regex"`
+	Group int    `json:"group"`
+}
+
+// extractSchema 是 extract 字段的 JSON-Schema(变量名 → 提取规则)。
+func extractSchema() map[string]any {
+	rule := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"from":  map[string]any{"type": "string", "description": "body|header|status"},
+			"name":  map[string]any{"type": "string", "description": "from=header 时的头名(如 Set-Cookie)"},
+			"regex": map[string]any{"type": "string", "description": "提取正则;有捕获组取第 1 组"},
+			"group": map[string]any{"type": "integer", "description": "捕获组序号(默认 1;填 0 取整个匹配)"},
+		},
+		"required": []string{"from"},
+	}
+	return map[string]any{
+		"type":                 "object",
+		"description":          "变量名 → 提取规则;提取到的变量可在后续请求 URL/headers/body 里用 {变量名} 回填",
+		"additionalProperties": rule,
+	}
 }
 
 // httpProbeSpec 单个请求规格(批量数组/模板通用)。
 type httpProbeSpec struct {
-	Label       string            `json:"label"`
-	Method      string            `json:"method"`
-	URL         string            `json:"url"`
-	Headers     map[string]string `json:"headers"`
-	Body        string            `json:"body"`
-	UploadFile  string            `json:"upload_file"`
-	UploadField string            `json:"upload_field"`
-	FormFields  map[string]string `json:"form_fields"`
+	Label       string                      `json:"label"`
+	Method      string                      `json:"method"`
+	URL         string                      `json:"url"`
+	Headers     map[string]string           `json:"headers"`
+	Body        string                      `json:"body"`
+	UploadFile  string                      `json:"upload_file"`
+	UploadField string                      `json:"upload_field"`
+	FormFields  map[string]string           `json:"form_fields"`
+	Extract     map[string]httpProbeExtract `json:"extract"`
+	SaveToFile  string                      `json:"save_to_file"`
 }
 
 // expandProbeSpecs 归一请求清单:requests 直用;template+matrix/range 展开
@@ -276,6 +376,7 @@ func expandProbeSpecs(in *httpProbeInput) ([]httpProbeSpec, string) {
 	return []httpProbeSpec{norm(httpProbeSpec{
 		Method: in.Method, URL: in.URL, Headers: in.Headers, Body: in.Body,
 		UploadFile: in.UploadFile, UploadField: in.UploadField, FormFields: in.FormFields,
+		Extract: in.Extract, SaveToFile: in.SaveToFile,
 	})}, ""
 }
 
@@ -290,6 +391,7 @@ func substituteSpec(tmpl httpProbeSpec, row map[string]string) httpProbeSpec {
 	tmpl.URL = sub(tmpl.URL)
 	tmpl.Body = sub(tmpl.Body)
 	tmpl.Label = sub(tmpl.Label)
+	tmpl.SaveToFile = sub(tmpl.SaveToFile)
 	if tmpl.Headers != nil {
 		nh := make(map[string]string, len(tmpl.Headers))
 		for k, v := range tmpl.Headers {
@@ -429,4 +531,152 @@ func crossTag(cross bool) string {
 		return " [跨域]"
 	}
 	return ""
+}
+
+// applyProbeVars 把 extract 提取到的变量代入后续请求(URL/headers/body/label)。
+// 只替换 {已知变量名};普通 JSON 花括号不会命中。
+func applyProbeVars(sp httpProbeSpec, vars map[string]string) httpProbeSpec {
+	if len(vars) == 0 {
+		return sp
+	}
+	sub := func(s string) string {
+		for k, v := range vars {
+			s = strings.ReplaceAll(s, "{"+k+"}", v)
+		}
+		return s
+	}
+	sp.URL = sub(sp.URL)
+	sp.Body = sub(sp.Body)
+	sp.Label = sub(sp.Label)
+	sp.SaveToFile = sub(sp.SaveToFile)
+	if sp.Headers != nil {
+		nh := make(map[string]string, len(sp.Headers))
+		for k, v := range sp.Headers {
+			nh[sub(k)] = sub(v)
+		}
+		sp.Headers = nh
+	}
+	return sp
+}
+
+// cookieHeaderValue 把批量 Cookie 罐渲染成 Cookie 头(名字排序保证稳定输出)。
+func cookieHeaderValue(jar map[string]string) string {
+	keys := make([]string, 0, len(jar))
+	for k := range jar {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+jar[k])
+	}
+	return strings.Join(parts, "; ")
+}
+
+// mergeSetCookies 把响应里的 Set-Cookie 收进批量 Cookie 罐(忽略 Domain/Path/
+// 过期,批量内通常同 host;显式 Cookie 头仍优先)。
+func mergeSetCookies(jar map[string]string, h http.Header) {
+	for _, line := range h.Values("Set-Cookie") {
+		if i := strings.IndexByte(line, ';'); i >= 0 {
+			line = line[:i]
+		}
+		line = strings.TrimSpace(line)
+		if k, v, ok := strings.Cut(line, "="); ok && strings.TrimSpace(k) != "" {
+			jar[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		}
+	}
+}
+
+// applyProbeExtracts 按规则从响应提取变量写入 vars,返回可读的结果备注。
+// from=body/header 用 regex(默认第 1 捕获组);from=status 直接取状态码。
+func applyProbeExtracts(rules map[string]httpProbeExtract, res *httpprobe.Result, vars map[string]string) []string {
+	names := make([]string, 0, len(rules))
+	for name := range rules {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	notes := make([]string, 0, len(names))
+	for _, name := range names {
+		rule := rules[name]
+		from := strings.ToLower(strings.TrimSpace(rule.From))
+		if from == "status" {
+			vars[name] = strconv.Itoa(res.StatusCode)
+			notes = append(notes, fmt.Sprintf("提取 %s = %d", name, res.StatusCode))
+			continue
+		}
+		var subject string
+		switch from {
+		case "body":
+			subject = res.RespBody
+		case "header":
+			if rule.Name != "" {
+				subject = strings.Join(res.RespHeaders.Values(rule.Name), "\n")
+			} else {
+				keys := make([]string, 0, len(res.RespHeaders))
+				for k := range res.RespHeaders {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				var sb strings.Builder
+				for _, k := range keys {
+					for _, v := range res.RespHeaders[k] {
+						fmt.Fprintf(&sb, "%s: %s\n", k, v)
+					}
+				}
+				subject = sb.String()
+			}
+		default:
+			notes = append(notes, fmt.Sprintf("提取 %s 失败: from 必须是 body/header/status", name))
+			continue
+		}
+		if strings.TrimSpace(rule.Regex) == "" {
+			notes = append(notes, fmt.Sprintf("提取 %s 失败: regex 不能为空", name))
+			continue
+		}
+		re, err := regexp.Compile(rule.Regex)
+		if err != nil {
+			notes = append(notes, fmt.Sprintf("提取 %s 失败: 正则无效: %v", name, err))
+			continue
+		}
+		m := re.FindStringSubmatch(subject)
+		if len(m) == 0 {
+			notes = append(notes, fmt.Sprintf("提取 %s 失败: 未匹配到内容", name))
+			continue
+		}
+		group := rule.Group
+		if group <= 0 && len(m) > 1 {
+			group = 1 // 默认取第一个捕获组
+		}
+		if group >= len(m) {
+			group = 0
+		}
+		val := m[group]
+		vars[name] = val
+		shown := val
+		if len(shown) > 120 {
+			shown = shown[:120] + "…"
+		}
+		notes = append(notes, fmt.Sprintf("提取 %s = %s", name, shown))
+	}
+	return notes
+}
+
+// resolveProbeSavePath 把 save_to_file 解析到 agent 工作目录内:拒绝绝对路径
+// 与 ../ 越界(中间产物必须落在工作目录,和提示词里的输出规约一致)。
+func resolveProbeSavePath(workDir, raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("save_to_file 为空")
+	}
+	if filepath.IsAbs(raw) {
+		return "", fmt.Errorf("save_to_file 必须是工作目录内的相对路径: %s", raw)
+	}
+	clean := filepath.Clean(raw)
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("save_to_file 不能越出工作目录: %s", raw)
+	}
+	if strings.TrimSpace(workDir) == "" {
+		workDir = "."
+	}
+	return filepath.Join(workDir, clean), nil
 }

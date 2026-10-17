@@ -339,6 +339,8 @@ export default function SkillsPage() {
   const [usageCalls, setUsageCalls] = React.useState<SkillCall[]>([]);
   const [usageLoading, setUsageLoading] = React.useState(false);
   const [missing, setMissing] = React.useState<MissingSkill[]>([]);
+  // 同名 Skill 覆盖确认(统一弹窗,不用 window.confirm)。
+  const [pendingOverwrite, setPendingOverwrite] = React.useState<{ file: File; message: string } | null>(null);
 
   // ── Data ──────────────────────────────────────────────────────────────────
   const load = React.useCallback(() => {
@@ -368,10 +370,7 @@ export default function SkillsPage() {
       const msg = (e as Error).message;
       // offer overwrite when the skill already exists
       if (!overwrite && msg.includes("已存在")) {
-        if (window.confirm(`${msg}\n\n是否覆盖同名 Skill？`)) {
-          await uploadZip(file, true);
-          return;
-        }
+        setPendingOverwrite({ file, message: msg });
       } else {
         toast.error("上传失败：" + msg);
       }
@@ -383,6 +382,12 @@ export default function SkillsPage() {
     const f = e.target.files?.[0];
     e.target.value = ""; // reset so picking the same file again re-fires
     if (f) uploadZip(f);
+  }
+  async function confirmOverwrite() {
+    if (!pendingOverwrite) return;
+    const file = pendingOverwrite.file;
+    setPendingOverwrite(null);
+    await uploadZip(file, true);
   }
 
   React.useEffect(() => {
@@ -982,6 +987,37 @@ export default function SkillsPage() {
           )}
         </div>
       </div>
+
+      {/* ── 同名 Skill 覆盖确认 ── */}
+      <AlertDialog
+        open={!!pendingOverwrite}
+        onOpenChange={(o) => {
+          if (!o) setPendingOverwrite(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>覆盖同名 Skill？</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingOverwrite?.message}
+              <br />
+              覆盖会替换该 Skill 的全部文件，此操作不可撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={uploading}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={uploading}
+              onClick={(e) => {
+                e.preventDefault();
+                void confirmOverwrite();
+              }}
+            >
+              {uploading ? "覆盖中…" : "覆盖"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* ── 删除二次确认 ── */}
       <AlertDialog open={!!pendingDelete} onOpenChange={(o) => { if (!o) setPendingDelete(null); }}>

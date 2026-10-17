@@ -18,9 +18,11 @@ import { Bar, BarChart, CartesianGrid, Tooltip as RechartsTooltip, XAxis, YAxis 
 
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { Progress } from "@/components/ui/progress";
+import { LLMPricingDialog } from "@/components/llm-pricing-dialog";
 import { api } from "@/lib/api";
 import type {
   Activity,
@@ -34,7 +36,6 @@ import type {
   SkillItem,
   Stats,
   Task,
-  TokenTotal,
   Tool,
   TrafficExchange,
   UsageStats,
@@ -44,7 +45,7 @@ import { cn } from "@/lib/utils";
 // ── chart constants ───────────────────────────────────────────────────────────
 
 const dailyTrendConfig = {
-  input: { label: "输入", color: "hsl(217 91% 60%)" },
+  input: { label: "输入(未命中)", color: "hsl(217 91% 60%)" },
   output: { label: "输出", color: "hsl(263 70% 60%)" },
   cacheRead: { label: "缓存读", color: "hsl(160 60% 45%)" },
 } satisfies ChartConfig;
@@ -67,6 +68,14 @@ function fmtTokens(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
   if (n >= 1000) return (n / 1000).toFixed(1) + "k";
   return String(n);
+}
+
+// fmtCost 费用展示:小额保留 4 位,大额 2 位。
+function fmtCost(n: number, currency = "CNY"): string {
+  const symbol = currency === "USD" ? "$" : currency === "CNY" ? "¥" : `${currency} `;
+  if (!Number.isFinite(n) || n <= 0) return `${symbol}0`;
+  const digits = n < 1 ? 4 : 2;
+  return symbol + n.toLocaleString("zh-CN", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
 const ASSET_TYPE_LABELS: Record<string, string> = {
@@ -137,7 +146,6 @@ export default function DashboardPage() {
   const [settings, setSettings] = React.useState<Settings | null>(null);
   const [pending, setPending] = React.useState<InterceptPending[]>([]);
   const [activity, setActivity] = React.useState<Activity[]>([]);
-  const [tokens, setTokens] = React.useState<TokenTotal | null>(null);
   const [convTokens, setConvTokens] = React.useState<ConvTokenSummary[]>([]);
   const [usageStats, setUsageStats] = React.useState<UsageStats | null>(null);
   const [assetCounts, setAssetCounts] = React.useState<Record<string, number>>({});
@@ -187,13 +195,12 @@ export default function DashboardPage() {
       if (loading) return;
       loading = true;
       try {
-        const [findings, stats, settings, pending, activity, tokens, conversationTokens] = await Promise.all([
+        const [findings, stats, settings, pending, activity, conversationTokens] = await Promise.all([
           api.findings(),
           api.stats(),
           api.settings(),
           api.interceptPending(),
           api.activity(undefined, { limit: 30 }),
-          api.tokenStats(),
           api.conversationTokens(),
         ]);
         if (!alive) return;
@@ -202,7 +209,6 @@ export default function DashboardPage() {
         setSettings(settings);
         setPending(pending);
         setActivity(activity.items);
-        setTokens(tokens.total ?? null);
         setConvTokens(conversationTokens);
       } catch {
         // Preserve stale data and retry on the next interval.
@@ -328,12 +334,15 @@ export default function DashboardPage() {
   // tasks whose llm_profile_id is null/undefined used the active default profile
   const defaultProfileId = activeProfile ? Number(activeProfile.id) : null;
 
-  // 数据源开关：旧版 = activity（task.tokens + 会话），新版 = llm_usage 计量账本。
-  const [tokenVersion, setTokenVersion] = React.useState<"old" | "new">("old");
+  // 数据源开关：旧版 = activity（task.tokens + 会话，仅 result 行、会少计）；
+  // 新版 = llm_usage 计量账本（逐次调用，含失败/中断/内部压缩）。默认用准确的新版。
+  const [tokenVersion, setTokenVersion] = React.useState<"old" | "new">("new");
   // selected profile tab: "all" = 全部; number = specific profile id
   const [tokenTab, setTokenTab] = React.useState<number | null | "all">("all");
   // day range for the daily bar chart
   const [tokenDays, setTokenDays] = React.useState<7 | 30 | 90 | 180 | 365>(30);
+  // 模型单价编辑弹窗
+  const [pricingOpen, setPricingOpen] = React.useState(false);
 
   // profile 名 → id，用于把 llm_usage 的 profile_name 映射到现有 profile 分栏。
   const profileIdByName = React.useMemo(() => {
@@ -342,19 +351,27 @@ export default function DashboardPage() {
     return m;
   }, [llmProfiles]);
 
-  type Bucket = { input: number; output: number; cacheRead: number; cacheWrite: number; taskCount: number };
+  type Bucket = {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    taskCount: number;
+    cost: number;
+  };
 
   // 旧版：按 profile 归桶（来自 activity 的 task.tokens + 会话用量）。
   const tokenByProfileOld = React.useMemo<Map<number | null, Bucket>>(() => {
     const m = new Map<number | null, Bucket>();
     const fold = (key: number | null, inp: number, out: number, cr: number, cw: number, addTask: boolean) => {
-      const prev = m.get(key) ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, taskCount: 0 };
+      const prev = m.get(key) ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, taskCount: 0, cost: 0 };
       m.set(key, {
         input: prev.input + inp,
         output: prev.output + out,
         cacheRead: prev.cacheRead + cr,
         cacheWrite: prev.cacheWrite + cw,
         taskCount: prev.taskCount + (addTask ? 1 : 0),
+        cost: prev.cost,
       });
     };
     for (const t of tasks) {
@@ -386,13 +403,14 @@ export default function DashboardPage() {
     for (const p of usageStats?.by_profile ?? []) {
       // 未匹配到现有 profile（改名/删除/空名）→ 落到默认桶，仍计入「全部」。
       const key = profileIdByName.get(p.profile_name) ?? defaultProfileId;
-      const prev = m.get(key) ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, taskCount: 0 };
+      const prev = m.get(key) ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, taskCount: 0, cost: 0 };
       m.set(key, {
         input: prev.input + p.input_tokens,
         output: prev.output + p.output_tokens,
         cacheRead: prev.cacheRead + p.cache_read_tokens,
         cacheWrite: prev.cacheWrite + p.cache_write_tokens,
         taskCount: prev.taskCount + p.tasks,
+        cost: prev.cost + (p.cost ?? 0),
       });
     }
     return m;
@@ -406,21 +424,33 @@ export default function DashboardPage() {
         output = 0,
         cacheRead = 0,
         cacheWrite = 0,
-        taskCount = 0;
+        taskCount = 0,
+        cost = 0;
       for (const v of tokenByProfile.values()) {
         input += v.input;
         output += v.output;
         cacheRead += v.cacheRead;
         cacheWrite += v.cacheWrite;
         taskCount += v.taskCount;
+        cost += v.cost;
       }
-      return { input, output, cacheRead, cacheWrite, taskCount };
+      // 新版：任务数与费用用后端全局值——同一任务可能出现在多个 profile 分栏。
+      const globalTasks = tokenVersion === "new" ? (usageStats?.tasks ?? taskCount) : taskCount;
+      const globalCost = tokenVersion === "new" ? (usageStats?.cost ?? cost) : cost;
+      return { input, output, cacheRead, cacheWrite, taskCount: globalTasks, cost: globalCost };
     }
     const v = tokenByProfile.get(tokenTab as number | null);
     return v
-      ? { input: v.input, output: v.output, cacheRead: v.cacheRead, cacheWrite: v.cacheWrite, taskCount: v.taskCount }
-      : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, taskCount: 0 };
-  }, [tokenTab, tokenByProfile]);
+      ? {
+          input: v.input,
+          output: v.output,
+          cacheRead: v.cacheRead,
+          cacheWrite: v.cacheWrite,
+          taskCount: v.taskCount,
+          cost: v.cost,
+        }
+      : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, taskCount: 0, cost: 0 };
+  }, [tokenTab, tokenByProfile, tokenVersion, usageStats]);
 
   // 旧版每日：把任务/会话的总量按其创建日期归桶（近似，非真实每日消耗）。
   const dailyTokenDataOld = React.useMemo(() => {
@@ -576,12 +606,18 @@ export default function DashboardPage() {
               <ZapIcon className="size-3" /> Token 用量
             </div>
             <div className="text-2xl font-semibold tabular-nums">
-              {fmtTokens(displayedTokens.input + displayedTokens.output) || "—"}
+              {fmtTokens(displayedTokens.input + displayedTokens.cacheRead + displayedTokens.output) || "—"}
             </div>
           </CardHeader>
           <CardContent className="text-[10px] text-muted-foreground">
-            入 {fmtTokens(displayedTokens.input)}（含缓存 {fmtTokens(displayedTokens.cacheRead)}）· 出{" "}
-            {fmtTokens(displayedTokens.output)}
+            <div>
+              入 {fmtTokens(displayedTokens.input)} · 缓存 {fmtTokens(displayedTokens.cacheRead)} · 出{" "}
+              {fmtTokens(displayedTokens.output)}
+            </div>
+            <div className="mt-0.5">
+              费用 {fmtCost(displayedTokens.cost, usageStats?.currency)}
+              {tokenVersion === "old" ? "（旧版不计费）" : null}
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -607,8 +643,8 @@ export default function DashboardPage() {
                   onClick={() => setTokenVersion(v)}
                   title={
                     v === "new"
-                      ? "新版：来自 llm_usage 计量账本，逐次调用精确、含中断消耗；仅覆盖启用后的数据"
-                      : "旧版：来自 activity 统计（含历史任务），中断消耗不计、无法精确到模型"
+                      ? "新版：来自 llm_usage 计量账本，逐次调用精确（含失败/中断/内部压缩调用），推荐"
+                      : "旧版：来自 activity 的 result 行——内部压缩/重试/失败调用不计、按任务创建日归桶，会少计"
                   }
                   className={cn(
                     "rounded px-2 py-0.5 text-[9px] font-medium transition-colors",
@@ -624,6 +660,15 @@ export default function DashboardPage() {
             <span className="text-[10px] font-normal text-muted-foreground">
               {tokenVersion === "new" ? "llm_usage" : "activity"}
             </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-1 h-6 px-2 text-[10px]"
+              onClick={() => setPricingOpen(true)}
+              title="配置每个模型的输入/输出/缓存单价，仪表盘按真实单价计算费用"
+            >
+              单价
+            </Button>
           </div>
           {/* Profile tabs */}
           <div className="flex flex-wrap items-center gap-1">
@@ -681,22 +726,36 @@ export default function DashboardPage() {
           <div className="flex flex-col gap-4">
             {/* Total */}
             <div>
-              <div className="text-[10px] text-muted-foreground">合计 (输入+输出)</div>
+              <div className="text-[10px] text-muted-foreground">合计 (输入+缓存+输出)</div>
               <div className="mt-0.5 text-3xl font-bold tabular-nums tracking-tight">
-                {fmtTokens(displayedTokens.input + displayedTokens.output) || "—"}
+                {fmtTokens(displayedTokens.input + displayedTokens.cacheRead + displayedTokens.output) || "—"}
               </div>
               <div className="mt-0.5 text-[10px] text-muted-foreground">{displayedTokens.taskCount} 个任务</div>
+              <div className="mt-1 text-[11px] font-medium tabular-nums">
+                费用 ≈ {fmtCost(displayedTokens.cost, usageStats?.currency)}
+              </div>
+              {tokenVersion === "new" && (usageStats?.unpriced_models?.length ?? 0) > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setPricingOpen(true)}
+                  className="mt-1 text-left text-[10px] text-amber-500 hover:underline"
+                  title="这些模型有 token 消耗但未配置单价，费用未计入"
+                >
+                  未配单价：{usageStats?.unpriced_models.join("、")}，点此配置
+                </button>
+              ) : null}
             </div>
 
             {/* Per-type bars */}
             <div className="space-y-3">
               {(() => {
-                // input 已含缓存；拆成不重叠三段：未命中输入 + 缓存命中 + 输出 = 总量。
-                const total = displayedTokens.input + displayedTokens.output;
+                // ledger 的 input 是未命中缓存的输入(cache_read 单列),三段互不重叠。
+                const total =
+                  displayedTokens.input + displayedTokens.cacheRead + displayedTokens.output;
                 return [
                   {
                     label: "输入(未命中)",
-                    value: displayedTokens.input - displayedTokens.cacheRead,
+                    value: displayedTokens.input,
                     barColor: dailyTrendConfig.input.color!,
                     text: "text-blue-400",
                   },
@@ -734,8 +793,8 @@ export default function DashboardPage() {
 
             {/* Cache hit rate */}
             {(() => {
-              // input 已含缓存 → 命中率 = 缓存命中 / 总输入。
-              const denominator = displayedTokens.input;
+              // 命中率 = 缓存命中 / 总输入(未命中 + 命中)。
+              const denominator = displayedTokens.input + displayedTokens.cacheRead;
               const hitPct = denominator > 0 ? Math.round((displayedTokens.cacheRead / denominator) * 100) : 0;
               return (
                 <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2 text-[10px]">
@@ -1206,6 +1265,15 @@ export default function DashboardPage() {
           )}
         </Card>
       </div>
+
+      <LLMPricingDialog
+        open={pricingOpen}
+        onOpenChange={setPricingOpen}
+        onSaved={() => {
+          // 单价变了立即重算(不必等 15s 慢轮询)。
+          void api.usageStats(365).then(setUsageStats);
+        }}
+      />
     </div>
   );
 }

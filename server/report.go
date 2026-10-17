@@ -314,6 +314,9 @@ func (s *Server) exportFinding(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "无效的 finding id")
 		return
 	}
+	if !s.checkFindingScope(w, r, id) {
+		return
+	}
 	f, err := s.m.pg.GetFinding(id)
 	if err != nil {
 		writeErr(w, 500, err.Error())

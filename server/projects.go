@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -34,6 +35,16 @@ func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
+	}
+	// 项目级 API Key 只看到自己绑定的项目。
+	if pid := scopedProjectID(r.Context()); pid > 0 {
+		filtered := make([]db.Project, 0, 1)
+		for _, p := range projects {
+			if p.ID == pid {
+				filtered = append(filtered, p)
+			}
+		}
+		projects = filtered
 	}
 	if projects == nil {
 		projects = []db.Project{}
@@ -112,11 +123,51 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid project id")
 		return
 	}
+	q := r.URL.Query()
+	deleteTasks := q.Get("delete_tasks") == "1" || q.Get("delete_tasks") == "true"
+	deleteAssets := q.Get("delete_assets") == "1" || q.Get("delete_assets") == "true"
+
+	deletedTasks := 0
+	if deleteTasks {
+		ids, err := pg.TaskIDsByProject(id)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		for _, tid := range ids {
+			_, derr := s.deleteTaskInternal(r.Context(), strconv.FormatInt(tid, 10), DeleteTaskOptions{})
+			if derr != nil {
+				var committed *taskDeleteCommittedError
+				if errors.As(derr, &committed) {
+					deletedTasks++ // DB 已删,仅清理告警
+					continue
+				}
+				writeErr(w, 500, fmt.Sprintf("删除任务 #%d 失败: %v（项目未删除，可重试）", tid, derr))
+				return
+			}
+			deletedTasks++
+		}
+	}
+
+	deletedAssets := int64(0)
+	if deleteAssets {
+		n, aerr := pg.Assets().DeleteByProject(id)
+		if aerr != nil {
+			writeErr(w, 500, aerr.Error())
+			return
+		}
+		deletedAssets = n
+	}
+
+	// 项目行删除:project_scope 与项目级 api_keys 走 ON DELETE CASCADE;
+	// 未勾选删除的任务/资产保留,project_id 置 NULL(解除归属)。
 	if err := pg.Projects().DeleteProject(id); err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"ok": true})
+	writeJSON(w, 200, map[string]any{
+		"ok": true, "deleted_tasks": deletedTasks, "deleted_assets": deletedAssets,
+	})
 }
 
 type projectScopeReq struct {
@@ -132,6 +183,9 @@ func (s *Server) addProjectScope(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
 		writeErr(w, 400, "invalid project id")
+		return
+	}
+	if !s.checkProjectScope(w, r, id) {
 		return
 	}
 	var req projectScopeReq
@@ -165,6 +219,9 @@ func (s *Server) deleteProjectScope(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid project id")
 		return
 	}
+	if !s.checkProjectScope(w, r, id) {
+		return
+	}
 	sid, err := strconv.ParseInt(r.PathValue("sid"), 10, 64)
 	if err != nil || sid <= 0 {
 		writeErr(w, 400, "invalid scope id")
@@ -190,6 +247,9 @@ func (s *Server) scopeCandidates(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
 		writeErr(w, 400, "invalid project id")
+		return
+	}
+	if !s.checkProjectScope(w, r, id) {
 		return
 	}
 	candidates, err := pg.ProjectScopeCandidates(id)
@@ -235,6 +295,9 @@ func (s *Server) importScope(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid project id")
 		return
 	}
+	if !s.checkProjectScope(w, r, id) {
+		return
+	}
 	var req importScopeReq
 	if err := decode(r, &req); err != nil || len(req.Domains) == 0 {
 		writeErr(w, 400, "domains 不能为空")
@@ -266,6 +329,9 @@ func (s *Server) listPendingAssets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	projectID, _ := strconv.ParseInt(r.URL.Query().Get("project_id"), 10, 64)
+	if scopeProject := scopedProjectID(r.Context()); scopeProject > 0 {
+		projectID = scopeProject // 项目级 key 强制只看本项目
+	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	assets, total, err := pg.Assets().ListPendingAssets(projectID, limit, offset)
@@ -299,6 +365,22 @@ func (s *Server) setAssetAuthz(w http.ResponseWriter, r *http.Request) {
 	if len(req.IDs) == 0 {
 		writeErr(w, 400, "ids 不能为空")
 		return
+	}
+	if scopeProject := scopedProjectID(r.Context()); scopeProject > 0 {
+		if req.ProjectID > 0 && req.ProjectID != scopeProject {
+			writeErr(w, 403, "项目级 API Key 只能操作本项目资产")
+			return
+		}
+		req.ProjectID = scopeProject
+		outside, err := pg.AssetsOutsideProject(req.IDs, scopeProject)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		if len(outside) > 0 {
+			writeErr(w, 403, "ids 包含其他项目的资产")
+			return
+		}
 	}
 	switch req.Action {
 	case "approve":
@@ -339,6 +421,21 @@ func (s *Server) assetsBind(w http.ResponseWriter, r *http.Request) {
 	if err := decode(r, &in); err != nil || in.ProjectID <= 0 || len(in.IDs) == 0 {
 		writeErr(w, 400, "project_id 与 ids 必填")
 		return
+	}
+	if scopeProject := scopedProjectID(r.Context()); scopeProject > 0 {
+		if in.ProjectID != scopeProject {
+			writeErr(w, 403, "项目级 API Key 只能操作本项目资产")
+			return
+		}
+		outside, err := pg.AssetsOutsideProject(in.IDs, scopeProject)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		if len(outside) > 0 {
+			writeErr(w, 403, "ids 包含其他项目的资产")
+			return
+		}
 	}
 	if in.ProjectID > 0 {
 		if _, err := pg.Projects().GetProject(in.ProjectID); err != nil {

@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/c1ayooo/4zrec/db"
 	"github.com/c1ayooo/4zrec/guard"
@@ -208,7 +210,21 @@ func (s *Server) interceptListPending(w http.ResponseWriter, r *http.Request) {
 	if pg == nil {
 		return
 	}
-	pending, err := pg.ListPendingIntercepts()
+	var (
+		pending []db.InterceptPending
+		err     error
+	)
+	// project_id>0:只返回归属该项目的任务/会话产生的审批——项目页与任务页
+	// 共用同一个队列,只是过滤维度不同。项目级 key 强制到绑定项目。
+	projectID := int64(atoiDefault(r.URL.Query().Get("project_id"), 0))
+	if scopeProject := scopedProjectID(r.Context()); scopeProject > 0 {
+		projectID = scopeProject
+	}
+	if projectID > 0 {
+		pending, err = pg.ListPendingInterceptsByProject(projectID)
+	} else {
+		pending, err = pg.ListPendingIntercepts()
+	}
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -216,7 +232,37 @@ func (s *Server) interceptListPending(w http.ResponseWriter, r *http.Request) {
 	if pending == nil {
 		pending = []db.InterceptPending{}
 	}
+	fence := guard.NewAssetFence(pg)
+	for i := range pending {
+		s.fillLegacyFenceTarget(fence, &pending[i])
+	}
 	writeJSON(w, 200, map[string]any{"pending": pending})
+}
+
+// fillLegacyFenceTarget 给旧围栏审批记录补出结构化目标(该列上线前的行):
+// 重新提取一次工具输入并回填,让审批页对历史挂起记录也能逐目标勾选。
+func (s *Server) fillLegacyFenceTarget(fence *guard.AssetFence, p *db.InterceptPending) {
+	if fence == nil || p == nil {
+		return
+	}
+	if len(p.Targets) > 0 || !strings.Contains(p.Reason, "【资产围栏】") {
+		return
+	}
+	domains, ips := fence.PendingTargets(*p)
+	if len(domains) == 0 && len(ips) == 0 {
+		return
+	}
+	if raw, err := json.Marshal(map[string]any{"domains": domains, "ips": ips}); err == nil {
+		p.Targets = raw
+	}
+}
+
+// fillLegacyFenceTargetsForRows 是审批历史行列表的批量版本。
+func (s *Server) fillLegacyFenceTargetsForRows(pg *db.DB, rows []db.InterceptApprovalRow) {
+	fence := guard.NewAssetFence(pg)
+	for i := range rows {
+		s.fillLegacyFenceTarget(fence, &rows[i].InterceptPending)
+	}
 }
 
 func (s *Server) interceptGetOne(w http.ResponseWriter, r *http.Request) {
@@ -238,6 +284,12 @@ func (s *Server) interceptGetOne(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "not found")
 		return
 	}
+	if sc := APIScopeFrom(r.Context()); !sc.Global {
+		if guard.NewAssetFence(pg).PendingProject(*p) != sc.ProjectID {
+			writeErr(w, 404, "not found")
+			return
+		}
+	}
 	writeJSON(w, 200, p)
 }
 
@@ -249,6 +301,9 @@ func (s *Server) interceptListTaskItems(w http.ResponseWriter, r *http.Request) 
 	taskID := r.PathValue("taskID")
 	if taskID == "" {
 		writeErr(w, 400, "bad task id")
+		return
+	}
+	if !s.checkTaskScope(w, r, taskID) {
 		return
 	}
 	q := r.URL.Query()
@@ -266,6 +321,7 @@ func (s *Server) interceptListTaskItems(w http.ResponseWriter, r *http.Request) 
 		if items == nil {
 			items = []db.InterceptApprovalRow{}
 		}
+		s.fillLegacyFenceTargetsForRows(pg, items)
 		writeJSON(w, 200, map[string]any{"items": items, "total": len(items)})
 		return
 	}
@@ -278,6 +334,42 @@ func (s *Server) interceptListTaskItems(w http.ResponseWriter, r *http.Request) 
 	if items == nil {
 		items = []db.InterceptApprovalRow{}
 	}
+	s.fillLegacyFenceTargetsForRows(pg, items)
+	writeJSON(w, 200, map[string]any{"items": items, "total": total, "page": page, "page_size": size})
+}
+
+// interceptListProjectItems is the project-scoped approval history: the same
+// rows the task intercept tab shows, aggregated over every task/conversation
+// attached to the project. One approval surface, two scopes.
+func (s *Server) interceptListProjectItems(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	projectID, ok := pathInt(r, "projectID")
+	if !ok || projectID <= 0 {
+		writeErr(w, 400, "bad project id")
+		return
+	}
+	if !s.checkProjectScope(w, r, projectID) {
+		return
+	}
+	q := r.URL.Query()
+	filter, err := interceptFilterParams(q)
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	page, size := interceptPageParams(q)
+	items, total, err := pg.ListProjectInterceptsPage(projectID, page, size, filter)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if items == nil {
+		items = []db.InterceptApprovalRow{}
+	}
+	s.fillLegacyFenceTargetsForRows(pg, items)
 	writeJSON(w, 200, map[string]any{"items": items, "total": total, "page": page, "page_size": size})
 }
 
@@ -291,6 +383,10 @@ func (s *Server) interceptHistory(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, 400, err.Error())
 		return
+	}
+	// 项目级 API Key:历史只按绑定项目过滤(单行/分页两条路径都覆盖)。
+	if scopeProject := scopedProjectID(r.Context()); scopeProject > 0 {
+		filter.ProjectID = scopeProject
 	}
 	if q.Get("page") == "" && q.Get("size") == "" && filter == (db.InterceptApprovalFilter{}) {
 		items, err := pg.ListAllIntercepts(200)
@@ -354,6 +450,8 @@ func (s *Server) interceptDecide(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		Decision string `json:"decision"` // "allowed" | "denied"
+		// Targets 是围栏审批里用户勾选要授权的目标(省略=全部,兼容旧前端)。
+		Targets []string `json:"targets,omitempty"`
 	}
 	if err := decode(r, &req); err != nil {
 		writeErr(w, 400, err.Error())
@@ -363,6 +461,38 @@ func (s *Server) interceptDecide(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "decision 必须是 allowed 或 denied")
 		return
 	}
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	fence := guard.NewAssetFence(pg)
+	// 先读记录:项目级 key 的归属校验与勾选授权都依赖它。
+	p, err := pg.GetInterceptPending(id)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if p == nil {
+		writeErr(w, 404, "审批不存在")
+		return
+	}
+	projectID := fence.PendingProject(*p)
+	if sc := APIScopeFrom(r.Context()); !sc.Global && projectID != sc.ProjectID {
+		writeErr(w, 404, "审批不存在")
+		return
+	}
+	var approvedDomains, approvedIPs []string
+	// 允许时按勾选子集登记授权:只把用户勾选的目标写成 approved 资产,未勾选
+	// 的保持未授权(本次调用仍按人工允许执行)。旧前端不带 targets → 全部登记。
+	// 资产批准走与项目页「待审批资产」完全相同的授权语义,两个入口是一个东西。
+	if req.Decision == "allowed" && projectID > 0 {
+		approvedDomains, approvedIPs = fence.PendingTargets(*p)
+		// Targets==nil 表示旧前端/未传(全部登记);显式空数组表示
+		// 一个都不授权(本次仍允许执行)。
+		if req.Targets != nil {
+			approvedDomains, approvedIPs = pickPendingTargets(approvedDomains, approvedIPs, req.Targets)
+		}
+	}
 	if err := s.m.interceptor.Decide(id, req.Decision == "allowed"); err != nil {
 		if errors.Is(err, intercept.ErrAlreadyDecided) {
 			writeErr(w, 409, err.Error())
@@ -371,7 +501,39 @@ func (s *Server) interceptDecide(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	if req.Decision == "allowed" {
+		fence.Authorize(projectID, approvedDomains, approvedIPs)
+		// 勾选目标获批后,其他因同一目标挂起的围栏审批自动放行——与项目页
+		// 批准资产后的联动一致。
+		if n := s.m.interceptor.ReleaseAsks(fence.AskAuthorized); n > 0 {
+			log.Printf("[fence] 审批目标授权后联动放行 %d 条挂起的围栏审批", n)
+		}
+	}
 	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// pickPendingTargets 按用户勾选的字符串集合过滤目标;只保留审批记录里
+// 实际存在的目标(前端不会凭空扩大授权面)。
+func pickPendingTargets(domains, ips, selected []string) ([]string, []string) {
+	if len(selected) == 0 {
+		return nil, nil // 显式一个都不选:不授权任何目标
+	}
+	want := make(map[string]bool, len(selected))
+	for _, s := range selected {
+		want[strings.TrimSpace(s)] = true
+	}
+	var outDomains, outIPs []string
+	for _, d := range domains {
+		if want[d] {
+			outDomains = append(outDomains, d)
+		}
+	}
+	for _, ip := range ips {
+		if want[ip] {
+			outIPs = append(outIPs, ip)
+		}
+	}
+	return outDomains, outIPs
 }
 
 // --- tool-config (全局工具拦截范围) ---

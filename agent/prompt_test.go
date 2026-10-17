@@ -79,4 +79,19 @@ func TestRenderSystemOverrideAndFallback(t *testing.T) {
 	if strings.Contains(noProxy, "traffic_search") {
 		t.Fatalf("worker without proxy must NOT inject trafficTool: %q", noProxy)
 	}
+
+	// HTTP 工具优先级是代码固定尾巴:改 DB body 删不掉;渗透类 chat agent 同样注入,
+	// 非渗透类(reporter)不注入。
+	if !strings.Contains(got, "先走 http_probe") {
+		t.Fatalf("plannerSystem missing code-owned HTTP tool policy: %q", got)
+	}
+	if !strings.Contains(recording, "先走 http_probe") || !strings.Contains(recording, "写明原因") {
+		t.Fatalf("workerSystem missing code-owned HTTP tool policy: %q", recording)
+	}
+	if !strings.Contains(chatSystem("pentest", "/data", "/work"), "先走 http_probe") {
+		t.Fatal("pentest chat prompt should carry the HTTP tool policy")
+	}
+	if strings.Contains(chatSystem("reporter", "/data", "/work"), "先走 http_probe") {
+		t.Fatal("reporter chat prompt should not carry the HTTP tool policy")
+	}
 }

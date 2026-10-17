@@ -66,7 +66,7 @@ func (s *Server) expandImportDomains(ctx context.Context, explicit, projectID in
 	for _, d := range domains {
 		results = append(results, &spacemap.Result{Domain: d, Host: d})
 	}
-	d, _, _ := s.spacemapImport(ctx, projectID, 0, results)
+	d, _, _ := s.spacemapImport(ctx, projectID, 0, results, "")
 	return d, len(results)
 }
 

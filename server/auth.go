@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"fmt"
 	"log"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -137,19 +139,184 @@ func verifyJWT(tokenStr string, key []byte) bool {
 	return err == nil && t.Valid
 }
 
-// extractToken reads the JWT from Authorization: Bearer header,
-// 4zrec_token cookie, or ?token= query param (for SSE connections).
+// extractToken reads the JWT from Authorization: Bearer header, the login
+// cookie, or ?token= query param (for SSE/download direct links).
+//
+// 前端登录写的是 artex_token(Next middleware 也读它),历史/SSE 侧用
+// 4zrec_token;两种都认,否则浏览器直接打开导出链接会 401(无 Authorization 头)。
 func extractToken(r *http.Request) string {
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
 		return strings.TrimPrefix(h, "Bearer ")
 	}
-	if c, err := r.Cookie("4zrec_token"); err == nil && c.Value != "" {
-		return c.Value
+	if h := strings.TrimSpace(r.Header.Get("X-API-Key")); h != "" {
+		return h
+	}
+	for _, name := range []string{"artex_token", "4zrec_token"} {
+		if c, err := r.Cookie(name); err == nil && c.Value != "" {
+			return c.Value
+		}
 	}
 	return r.URL.Query().Get("token")
 }
 
-// requireAuth wraps h with JWT validation.
+// APIScope is the authorization scope of the current request: JWT = global;
+// a project-scoped API key = one project only.
+type APIScope struct {
+	Global    bool
+	ProjectID int64
+	KeyID     int64
+}
+
+type apiScopeCtxKey struct{}
+
+func withAPIScope(ctx context.Context, sc APIScope) context.Context {
+	return context.WithValue(ctx, apiScopeCtxKey{}, sc)
+}
+
+// APIScopeFrom returns the request scope; default global (internal handlers and
+// paths outside requireAuth keep their previous behavior).
+func APIScopeFrom(ctx context.Context) APIScope {
+	if v, ok := ctx.Value(apiScopeCtxKey{}).(APIScope); ok {
+		return v
+	}
+	return APIScope{Global: true}
+}
+
+// scopedProjectID returns the forced project id for a project-scoped key
+// (0 = global / no restriction).
+func scopedProjectID(ctx context.Context) int64 {
+	sc := APIScopeFrom(ctx)
+	if sc.Global {
+		return 0
+	}
+	return sc.ProjectID
+}
+
+// projectKeyPathAllowed is the route allowlist for project-scoped API keys.
+// Everything outside is global-only (settings/agents/tools/LLM/MCP/system).
+func projectKeyPathAllowed(method, path string) bool {
+	if path == "/api/projects" {
+		return method == http.MethodGet
+	}
+	if strings.HasPrefix(path, "/api/projects/") {
+		// 项目范围维护(读候选/追加/导入/删除)允许;项目本身的建/改/删仍全局。
+		return strings.Contains(path, "/scope")
+	}
+	if path == "/api/tasks" {
+		return true // GET 列表 / POST 创建(创建时强制本项目)
+	}
+	if strings.HasPrefix(path, "/api/tasks/") {
+		rest := strings.TrimPrefix(path, "/api/tasks/")
+		seg := strings.SplitN(rest, "/", 2)[0]
+		if seg == "control" {
+			return rest == "control/batch"
+		}
+		// 数值 id 的子路由由 requireAuth 统一校验任务归属;其余批量/归档类
+		// 路由(archive/category/...)对项目 key 一律拒绝。
+		_, err := strconv.ParseInt(seg, 10, 64)
+		return err == nil
+	}
+	if path == "/api/assets" {
+		return true // 列表/批量写入/删除都在 handler 内做项目边界
+	}
+	switch path {
+	case "/api/assets/pending", "/api/assets/authz", "/api/assets/probe", "/api/assets/bind":
+		return true
+	}
+	if path == "/api/exploration/findings" || path == "/api/exploration/findings/export" ||
+		path == "/api/exploration/findings/groups" || path == "/api/exploration/findings/asset-tree" {
+		return method == http.MethodGet
+	}
+	if strings.HasPrefix(path, "/api/exploration/findings/") {
+		rest := strings.TrimPrefix(path, "/api/exploration/findings/")
+		seg := strings.SplitN(rest, "/", 2)[0]
+		if _, err := strconv.ParseInt(seg, 10, 64); err == nil {
+			// 只允许 /{id} 与 /{id}/export;lineage 等子路由不开放。
+			return method == http.MethodGet && (rest == seg || rest == seg+"/export")
+		}
+		return false
+	}
+	if strings.HasPrefix(path, "/api/intercept/pending") {
+		return true
+	}
+	if path == "/api/intercept/history" {
+		return method == http.MethodGet
+	}
+	if strings.HasPrefix(path, "/api/intercept/project/") {
+		return method == http.MethodGet
+	}
+	return false
+}
+
+// checkProjectScope rejects a project-scoped key targeting another project.
+func (s *Server) checkProjectScope(w http.ResponseWriter, r *http.Request, projectID int64) bool {
+	sc := APIScopeFrom(r.Context())
+	if sc.Global {
+		return true
+	}
+	if projectID > 0 && sc.ProjectID == projectID {
+		return true
+	}
+	writeErr(w, 403, "项目级 API Key 只能访问绑定项目")
+	return false
+}
+
+// checkTaskScope rejects a project-scoped key targeting a task outside its
+// project. Unknown/foreign tasks return 404 so existence isn't leaked.
+func (s *Server) checkTaskScope(w http.ResponseWriter, r *http.Request, taskID string) bool {
+	sc := APIScopeFrom(r.Context())
+	if sc.Global {
+		return true
+	}
+	id, err := strconv.ParseInt(strings.TrimSpace(taskID), 10, 64)
+	if err != nil || id <= 0 {
+		writeErr(w, 400, "bad task id")
+		return false
+	}
+	pid, err := s.m.pg.TaskProjectID(id)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return false
+	}
+	if pid == sc.ProjectID {
+		return true
+	}
+	writeErr(w, 404, "task not found")
+	return false
+}
+
+// forceProjectQuery injects project_id into a filter-style query (findings
+// groups/tree/export), so a project-scoped key can't widen the result set.
+func forceProjectQuery(r *http.Request, projectID int64) {
+	if projectID <= 0 {
+		return
+	}
+	q := r.URL.Query()
+	q.Set("project_id", strconv.FormatInt(projectID, 10))
+	r.URL.RawQuery = q.Encode()
+}
+
+// checkFindingScope rejects findings whose owning task belongs to another project.
+func (s *Server) checkFindingScope(w http.ResponseWriter, r *http.Request, ids ...int64) bool {
+	sc := APIScopeFrom(r.Context())
+	if sc.Global {
+		return true
+	}
+	projects, err := s.m.pg.FindingTaskProjects(ids)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return false
+	}
+	for _, id := range ids {
+		if projects[id] != sc.ProjectID {
+			writeErr(w, 404, "finding not found")
+			return false
+		}
+	}
+	return true
+}
+
+// requireAuth wraps h with JWT / API-key validation.
 // /api/auth/* and /api/health are exempt.
 func (s *Server) requireAuth(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -163,11 +330,44 @@ func (s *Server) requireAuth(h http.Handler) http.Handler {
 			writeErr(w, 401, "未授权")
 			return
 		}
+		// 持久 API Key(zrec_ 前缀):长期有效,按 scope 收紧到项目。
+		if strings.HasPrefix(tok, db.APIKeyPrefix) {
+			if s.m == nil || s.m.PG() == nil {
+				writeErr(w, 503, errDataSourceUnavailable)
+				return
+			}
+			key, ok := s.m.PG().AuthenticateAPIKey(tok)
+			if !ok {
+				writeErr(w, 401, "API Key 无效、已禁用或已过期")
+				return
+			}
+			sc := APIScope{Global: key.Scope == "global", KeyID: key.ID}
+			if key.ProjectID != nil {
+				sc.ProjectID = *key.ProjectID
+			}
+			if !sc.Global && !projectKeyPathAllowed(r.Method, p) {
+				writeErr(w, 403, "项目级 API Key 无权访问该接口")
+				return
+			}
+			// /api/tasks/{id}/... 统一在入口做归属校验,覆盖所有子路由。
+			if !sc.Global && strings.HasPrefix(p, "/api/tasks/") {
+				seg := strings.SplitN(strings.TrimPrefix(p, "/api/tasks/"), "/", 2)[0]
+				if id, err := strconv.ParseInt(seg, 10, 64); err == nil && id > 0 {
+					pid, err := s.m.PG().TaskProjectID(id)
+					if err != nil || pid != sc.ProjectID {
+						writeErr(w, 404, "task not found")
+						return
+					}
+				}
+			}
+			h.ServeHTTP(w, r.WithContext(withAPIScope(r.Context(), sc)))
+			return
+		}
 		if !verifyJWT(tok, s.jwtKey) {
 			writeErr(w, 401, "token 无效或已过期")
 			return
 		}
-		h.ServeHTTP(w, r)
+		h.ServeHTTP(w, r.WithContext(withAPIScope(r.Context(), APIScope{Global: true})))
 	})
 }
 

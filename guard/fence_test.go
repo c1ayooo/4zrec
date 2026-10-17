@@ -51,9 +51,8 @@ func TestExtractFenceTargets(t *testing.T) {
 			cmd:  `nginx version 1.2.3 updated 2.4.13`,
 		},
 		{
-			name:    "回环地址排除",
-			cmd:     `curl http://127.0.0.1:8080/debug && curl http://localhost/x`,
-			domains: []string{"localhost"}, // localhost 是域名形态,回环 IP 被排除
+			name: "回环地址排除",
+			cmd:  `curl http://127.0.0.1:8080/debug && curl http://localhost/x`,
 		},
 		{
 			// 2026-10-15 误报:渗透脚本把 shell 变量拼进 URL(循环/函数参数拼路径),
@@ -85,10 +84,10 @@ func TestExtractFenceTargets(t *testing.T) {
 			domains: []string{"woniuxy.com"},
 		},
 		{
-			// user@host 形态的凭据/登录名不在参数位,保留提取(宁误报勿漏拦)。
-			name:    "user@host 凭据保留主机提取",
+			// 新口径:凭据参数(-u user@host)不是连接目标,只提取 URL 主机。
+			name:    "凭据参数内的主机不当作目标",
 			cmd:     `curl -u admin@evil.com http://api.example.com/`,
-			domains: []string{"api.example.com", "evil.com"},
+			domains: []string{"api.example.com"},
 		},
 		{
 			name: "路径里的点分串不算目标",
@@ -120,9 +119,9 @@ func TestExtractFenceTargets(t *testing.T) {
 			domains: []string{"sub.example.com"},
 		},
 		{
-			name:    "引号内带 scheme 的 URL 仍是目标(代码里的真实请求)",
-			cmd:     `python3 -c 'import requests; requests.get("https://api.evil.com/x")'`,
-			domains: []string{"api.evil.com"},
+			// 新口径:python/node 等脚本执行命令整段跳过(用户明确要求样本分析不卡审批)。
+			name: "python -c 代码内容不扫描",
+			cmd:  `python3 -c 'import requests; requests.get("https://api.evil.com/x")'`,
 		},
 		{
 			name:    "双引号包裹的真实目标仍识别",
@@ -145,11 +144,11 @@ for m in re.finditer(r'<script>(.*?)</script>', html, re.S):
 EOF`,
 		},
 		{
-			name: "heredoc 之外的命令参数区目标照常识别",
+			// 新口径:grep/cat/jq 等数据加工命令与 heredoc 一律跳过。
+			name: "grep 参数与 heredoc 内容都不扫描",
 			cmd: `grep -o sub.example.com index.html; python3 - <<'EOF'
 x=m.group(1)
 EOF`,
-			domains: []string{"sub.example.com"},
 		},
 		{
 			name: "直接对公共解析器本身操作也不进围栏",
@@ -225,6 +224,57 @@ EOF`,
 			// 版本号碎片(纯十进制三段)不判 IP 变体——防误报回归护栏。
 			name: "纯十进制三段仍不判 IP 变体(版本号形态)",
 			cmd:  `nginx version 1.2.3 updated 2.4.13 build 10.20.30`,
+		},
+
+		// ---- 2026-10-17 实盘误报回归:任务 165 的围栏审批把授权目标
+		// (aiface.fanyunedu.com)和一个幽灵 IP(0.0.0.126)一起列出来,
+		// 用户以为授权失效。下面是每个误报的原始形态。----
+
+		{
+			// SQLi payload 里的字节常量 0x7e 曾被 inet_aton 归一化成
+			// 0.0.0.126,整条已授权命令被拖进审批。
+			name:    "SQLi 载荷的 0x7e 字节常量不当作单段 IP",
+			cmd:     `curl -G --data-urlencode "goodsTitle=bb' AND extractvalue(1,concat(0x7e,version()))-- -" https://aiface.fanyunedu.com/partner-back`,
+			domains: []string{"aiface.fanyunedu.com"},
+		},
+		{
+			name: "十六进制字节常量 0x27/0x20 不当作 IP",
+			cmd:  `python3 -c "print(bytes([0x27,0x20]))"`,
+		},
+		{
+			// 内联 python 的双引号段是代码:m.group 撞 .group 真 gTLD。
+			name: "内联解释器代码参数里的 m.group 不当作域名",
+			cmd:  `python3 -c "import re; h=open('x').read(); m=re.search(r'a',h); print(m.group(1))"`,
+		},
+		{
+			// 文档/heredoc 里的占位符 host 不是目标(URL 分支此前不做校验)。
+			name: "heredoc 文档里的 http://host 占位符不当作域名",
+			cmd: `cat > n.txt <<'EOF'
+target: http://host:8080/api
+EOF`,
+		},
+		{
+			// 单段真实内网主机名仍要拦(不能因为"没有点"就放行)。
+			name:    "URL 里的单段内网主机名仍按目标处理",
+			cmd:     `curl -s http://jira/rest/api && curl -s http://x/a`,
+			domains: []string{"jira"},
+		},
+		{
+			// URL 路径/裸字符串里的版本目录曾被 IPv4 正则当目标。
+			name:    "路径片段里的版本号不当作 IP",
+			cmd:     `for p in "/rainloop/v/1.10.0.103/" "/index.php/"; do curl -s -o /dev/null "http://smtp.woniuxy.com:8000$p"; done`,
+			domains: []string{"smtp.woniuxy.com"},
+		},
+		{
+			// .sh 在文件扩展名黑名单里;URL 分支现在与裸 token 同口径。
+			name: `公共 CT 日志服务 crt.sh 不当作目标`,
+			cmd:  `curl -s "https://crt.sh/?q=%25.fanyunedu.com&output=json"`,
+		},
+		{
+			// 8 位十六进制单段仍是合法 IP 形态(0xC0A80001 用例的对偶护栏)。
+			name: `8 位十六进制 IP 仍归一化提取`,
+			cmd:  `curl -s 0x0A000001`,
+			ips:  []string{"10.0.0.1"},
 		},
 	}
 	for _, tc := range cases {
