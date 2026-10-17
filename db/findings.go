@@ -77,6 +77,22 @@ func ValidSeverity(s string) bool {
 	return false
 }
 
+// SeverityRank orders severity levels for comparisons: critical 4, high 3,
+// medium 2, low 1, unknown 0. Used by the reporter's downgrade-only guard.
+func SeverityRank(s string) int {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case SeverityCritical:
+		return 4
+	case SeverityHigh:
+		return 3
+	case SeverityMedium:
+		return 2
+	case SeverityLow:
+		return 1
+	}
+	return 0
+}
+
 // AddFinding inserts a finding into the standalone findings table. taskID and
 // nodeID may be 0 (stored as NULL). name may be "" (frontend falls back to
 // vulnclass). Returns the new finding id.

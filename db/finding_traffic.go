@@ -474,3 +474,49 @@ func (d *DB) SetFindingReportVersionByNodeID(ctx context.Context, nodeID int64, 
 	})
 	return
 }
+
+// SetFindingReportWithSeverityByNodeID writes the Markdown report (with the same
+// optimistic evidence-version lock as SetFindingReportVersionByNodeID) and applies
+// a reporter-proposed severity only when it is a downgrade. requestedSeverity may
+// be empty (report-only update). An equal or higher request is ignored: the stored
+// severity stays unchanged and downgraded=false, so the caller can surface an
+// "建议上调，需人工确认" note instead of letting the report writer raise levels.
+// Returns rows affected, the effective severity after the write, and whether the
+// downgrade was applied.
+func (d *DB) SetFindingReportWithSeverityByNodeID(ctx context.Context, nodeID int64, report string, version *int64, requestedSeverity string) (n int64, effective string, downgraded bool, err error) {
+	err = d.WithEvidenceTx(ctx, func(tx *sql.Tx) error {
+		var id int64
+		var cur string
+		if err := tx.QueryRow(`SELECT id, COALESCE(severity,'') FROM findings WHERE node_id=$1`, nodeID).Scan(&id, &cur); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil
+			}
+			return err
+		}
+		if err := LockFindingEvidenceTx(tx, id, version); err != nil {
+			return err
+		}
+		effective = cur
+		req := strings.ToLower(strings.TrimSpace(requestedSeverity))
+		if req != "" && ValidSeverity(req) && SeverityRank(req) < SeverityRank(cur) {
+			res, err := tx.Exec(`UPDATE findings SET report=$2,severity=$3,report_evidence_version=COALESCE($4::bigint,CASE WHEN evidence_version=0 THEN 0 ELSE -1 END) WHERE id=$1`, id, report, req, version)
+			if err != nil {
+				return err
+			}
+			if n, err = res.RowsAffected(); err != nil {
+				return err
+			}
+			// 保持发现 Tab（读探索节点 payload）与 findings 行一致。
+			_, _ = tx.Exec(`UPDATE exploration_nodes SET payload = jsonb_set(payload, '{severity}', to_jsonb($1::text)) WHERE id=$2`, req, nodeID)
+			effective, downgraded = req, true
+			return nil
+		}
+		res, err := tx.Exec(`UPDATE findings SET report=$2,report_evidence_version=COALESCE($3::bigint,CASE WHEN evidence_version=0 THEN 0 ELSE -1 END) WHERE id=$1`, id, report, version)
+		if err != nil {
+			return err
+		}
+		n, err = res.RowsAffected()
+		return err
+	})
+	return
+}

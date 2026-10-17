@@ -437,10 +437,11 @@ func (s *Server) toolGetTaskNodeDetail() actool.CoreTool {
 // task-agnostic, so this host tool needs no task_id / exploration store.
 func (s *Server) toolUpdateFindingReport() actool.CoreTool {
 	return wrTool("update_finding_report",
-		"为已登记的漏洞写入/更新【详细报告】(Markdown 全文,整段覆盖旧内容)。finding_id 传 report_finding 返回的那个 id(\"finding recorded: <id>\" 里的数字)。报告建议包含:漏洞概述、影响与危害、复现步骤、证据/PoC、修复建议。",
+		"为已登记的漏洞写入/更新【详细报告】(Markdown 全文,整段覆盖旧内容)。finding_id 传 report_finding 返回的那个 id(\"finding recorded: <id>\" 里的数字)。报告建议包含:漏洞概述、影响与危害、复现步骤、证据/PoC、修复建议。可选 severity 传报告按定级标尺判定的等级：仅允许下调（低于 finding 原登记值时写入），高于原值时忽略并提示在附录注明「建议上调为 X，需人工确认」。保存后返回实际生效的 severity，报告正文等级必须与之一致。",
 		objSchema(map[string]any{
 			"finding_id":       map[string]any{"type": "integer", "description": "目标漏洞 id(report_finding 返回的 id)"},
 			"report":           strParam("详细报告全文,Markdown 格式"),
+			"severity":         map[string]any{"type": "string", "enum": []string{"critical", "high", "medium", "low"}, "description": "可选。报告按定级标尺判定的等级，仅允许下调：低于 finding 原登记值时写入；高于原值时忽略，需在报告附录注明「建议上调为 X，需人工确认」"},
 			"evidence_version": map[string]any{"type": "integer", "description": "get_finding_traffic 返回的证据 version；用于防止报告覆盖新的证据变更"},
 		}, "finding_id", "report"),
 		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
@@ -448,20 +449,32 @@ func (s *Server) toolUpdateFindingReport() actool.CoreTool {
 				EvidenceVersion *int64          `json:"evidence_version"`
 				FindingID       json.RawMessage `json:"finding_id"`
 				Report          string          `json:"report"`
+				Severity        string          `json:"severity"`
 			}
 			_ = json.Unmarshal(in, &a)
 			nodeID := parseProfileID(a.FindingID) // 复用「数字或数字字符串」解析
 			if nodeID <= 0 {
 				return actool.Errorf("finding_id 无效"), nil
 			}
-			n, err := s.m.pg.SetFindingReportVersionByNodeID(ctx, nodeID, a.Report, a.EvidenceVersion)
+			req := strings.ToLower(strings.TrimSpace(a.Severity))
+			if req != "" && !db.ValidSeverity(req) {
+				return actool.Errorf("severity 只能是 critical|high|medium|low"), nil
+			}
+			n, effective, downgraded, err := s.m.pg.SetFindingReportWithSeverityByNodeID(ctx, nodeID, a.Report, a.EvidenceVersion, req)
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
 			}
 			if n == 0 {
 				return actool.Errorf(fmt.Sprintf("未找到 finding_id=%d 对应的漏洞记录(先用 report_finding 登记)", nodeID)), nil
 			}
-			return actool.Text(fmt.Sprintf("finding %d report updated (%d chars)", nodeID, len(a.Report))), nil
+			switch {
+			case downgraded:
+				return actool.Text(fmt.Sprintf("finding %d report updated (%d chars); severity downgraded to %s (报告正文必须与之一致)", nodeID, len(a.Report), effective)), nil
+			case req != "" && db.SeverityRank(req) > db.SeverityRank(effective):
+				return actool.Text(fmt.Sprintf("finding %d report updated (%d chars); severity kept at %s (requested %s ignored — 仅允许下调); 请在报告附录注明「建议上调为 %s，需人工确认」", nodeID, len(a.Report), effective, req, req)), nil
+			default:
+				return actool.Text(fmt.Sprintf("finding %d report updated (%d chars); severity %s", nodeID, len(a.Report), effective)), nil
+			}
 		})
 }
 
@@ -524,6 +537,7 @@ func (s *Server) seedOrchestrationTools() {
 	s.reseedReporterPromptV3()        // reporter 提示词:统一 SRC 口径(一次性)
 	s.reseedReporterPromptV4()        // reporter 提示词:发现方式写真实路径,去掉 SRC 套话(一次性)
 	s.reseedReporterPromptV5()        // reporter 提示词:加入按证据深度定级标尺与措辞红线(一次性)
+	s.reseedReporterPromptV6()        // reporter 提示词:加入截断证据处理规则(一次性)
 	s.seedFindingTrafficTools()       // 增加可选证据参数及只读证据工具，保留用户配置
 	s.seedFindingWorkflowTools()
 	// 注：pentest 的默认工具绑定无需迁移——BuiltinToolSeeds 在全新初始化时就把
@@ -537,7 +551,7 @@ func (s *Server) seedOrchestrationTools() {
 // reaches an old DB otherwise. Preserves each tool's agent binding + enabled flag.
 // Bump the flag whenever these tools' schemas/descriptions change in code.
 func (s *Server) refreshBuiltinToolSchemas() {
-	const flag = "tool_schema_refresh_v8_report_severity"
+	const flag = "tool_schema_refresh_v9_report_truncation"
 	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
 		return
 	}
@@ -841,6 +855,30 @@ func (s *Server) reseedReporterPromptV5() {
 		return
 	}
 	log.Printf("[prompts] reporter 提示词已加入证据深度定级标尺(一次性)")
+}
+
+// reseedReporterPromptV6 存量库迁移:reporter 提示词加入「截断证据的处理」——
+// 截断内容不得当完整事实、先按 binding_id 分段读完整正文、仍不完整时写明截断位置、
+// 无法判断敏感度一律按 medium 且不得上调。追加新版本并切换,旧版本留在历史。
+func (s *Server) reseedReporterPromptV6() {
+	const flag = "reporter_prompt_truncation_v1"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	defer func() { _ = s.m.pg.SetSetting(flag, "true") }()
+	a, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil || a == nil {
+		return // 全新库 seedPrompts 会直接 seed 最新默认
+	}
+	tmpl := agent.ReporterDefaultPrompt
+	if cur, err := s.m.pg.CurrentPrompt(a.ID); err == nil && cur == tmpl {
+		return
+	}
+	if _, err := s.m.pg.ResetPromptToDefault(a.ID, tmpl); err != nil {
+		log.Printf("[prompts] reporter 提示词重刷失败: %v", err)
+		return
+	}
+	log.Printf("[prompts] reporter 提示词已加入截断证据处理规则(一次性)")
 }
 
 // collectToolNames 动态枚举全部信息收集工具名(各工具族切片聚合)——recon agent

@@ -19,6 +19,8 @@ func TestReporterPromptSeverityRubric(t *testing.T) {
 		"已确认字段范围",
 		"已抽样确认正文为公开内容",
 		"推断：基于框架行为或同类接口的推测",
+		"━━ 截断证据的处理 ━━",
+		"已截断，原长 N 字节",
 		"交付前自检",
 	} {
 		if !strings.Contains(ReporterDefaultPrompt, want) {
@@ -26,7 +28,7 @@ func TestReporterPromptSeverityRubric(t *testing.T) {
 		}
 	}
 	b, _ := json.Marshal(NewToolSet(nil, "").addFinding().InputSchema())
-	for _, want := range []string{"较低一档", "未端到端验证", "数据落地"} {
+	for _, want := range []string{"较低一档", "未端到端验证", "数据落地", "完整实体样本", "已截断，原长 N 字节"} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("report_finding severity schema missing %q", want)
 		}
