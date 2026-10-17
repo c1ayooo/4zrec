@@ -2,6 +2,26 @@
 
 本项目的重要变更记录在此文件中，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.4.3] - 2026-10-17
+
+本版是 0.4.2 之后的报告/证据修复与内部目录整理，无数据库结构变更。
+
+### 报告与证据
+
+- **报告证据深度定级标尺**：新增四级判据（实体样本/部分验证/未验证/推测），部分验证最高定级为 medium；数据泄露类必须读到完整实体；要求写明“为什么不是上一级”，并加入措辞红线和交付自检。
+- **`report_finding` / `update_finding_report` 约束**：`report_finding` 同步约束 severity 与标题标注；`update_finding_report` 支持下调 severity，并返回实际生效等级。
+- **截断证据规范**：证据强制包含实体样本并标注截断；reporter 提示词增加截断处理章节，避免用截断内容支撑高定级。
+- **修复流量证据读取**：流量读工具不再受 capture/绑定开关双重门控——`http_probe` 存证在捕获关闭时仍有数据，reporter 可通过 `traffic_search` / `traffic_get` / `traffic_blob` 读取完整正文（V7）。
+- **报告措辞**：移除“在 SRC 漏洞挖掘过程中发现/复验”套话。
+
+### 仓库与构建
+
+- **Go 包按域收拢到 `internal/`**：按 kernel / domain / capability / orchestration / toolface / knowledge / platform 分组；顶层不再平铺 Go 包，包名保持不变，无用户可见行为变化。
+- **代码与数据分离**：`skills/`、`vulnkb/` 仅保留数据，Go 代码移入 `internal/knowledge/`；同步修正相关测试的相对路径。
+- **构建路径同步**：`build.sh`、`install.sh`、`update.sh`、Dockerfile、Release workflow 和忽略规则统一指向 `internal/platform/server/webui/dist`。
+- **仓库清理**：根目录历史二进制归档并停止跟踪 `4zrec.pre-*`；架构文档纳入版本库，内部施工单移入 `.zcode/plans/`。
+- **环境变量与品牌统一**：示例和文档统一使用 `ZREC_*`（保留 `ARTEX_*` 旧名回退）；`.env.example` 修正 `ZREC_TAG` 与 `4zrec` 数据库名；更新卡片、日志 mock、报告模板和 guard 提示统一为 4zrec。
+
 ## [0.4.2] - 2026-10-17
 
 本版完成「信息收集平台原生化」全量落地：删除外部 4zrecon 资产同步，五引擎测绘/反查/子域/端口/流水线/周期采集全链原生，预置内置信息收集 agent；围栏改命令感知提取；连接管理上线（凭据台账/SSH 终端/DB 制台）；去企业概念以项目为主轴。
@@ -1082,7 +1102,11 @@
 - [@Autumn-27](https://github.com/Autumn-27)
 - [@neouks](https://github.com/neouks)
 
-[Unreleased]: https://github.com/Autumn-27/ARTEX/compare/v0.3.10...HEAD
+[Unreleased]: https://github.com/c1ayooo/4zrec/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/c1ayooo/4zrec/compare/v0.4.2...v0.4.3
+[0.4.2]: https://github.com/c1ayooo/4zrec/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/c1ayooo/4zrec/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/c1ayooo/4zrec/compare/v0.3.15...v0.4.0
 [0.3.10]: https://github.com/Autumn-27/ARTEX/compare/v0.3.9...v0.3.10
 [0.3.9]: https://github.com/Autumn-27/ARTEX/compare/v0.3.8...v0.3.9
 [0.3.8]: https://github.com/Autumn-27/ARTEX/compare/v0.3.7...v0.3.8
