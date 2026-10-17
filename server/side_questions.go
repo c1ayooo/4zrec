@@ -52,7 +52,11 @@ func bindSideProvider(p model.ToolCallingChatModel, cfg agent.Config, id int64, 
 
 func (s *Server) initSideQuestions() {
 	s.side = &sideQuestionState{pending: map[string]sidequestion.Snapshot{}, latest: map[string]sidequestion.Snapshot{}, seen: map[string][2]int64{}, runs: map[string]sideRun{}, done: make(chan struct{})}
-	if n, err := strconv.Atoi(os.Getenv("ARTEX_BTW_MAX_OUTPUT_TOKENS")); err == nil && n >= 256 && n <= 32768 {
+	btwLimit := strings.TrimSpace(os.Getenv("ZREC_BTW_MAX_OUTPUT_TOKENS"))
+	if btwLimit == "" {
+		btwLimit = os.Getenv("ARTEX_BTW_MAX_OUTPUT_TOKENS")
+	}
+	if n, err := strconv.Atoi(btwLimit); err == nil && n >= 256 && n <= 32768 {
 		s.side.outputTokens = n
 	}
 	if s.m.pg == nil {

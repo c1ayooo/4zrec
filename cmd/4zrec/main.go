@@ -87,7 +87,7 @@ func run() int {
 	if _, e := os.Stat(cfgPath); e == nil {
 		log.Printf("[config] 配置文件: %s", cfgPath)
 	} else {
-		log.Printf("[config] 配置文件: %s (不存在 — 将仅尝试环境变量 4ZREC_PG_DSN)", cfgPath)
+		log.Printf("[config] 配置文件: %s (不存在 — 将仅尝试环境变量 ZREC_PG_DSN)", cfgPath)
 	}
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

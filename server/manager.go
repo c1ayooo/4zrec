@@ -394,7 +394,10 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 		}).Start()
 	}
 	// 漏洞知识库后台导入:按 content_hash 幂等,放好 vulnkb/ 目录重启即入库。
-	vulnkbDir := os.Getenv("ARTEX_VULNKB_DIR")
+	vulnkbDir := strings.TrimSpace(os.Getenv("ZREC_VULNKB_DIR"))
+	if vulnkbDir == "" {
+		vulnkbDir = strings.TrimSpace(os.Getenv("ARTEX_VULNKB_DIR"))
+	}
 	if vulnkbDir == "" {
 		vulnkbDir = vulnkb.DefaultDir
 	}

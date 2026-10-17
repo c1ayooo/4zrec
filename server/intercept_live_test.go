@@ -45,7 +45,7 @@ func TestLiveContextReview(t *testing.T) {
 	}
 	rejected := []db.InterceptContextEntry{
 		{Kind: "tool_use", Tool: "Bash", ToolUseID: "denied", Text: `{"command":"rm /srv/production/orders.csv"}`},
-		{Kind: "tool_result", ToolUseID: "denied", IsError: true, Text: "【ARTEX 平台管控·非目标防御】此调用被平台拦截。原因：删除生产文件命中D4。"},
+		{Kind: "tool_result", ToolUseID: "denied", IsError: true, Text: "【4zrec 平台管控·非目标防御】此调用被平台拦截。原因：删除生产文件命中D4。"},
 	}
 	for _, tc := range []struct {
 		name, command, intent, want string

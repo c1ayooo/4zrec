@@ -43,7 +43,7 @@ type Options struct {
 	// empty) set and Add() to it when a skill loads.
 	Unlock *tools.UnlockSet
 
-	// PermissionMode is the permission pipeline mode. ARTEX runs bypass
+	// PermissionMode is the permission pipeline mode. 4zrec runs bypass
 	// everywhere today; empty defaults to tools.ModeBypass. Non-bypass modes go
 	// through the tools.Evaluate pipeline shape (no interactive ask callback —
 	// an "ask" verdict denies).

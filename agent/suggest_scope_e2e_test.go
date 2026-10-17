@@ -22,7 +22,7 @@ import (
 // 页面文本里埋了两个资产库没有的同机构域(acme-cloud.net / acme-labs.cn)
 // 和一个子域(sso.acme-corp.io)。期望:调用 suggest_scope、提名至少一个
 // 页面独有根域、不把子域/乱串当根域。
-// 跳过条件:无 ARTEX_LLM_* 环境变量(默认 go test ./... 无 key 时零开销)。
+// 跳过条件:无 ZREC_LLM_*(或旧名 ARTEX_LLM_*)环境变量(默认 go test ./... 无 key 时零开销)。
 // =====================================================================
 
 // recordingHook 借 PreToolUse 观察 suggest_scope 调用(不阻断)。
@@ -48,7 +48,7 @@ func (h *recordingHook) Stop(context.Context, []acllm.Message) (bool, []string, 
 func TestSuggestScopeEndToEnd(t *testing.T) {
 	cfg, ok := FromEnv()
 	if !ok {
-		t.Skip("未配置 ARTEX_LLM_* 环境变量,跳过真实 LLM 实测")
+		t.Skip("未配置 ZREC_LLM_*(或旧名 ARTEX_LLM_*)环境变量,跳过真实 LLM 实测")
 	}
 	prov, err := cfg.NewProvider()
 	if err != nil {

@@ -121,10 +121,10 @@ CGO_ENABLED=0 go build -tags embedui -o 4zrec ./cmd/4zrec
 # 产物：dist/4zrec-0.3.3-*.zip
 ```
 
-UPX 自解压二进制可能与部分 Linux 内核、虚拟化环境或安全策略不兼容，因此默认不启用。可用 `4ZREC_TARGETS` 自定义目标；确认目标运行环境兼容时，可显式传入 `--upx` 进一步缩小二进制：
+UPX 自解压二进制可能与部分 Linux 内核、虚拟化环境或安全策略不兼容，因此默认不启用。可用 `ZREC_TARGETS` 自定义目标；确认目标运行环境兼容时，可显式传入 `--upx` 进一步缩小二进制：
 
 ```bash
-4ZREC_TARGETS=linux/amd64,windows/amd64 ./build.sh --release
+ZREC_TARGETS=linux/amd64,windows/amd64 ./build.sh --release
 ./build.sh --target linux/amd64 --upx
 ```
 
@@ -156,7 +156,7 @@ cd 4zrec
 
 脚本先可选 `git pull` 拉取最新代码，再让你选 **① Docker 更新** 或 **② 本地编译更新**（与 `install.sh` 对应）：
 
-- **① Docker**：可指定目标镜像 tag（回车沿用 `.env` 的 `4ZREC_TAG`，缺省 `latest`）→ `docker compose pull` → `docker compose up -d`（换新镜像重启即自动迁移）。
+- **① Docker**：可指定目标镜像 tag（回车沿用 `.env` 的 `ZREC_TAG`，缺省 `latest`）→ `docker compose pull` → `docker compose up -d`（换新镜像重启即自动迁移）。
 - **② 本地**：重建前端静态产物 → 重新编译 `./4zrec`（完成后重启进程生效）。
 
 ### 方式三：Docker Compose（手动）
@@ -164,7 +164,7 @@ cd 4zrec
 ```bash
 cd 4zrec
 git pull                       # 更新 compose / 脚本（可选）
-# 指定版本：在 .env 设 4ZREC_TAG=v0.2.0；不设则用 latest
+# 指定版本：在 .env 设 ZREC_TAG=v0.2.0；不设则用 latest
 docker compose pull 4zrec
 docker compose up -d 4zrec     # 换新镜像重启 → 自动迁移 schema
 docker image prune -f          # 清理旧镜像（可选）
@@ -193,7 +193,7 @@ CGO_ENABLED=0 go build -tags embedui -o 4zrec ./cmd/4zrec
 
 ## 配置
 
-**数据库**（`config.json`，或用环境变量 `4ZREC_PG_DSN` 覆盖）：
+**数据库**（`config.json`，或用环境变量 `ZREC_PG_DSN` 覆盖）：
 
 ```json
 {
@@ -206,7 +206,7 @@ CGO_ENABLED=0 go build -tags embedui -o 4zrec ./cmd/4zrec
 ```
 
 **LLM**：`export ANTHROPIC_API_KEY=sk-...`（或 `OPENAI_API_KEY`），也可在 UI 的「LLM 配置」页填写。
-可选：`4ZREC_LLM_PROVIDER` / `4ZREC_LLM_MODEL` / `4ZREC_LLM_BASE_URL` / `4ZREC_LLM_PROXY`。
+可选：`ZREC_LLM_PROVIDER` / `ZREC_LLM_MODEL` / `ZREC_LLM_BASE_URL` / `ZREC_LLM_PROXY`。
 
 **并发**：每个任务的 work agent 数在「系统设置」里配置（默认 3）。
 
@@ -286,7 +286,7 @@ flowchart TB
     ENG["engine 调度循环"]
     MGR["Manager　任务/引擎/store 生命周期"]
   end
-  subgraph AG["agent（norma SDK）"]
+  subgraph AG["agent（eino ADK）"]
     GO["goals　目标分解 + 提取范围"]
     PL["planner　规划者（唯一意图生成者）"]
     WK["worker　执行者 ×N"]

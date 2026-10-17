@@ -138,11 +138,13 @@ func compactionConfig(windowTokens int) *compaction.Config {
 
 // FromEnv resolves the LLM provider config:
 //
-//	ARTEX_LLM_PROVIDER = anthropic|openai (default: inferred from keys)
-//	ARTEX_LLM_MODEL    = model id        (default: per provider)
-//	ARTEX_LLM_BASE_URL = endpoint        (optional)
-//	ARTEX_LLM_PROXY    = proxy URL        (optional; http/https/socks5)
+//	ZREC_LLM_PROVIDER = anthropic|openai (default: inferred from keys)
+//	ZREC_LLM_MODEL    = model id        (default: per provider)
+//	ZREC_LLM_BASE_URL = endpoint        (optional)
+//	ZREC_LLM_PROXY    = proxy URL        (optional; http/https/socks5)
 //	ANTHROPIC_API_KEY / OPENAI_API_KEY         = credentials
+//
+// ARTEX_LLM_* 旧名仍作为回退兼容。
 func FromEnv() (Config, bool) {
 	prov := envCompat("ARTEX_LLM_PROVIDER", "ZREC_LLM_PROVIDER")
 	anthKey := os.Getenv("ANTHROPIC_API_KEY")

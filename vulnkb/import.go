@@ -11,7 +11,7 @@ import (
 )
 
 // DefaultDir 是漏洞库源文件目录(相对工作目录)。仓库随二进制分发 vulnkb/,
-// 与 skills/ 同级;可用 ARTEX_VULNKB_DIR 指向外部维护的库。
+// 与 skills/ 同级;可用 ZREC_VULNKB_DIR(旧名 ARTEX_VULNKB_DIR 回退)指向外部维护的库。
 const DefaultDir = "vulnkb"
 
 // ImportResult 汇总一次导入。
