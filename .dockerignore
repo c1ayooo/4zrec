@@ -7,7 +7,6 @@ internal/platform/server/webui/dist
 /artex.*
 /4zrec.pre*
 /4zrec.old*
-dist
 data
 *.db
 transcripts
