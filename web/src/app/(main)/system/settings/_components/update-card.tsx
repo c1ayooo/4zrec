@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Progress } from "@/components/ui/progress";
 import { api, sseUrl } from "@/lib/api";
 import type { UpdateCheck, UpdateProgress } from "@/lib/types";
@@ -44,6 +45,14 @@ export function UpdateCard() {
   // 与 progress 分开：暂存完成后进程就没了，SSE 会断，此时要切到轮询 /api/health。
   const [restarting, setRestarting] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  // 更新/回滚确认(统一弹窗,替代 window.confirm)。
+  const [pendingConfirm, setPendingConfirm] = React.useState<{
+    title: string;
+    description: string;
+    confirmText: string;
+    destructive?: boolean;
+    action: () => void;
+  } | null>(null);
 
   // quiet 同时决定要不要绕过后端缓存：进页面时的自动检查用缓存（顶栏刚查过），
   // 用户手动点「检查更新」则强制回源，否则刚发布的版本要等缓存过期才看得到。
@@ -132,48 +141,50 @@ export function UpdateCard() {
 
   const doUpdate = () => {
     if (!info) return;
-    const from = info.current;
-    const ok = window.confirm(
-      `确定更新到 ${info.latest}？\n\n` +
-        "更新会重启程序，正在运行的任务会被中断。\n" +
+    setPendingConfirm({
+      title: `更新到 ${info.latest}`,
+      description:
+        "更新会重启程序，正在运行的任务会被中断。" +
         (info.mode === "docker"
-          ? "\n注意：容器内更新只替换程序本身，不会更新镜像里的 playwright / nmap 等工具链；" +
-            "若新版本依赖新工具，请改用 docker compose pull。"
+          ? "\n\n注意：容器内更新只替换程序本身，不会更新镜像里的 playwright / nmap 等工具链；若新版本依赖新工具，请改用 docker compose pull。"
           : ""),
-    );
-    if (!ok) return;
-
-    setBusy(true);
-    setProgress({ phase: "downloading", percent: 0, message: "准备中…" });
-    const es = openStream(from);
-    api.applyUpdate().catch((e) => {
-      es.close();
-      setBusy(false);
-      setProgress(null);
-      toast.error("启动更新失败：" + (e as Error).message);
+      confirmText: "更新",
+      action: () => {
+        setBusy(true);
+        setProgress({ phase: "downloading", percent: 0, message: "准备中…" });
+        const es = openStream(info.current);
+        api.applyUpdate().catch((e) => {
+          es.close();
+          setBusy(false);
+          setProgress(null);
+          toast.error("启动更新失败：" + (e as Error).message);
+        });
+      },
     });
   };
 
   const doRollback = () => {
     if (!info) return;
-    if (
-      !window.confirm(
-        "回滚到上一版本？\n\n程序会重启，正在运行的任务会被中断。\n注意：数据库结构不会回退，旧版本可能无法识别新版写入的数据。",
-      )
-    )
-      return;
-    const from = info.current;
-    setBusy(true);
-    api
-      .rollbackUpdate()
-      .then(() => {
-        toast.success("已切换到上一版本，正在重启…");
-        void waitForNewVersion(from);
-      })
-      .catch((e) => {
-        setBusy(false);
-        toast.error("回滚失败：" + (e as Error).message);
-      });
+    setPendingConfirm({
+      title: "回滚到上一版本",
+      description:
+        "程序会重启，正在运行的任务会被中断。\n\n注意：数据库结构不会回退，旧版本可能无法识别新版写入的数据。",
+      confirmText: "回滚",
+      destructive: true,
+      action: () => {
+        setBusy(true);
+        api
+          .rollbackUpdate()
+          .then(() => {
+            toast.success("已切换到上一版本，正在重启…");
+            void waitForNewVersion(info.current);
+          })
+          .catch((e) => {
+            setBusy(false);
+            toast.error("回滚失败：" + (e as Error).message);
+          });
+      },
+    });
   };
 
   const phase = progress?.phase;
@@ -309,6 +320,24 @@ export function UpdateCard() {
           <span className="font-mono"> start.bat</span>）启动 4zrec；直接运行 artex 本体时，程序退出后不会被自动拉起。
         </p>
       </CardContent>
+
+      <ConfirmDialog
+        open={!!pendingConfirm}
+        onOpenChange={(open) => {
+          if (!open) setPendingConfirm(null);
+        }}
+        title={pendingConfirm?.title ?? ""}
+        description={pendingConfirm?.description}
+        confirmText={pendingConfirm?.confirmText ?? "确认"}
+        destructive={pendingConfirm?.destructive}
+        busy={busy}
+        onConfirm={() => {
+          if (!pendingConfirm) return;
+          const action = pendingConfirm.action;
+          setPendingConfirm(null);
+          action();
+        }}
+      />
     </Card>
   );
 }

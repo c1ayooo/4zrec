@@ -651,7 +651,7 @@ export const api = {
   // exportFindings 触发发现页导出并下载文件。scope=selected 时传 ids(finding_id 列表);
   // scope=filtered 时传当前筛选(沿用 FindingQuery 的筛选字段);scope=all 忽略筛选。
   exportFindings: async (opts: {
-    format: "md-single" | "md-zip" | "csv" | "json";
+    format: "md-single" | "md-zip" | "csv" | "json" | "src-md" | "src-docx" | "src-pdf";
     scope: "filtered" | "all" | "selected";
     filters?: Omit<FindingQuery, "page" | "pageSize">;
     ids?: string[];
@@ -681,6 +681,11 @@ export const api = {
     a.remove();
     URL.revokeObjectURL(url);
   },
+  // 导出前检查：当前勾选的漏洞是否只覆盖了某条利用链的一部分。
+  checkFindingChains: (ids: string[]) =>
+    get<{ warnings: { chain: string; missing: { id: string; name: string }[] }[] }>(
+      `/exploration/findings/export/chain-check?ids=${encodeURIComponent(ids.join(","))}`,
+    ).then((r) => r.warnings),
   getFinding: (id: string, contextTaskId?: string) =>
     get<Finding>(
       `/exploration/findings/${id}${contextTaskId ? `?context_task=${encodeURIComponent(contextTaskId)}` : ""}`,
@@ -756,10 +761,10 @@ export const api = {
   findingLineage: (id: string) => get<{ nodes: TaskNode[]; edges: Edge[] }>(`/exploration/findings/${id}/lineage`),
   setFindingStatus: (id: string, status: FindingStatus) => patch<Finding>(`/exploration/findings/${id}`, { status }),
   setFindingSeverity: (id: string, severity: Severity) => patch<Finding>(`/exploration/findings/${id}`, { severity }),
-  // 一次保存漏洞的名称/类别/严重等级(发现列表行内编辑用),只传出现的字段。
+  // 一次保存漏洞的名称/类别/严重等级/报告正文(发现列表行内编辑用),只传出现的字段。
   updateFinding: (
     id: string,
-    fields: { name?: string; vulnclass?: string; severity?: Severity; status?: FindingStatus },
+    fields: { name?: string; vulnclass?: string; severity?: Severity; status?: FindingStatus; report?: string },
   ) => patch<Finding>(`/exploration/findings/${id}`, fields),
   // 删除漏洞:移除 findings 记录 + 来源探索节点(从发现列表/任务发现 Tab/探索图一并消失)。
   deleteFinding: (id: string) => del<{ deleted: boolean; id: number }>(`/exploration/findings/${id}`),
@@ -1532,8 +1537,8 @@ export const api = {
   saveReportSettings: (patch: Partial<ReportSettings>) => put<ReportSettings>(`/report-settings`, patch),
   reports: () => get<ReportRecord[]>(`/reports`).then(arr),
   reportRecordDownloadUrl: (id: number) => `/api/reports/${id}/download`,
-  // 发现页单条漏洞导出(format: md | docx);id 为 findings 表行 id(Finding.id)
-  findingExportUrl: (id: string, format: "md" | "docx") =>
+  // 发现页单条漏洞导出(format: md | docx | pdf);id 为 findings 表行 id(Finding.id)
+  findingExportUrl: (id: string, format: "md" | "docx" | "pdf") =>
     `/api/exploration/findings/${id}/export?format=${format}`,
   deleteReport: (id: number) => del<{ ok: boolean }>(`/reports/${id}`),
   reportTemplates: () => get<ReportTemplate[]>(`/report-templates`).then(arr),

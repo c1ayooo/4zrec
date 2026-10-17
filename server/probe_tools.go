@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,6 +23,7 @@ import (
 	"github.com/c1ayooo/4zrec/fingerprint"
 	"github.com/c1ayooo/4zrec/httpprobe"
 	actool "github.com/c1ayooo/4zrec/tools"
+	"github.com/c1ayooo/4zrec/traffic"
 )
 
 // toolHTTPProbe 结构化 HTTP 请求(单发+批量/矩阵差分;替代手写 curl 脚本)。
@@ -30,6 +32,7 @@ func (s *Server) toolHTTPProbe() actool.CoreTool {
 		Name: "http_probe",
 		Description: "结构化 HTTP 请求(**HTTP/HTTPS 请求的首选工具**,替代手写 curl 脚本):完整请求/响应报文捕获、30x 默认不跟随" +
 			"(跳转链带目标/跨域分析返回,不丢证据)、UA 指纹随机化防 WAF 画像、multipart 上传。" +
+			"每次请求的完整报文会自动写入平台证据库(即使流量捕获关闭),输出中的 traffic_id 可直接用于 bind_finding_traffic 或报告引用;save_to_file 下载的大文件按完整正文落库,不受内存快照截断影响。" +
 			"越权/遍历/A-B 差分用批量模式:requests 数组或 template+matrix/range 一次发多包(上限 50,别写脚本逐发)。" +
 			"串行链用 extract 从响应提取变量(如登录 token/Set-Cookie),后续请求用 {变量名} 回填;cookie_jar 在批量内自动传递 Cookie。" +
 			"大响应/二进制用 save_to_file 落盘(工作目录内相对路径)。" +
@@ -136,6 +139,7 @@ func (s *Server) toolHTTPProbe() actool.CoreTool {
 				}
 				var sink *os.File
 				var bodySink io.Writer // 避免 nil *os.File 装进非 nil interface
+				bodyPath := ""
 				if strings.TrimSpace(sp.SaveToFile) != "" {
 					path, perr := resolveProbeSavePath(workDir, sp.SaveToFile)
 					if perr != nil {
@@ -153,6 +157,7 @@ func (s *Server) toolHTTPProbe() actool.CoreTool {
 					}
 					sink = f
 					bodySink = f
+					bodyPath = path
 				}
 				res, err := httpprobe.DoRequest(ctx, httpprobe.Request{
 					Method: sp.Method, URL: sp.URL, Headers: sp.Headers, Body: sp.Body,
@@ -170,8 +175,12 @@ func (s *Server) toolHTTPProbe() actool.CoreTool {
 					fmt.Fprintf(&b, "【%s】%s %s → 失败: %v\n", sp.Label, sp.Method, sp.URL, err)
 					continue
 				}
+				trafficID := s.recordProbeEvidence(res, sp.Method, sp.URL, bodyPath)
 				fmt.Fprintf(&b, "【%s】%s %s → %d %s(%dms,UA %s)\n", sp.Label, sp.Method, sp.URL,
 					res.StatusCode, res.StatusText, res.DurationMS, res.UserAgent)
+				if trafficID != "" {
+					fmt.Fprintf(&b, "  ↳ 完整报文已存证 traffic_id=%s（可 bind_finding_traffic 绑定）\n", trafficID)
+				}
 				if len(res.Redirects) > 0 {
 					for _, h := range res.Redirects {
 						fmt.Fprintf(&b, "  ↳ #%d %s → %s [%d]%s\n", h.Index, h.FromURL, h.ToURL, h.Status, crossTag(h.CrossDomain))
@@ -208,6 +217,64 @@ func (s *Server) toolHTTPProbe() actool.CoreTool {
 			return actool.Text(b.String()), nil
 		},
 	})
+}
+
+// recordProbeEvidence persists the complete request/response of one http_probe
+// call. httpprobe already builds the transcript; before this hook the tool only
+// returned a status line and body snippet, so findings ended up with no packet
+// evidence. Recorded exchanges are searchable/bindable exactly like proxied
+// traffic, even when passive capture is off.
+func (s *Server) recordProbeEvidence(res *httpprobe.Result, method, requestedURL, fullBodyPath string) string {
+	if s == nil || s.m == nil || res == nil {
+		return ""
+	}
+	tr := s.m.Traffic()
+	if tr == nil {
+		return ""
+	}
+	reqHead, reqBody := splitHTTPHeadBody(res.RequestText)
+	respHead, respBody := splitHTTPHeadBody(res.ResponseText)
+	// save_to_file 已把完整正文流式落盘；用文件内容替换内存里的截断快照，
+	// 让大 PDF/大文件也能整包存证（正文由 blob store 承载）。
+	if fullBodyPath != "" {
+		if b, err := os.ReadFile(fullBodyPath); err == nil {
+			respBody = b
+		} else {
+			log.Printf("[http_probe] 读取落盘正文失败 %s: %v", fullBodyPath, err)
+		}
+	}
+	contentType := ""
+	if res.RespHeaders != nil {
+		contentType = res.RespHeaders.Get("Content-Type")
+	}
+	u := strings.TrimSpace(res.FinalURL)
+	if u == "" {
+		u = requestedURL
+	}
+	id, err := tr.RecordEvidence(traffic.EvidenceRecord{
+		URL: u, Method: method, Status: res.StatusCode, ContentType: contentType,
+		ReqHead: reqHead, ReqBody: reqBody, RespHead: respHead, RespBody: respBody,
+	})
+	if err != nil {
+		log.Printf("[http_probe] 完整报文存证失败 %s: %v", u, err)
+		return ""
+	}
+	return id
+}
+
+// splitHTTPHeadBody splits a raw HTTP message at the first blank line. Heads are
+// returned without the trailing CRLF; the export layer adds that back.
+func splitHTTPHeadBody(raw string) (string, []byte) {
+	if raw == "" {
+		return "", nil
+	}
+	if i := strings.Index(raw, "\r\n\r\n"); i >= 0 {
+		return strings.TrimRight(raw[:i], "\r\n"), []byte(raw[i+4:])
+	}
+	if i := strings.Index(raw, "\n\n"); i >= 0 {
+		return strings.TrimRight(raw[:i], "\r\n"), []byte(raw[i+2:])
+	}
+	return strings.TrimRight(raw, "\r\n"), nil
 }
 
 // httpProbeInput http_probe 入参(单发与批量共用)。

@@ -10,6 +10,20 @@ import (
 
 const IntentBlockedLLMQuota = "llm_quota_exhausted"
 
+// GetTaskNature returns the task's engagement nature ("src" or "pentest").
+// Unknown/missing values fall back to "pentest" so older rows keep the legacy
+// report wording.
+func (d *DB) GetTaskNature(id int64) string {
+	var n string
+	if err := d.QueryRow(`SELECT COALESCE(NULLIF(nature,''),'pentest') FROM tasks WHERE id=$1`, id).Scan(&n); err != nil {
+		return "pentest"
+	}
+	if n == "src" {
+		return "src"
+	}
+	return "pentest"
+}
+
 // TaskLLMProfile is one ordered entry in a task's explicit failover chain.
 type TaskLLMProfile struct {
 	ProfileID   int64      `json:"profile_id"`

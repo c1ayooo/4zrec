@@ -747,11 +747,76 @@ def vuln_heading_text(meta, sec_no, title, sev, cvss):
     return f"{head}{L(meta, 'lparen')}{tail}{L(meta, 'rparen')}"
 
 
-def build_vuln(doc, v, meta):
+def render_page_blocks(doc, blocks):
+    """Render the finding detail page's Markdown blocks into the docx body."""
+    num = 0
+    for block in blocks:
+        if not isinstance(block, dict):
+            add_body_text(doc, str(block))
+            num = 0
+            continue
+        bt = block.get('type')
+        if bt == 'heading':
+            add_paragraph(doc, block.get('content', ''), font=UI_FONT, size_pt=11,
+                          bold=True, space_before=9, space_after=3)
+            num = 0
+        elif bt == 'code':
+            add_code_block(doc, block.get('content', ''))
+            num = 0
+        elif bt == 'image':
+            add_picture(doc, block.get('path', ''), caption=block.get('caption'), width_cm=15)
+            num = 0
+        elif bt == 'table':
+            rows = block.get('rows') or []
+            if rows:
+                ncols = max(len(r) for r in rows)
+                header = (rows[0] + [''] * ncols)[:ncols]
+                body = [((r + [''] * ncols)[:ncols]) for r in rows[1:]]
+                width = round(15.5 / ncols, 2)
+                C = WD_ALIGN_PARAGRAPH.CENTER
+                build_table(doc, header, body, [width] * ncols,
+                            col_aligns=[C] + [WD_ALIGN_PARAGRAPH.LEFT] * (ncols - 1))
+            num = 0
+        elif bt == 'quote':
+            add_paragraph(doc, block.get('content', ''), font=BODY_FONT, size_pt=10,
+                          color=CAPTION_GRAY, space_before=2, space_after=2)
+            num = 0
+        elif bt == 'bullet':
+            add_list_item(doc, block.get('content', ''), size_pt=10.5)
+            num = 0
+        elif bt == 'numbered':
+            num += 1
+            add_list_item(doc, block.get('content', ''), number=num, size_pt=10.5)
+        else:
+            add_body_text(doc, block.get('content', ''))
+            num = 0
+
+
+def build_page_only(doc, data, meta):
+    """Single-finding export: title + metadata + the page Markdown body."""
+    add_paragraph(doc, meta.get('report_title', ''), font=UI_FONT, size_pt=18, bold=True,
+                  color=TITLE_BLUE, space_after=8)
+    if meta.get('date'):
+        add_paragraph(doc, L(meta, 'date') + meta['date'], font=BODY_FONT, size_pt=9,
+                      color=CAPTION_GRAY, space_after=10)
+    for sysd in (data.get('systems_detail') or []):
+        for v in (sysd.get('vulns') or []):
+            build_vuln(doc, v, meta, page_only=True)
+
+
+def build_vuln(doc, v, meta, page_only=False):
     sev = v.get('severity', '')
     cvss = v.get('cvss_score')
-    add_heading(doc, vuln_heading_text(meta, v.get('sec_no', ''), v.get('title', ''), sev, cvss), 3)
+    if not page_only:
+        add_heading(doc, vuln_heading_text(meta, v.get('sec_no', ''), v.get('title', ''), sev, cvss), 3)
     add_vuln_info_table(doc, meta, v.get('target', ''), sev, v.get('found_date', ''))
+
+    # Single-finding export: the stored detail report is the page content. Render
+    # it verbatim so Word matches the page (images/tables included).
+    page = as_list(v.get('page_content'))
+    if page:
+        render_page_blocks(doc, page)
+        return
 
     # 1. 漏洞描述
     add_paragraph(doc, L(meta, "sub_desc"), font=UI_FONT, size_pt=11, bold=True, space_before=6, space_after=2)
@@ -863,6 +928,11 @@ def build(data, output_path):
     configure_styles(doc)
     setup_header(doc, meta)
     setup_footer(doc, meta)
+
+    if data.get('page_only'):
+        build_page_only(doc, data, meta)
+        doc.save(output_path)
+        return
 
     build_cover(doc, meta)
     add_paragraph(doc, L(meta, "toc"), align=WD_ALIGN_PARAGRAPH.CENTER, font=UI_FONT,

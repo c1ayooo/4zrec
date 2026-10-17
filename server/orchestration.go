@@ -520,6 +520,8 @@ func (s *Server) seedOrchestrationTools() {
 	s.mergeHTTPProbeSchema()          // http_probe 新增参数合并进存量工具行(一次性)
 	s.promoteCoreAgentsBuiltin()      // reporter/recon 提升内置角色(一次性)
 	s.upgradeReporterTriggerMessage() // 老库补迁移:让 reporter 回传 evidence_version(一次性)
+	s.reseedReporterPromptV2()        // reporter 提示词:按任务性质选择 SRC/渗透口径(一次性)
+	s.reseedReporterPromptV3()        // reporter 提示词:统一 SRC 口径(一次性)
 	s.seedFindingTrafficTools()       // 增加可选证据参数及只读证据工具，保留用户配置
 	s.seedFindingWorkflowTools()
 	// 注：pentest 的默认工具绑定无需迁移——BuiltinToolSeeds 在全新初始化时就把
@@ -1002,6 +1004,64 @@ func (s *Server) upgradeReporterTriggerMessage() {
 		}
 		log.Printf("[reporter] 触发消息已升级为读取并回传 evidence_version")
 	}
+}
+
+// reseedReporterPromptV2 upgrades the reporter's stored prompt to the
+// task-nature-aware template (SRC vs authorized pentest). Only the old default is
+// replaced; a prompt the user has edited is left untouched.
+func (s *Server) reseedReporterPromptV2() {
+	const flag = "reporter_prompt_nature_v1"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	defer func() { _ = s.m.pg.SetSetting(flag, "true") }()
+	a, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil || a == nil {
+		return
+	}
+	cur, err := s.m.pg.CurrentPrompt(a.ID)
+	if err != nil {
+		return
+	}
+	oldDefault := strings.Contains(cur, "你是一个授权渗透测试系统里的**漏洞报告撰写 agent**") ||
+		strings.Contains(cur, "你是一个 SRC 漏洞挖掘平台里的**漏洞报告撰写 agent**") ||
+		strings.Contains(cur, "- `## 概述`")
+	if !oldDefault {
+		return
+	}
+	if _, err := s.m.pg.SavePrompt(a.ID, agent.ReporterDefaultPrompt,
+		"报告口径按任务性质：SRC 四段 / 授权渗透测试结构", "system"); err != nil {
+		log.Printf("[reporter] 升级提示词失败: %v", err)
+		return
+	}
+	log.Printf("[reporter] 提示词已升级为按任务性质选择 SRC/渗透口径")
+}
+
+// reseedReporterPromptV3 makes the reporter prompt SRC-only (all report formats).
+func (s *Server) reseedReporterPromptV3() {
+	const flag = "reporter_prompt_src_only_v1"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	defer func() { _ = s.m.pg.SetSetting(flag, "true") }()
+	a, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil || a == nil {
+		return
+	}
+	cur, err := s.m.pg.CurrentPrompt(a.ID)
+	if err != nil {
+		return
+	}
+	if !strings.Contains(cur, "报告口径由触发消息里的【任务性质】决定") &&
+		!strings.Contains(cur, "B. 若【任务性质：授权渗透测试】") {
+		return
+	}
+	if _, err := s.m.pg.SavePrompt(a.ID, agent.ReporterDefaultPrompt,
+		"统一 SRC 报告口径（所有格式）", "system"); err != nil {
+		log.Printf("[reporter] 升级 SRC 提示词失败: %v", err)
+		return
+	}
+	log.Printf("[reporter] 提示词已统一为 SRC 报告口径")
 }
 
 // seedReporterAgent 预置一个「报告撰写」自定义 agent(builtin=false，可在 UI 编辑/删除)：

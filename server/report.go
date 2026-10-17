@@ -46,7 +46,7 @@ func (s *Server) generateReport(w http.ResponseWriter, r *http.Request) {
 	snap := *job
 	s.reportMu.Unlock()
 
-	in := s.buildReportInput(t, r.URL.Query())
+	in := s.buildSRCReportInput(t, r.URL.Query())
 	taskID := t.ID
 	taskDesc := t.Description
 	go func() {
@@ -122,6 +122,38 @@ func (s *Server) downloadReport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	http.ServeFile(w, r, path)
+}
+
+// buildSRCReportInput builds the consolidated SRC report document for a task.
+// All report formats now use the SRC layout; the legacy 5-chapter pentest input
+// builder is kept only for older code paths/tests.
+func (s *Server) buildSRCReportInput(t *Task, q map[string][]string) *report.GenInput {
+	get := func(k string) string {
+		if v := q[k]; len(v) > 0 {
+			return strings.TrimSpace(v[0])
+		}
+		return ""
+	}
+	title := get("title")
+	if title == "" {
+		title = defaultStrSrv(t.Name, "SRC") + " SRC 漏洞挖掘报告"
+	}
+	fs, _ := s.m.pg.ListFindingsForExport(db.FindingFilter{TaskID: t.ID}, nil)
+	assets, flow := s.srcReportContext(fs)
+	assetTypes := s.srcAssetTypes(fs)
+	assetLabels := s.srcAssetLabels(fs)
+	chains := report.GenerateSRCChainsWithAssets(s.ctx, s.m.pg, fs, assetTypes, assetLabels)
+	md := report.BuildSRCMarkdownWithChains(fs, title, assets, flow, chains)
+	company := get("company")
+	if company == "" {
+		company = "安全服务团队"
+	}
+	return &report.GenInput{
+		CompanyName: company, ProjectName: title, ReportTitle: title,
+		Locale: "zh-CN", CVSSVersion: "3.1",
+		Findings: []report.FindingInput{{Name: title, PageMarkdown: md, CreatedAt: time.Now()}},
+		SkillDir: s.skillDir, DataDir: s.dataDir, NoAI: true, PageOnly: true,
+	}
 }
 
 // buildReportInput flattens the task's confirmed findings + global asset counts
@@ -344,8 +376,9 @@ func (s *Server) exportFinding(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(report.FindingsMarkdown([]*db.DBFinding{f}, time.Now())))
 	case "docx":
 		fi := report.FindingInput{
-			VulnClass: f.VulnClass, Severity: f.Severity, Summary: f.Summary,
+			Name: f.Name, VulnClass: f.VulnClass, Severity: f.Severity, Summary: f.Summary,
 			PoC: f.Evidence, CreatedAt: f.CreatedAt, Reproduction: f.Reproduction,
+			PageMarkdown: report.SanitizeForExport(f.Report),
 		}
 		// Target 用第一个绑定资产的展示 label(富化里 AI 提取的目标在 Enrichment 中优先)。
 		if assets := s.resolveAssetIDs(f.AssetIDs); assets != nil && len(f.AssetIDs) > 0 {
@@ -381,7 +414,7 @@ func (s *Server) exportFinding(w http.ResponseWriter, r *http.Request) {
 		in := &report.GenInput{
 			CompanyName: companyName, // empty → BuildDoc applies locale default
 			ProjectName: title,
-			ReportTitle: title + " 漏洞报告",
+			ReportTitle: title,
 			Locale:      "zh-CN",
 			CVSSVersion: cvss,
 			LogoPath:    logoPath,
@@ -390,6 +423,7 @@ func (s *Server) exportFinding(w http.ResponseWriter, r *http.Request) {
 			SkillDir:    s.skillDir,
 			DataDir:     s.dataDir,
 			NoAI:        true,
+			PageOnly:    true,
 		}
 		stage, err := os.MkdirTemp("", "4zrec-finding-docx-")
 		if err != nil {
@@ -410,7 +444,133 @@ func (s *Server) exportFinding(w http.ResponseWriter, r *http.Request) {
 		defer file.Close()
 		disposition(".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 		http.ServeContent(w, r, filepath.Base(path), time.Now(), file)
+	case "pdf":
+		target := ""
+		if assets := s.resolveAssetIDs(f.AssetIDs); assets != nil && len(f.AssetIDs) > 0 {
+			if a := assets[f.AssetIDs[0]]; a != nil {
+				target = assetLabel(a)
+			}
+		}
+		rows := []report.PDFTrafficRow{}
+		if ft, terr := s.m.pg.GetFindingTraffic(r.Context(), id); terr == nil && ft != nil {
+			for _, b := range ft.Bindings {
+				rows = append(rows, report.PDFTrafficRow{
+					Role: b.Role, Method: b.Snapshot.Method, URL: b.Snapshot.URL,
+					Status: b.Snapshot.Status, RespLen: b.Snapshot.RespLen, Note: b.Note,
+				})
+			}
+		}
+		title := strings.TrimSpace(f.Name)
+		if title == "" {
+			title = strings.TrimSpace(f.VulnClass)
+		}
+		stage, err := os.MkdirTemp("", "4zrec-finding-pdf-")
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		defer os.RemoveAll(stage)
+		path, err := report.GeneratePDF(r.Context(), &report.PDFInput{
+			FindingID: id, Title: title, Severity: f.Severity, Status: f.Status,
+			Target: target, FoundDate: f.CreatedAt.Format("2006-01-02"),
+			Summary: f.Summary, Evidence: f.Evidence, Report: report.SanitizeForExport(f.Report),
+			DataDir: s.dataDir, Traffic: rows, GeneratedAt: time.Now(),
+		}, stage)
+		if err != nil {
+			writeErr(w, 500, "pdf 生成失败:"+err.Error())
+			return
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		defer file.Close()
+		disposition(".pdf", "application/pdf")
+		http.ServeContent(w, r, filepath.Base(path), time.Now(), file)
 	default:
 		writeErr(w, 400, "不支持的格式:"+format)
 	}
+}
+
+// srcReportContext builds the business-context table and flow line for a
+// consolidated SRC report from the findings' linked assets.
+func (s *Server) srcReportContext(fs []*db.DBFinding) ([]report.SRCAsset, string) {
+	resolved := s.resolveFindingAssets(fs)
+	seen := map[string]bool{}
+	var rows []report.SRCAsset
+	storage, gateway, preview := false, false, false
+	for _, f := range fs {
+		for _, id := range f.AssetIDs {
+			a := resolved[id]
+			if a == nil {
+				continue
+			}
+			label := srcAssetLabel(a)
+			if label == "" || seen[label] {
+				continue
+			}
+			seen[label] = true
+			l := strings.ToLower(label)
+			role := "关联资产"
+			switch {
+			case strings.Contains(l, "minio") || strings.Contains(l, "oss") || strings.Contains(l, "s3"):
+				role = "对象存储"
+				storage = true
+			case strings.Contains(l, "api") || strings.Contains(l, "finance"):
+				role = "业务 API 网关"
+				gateway = true
+			case strings.Contains(l, "preview") || strings.Contains(l, "info"):
+				role = "预览/前端服务"
+				preview = true
+			case a.Type == "service":
+				role = "业务服务"
+			case a.Type == "domain" || a.Type == "root_domain":
+				role = "业务域名"
+			}
+			rows = append(rows, report.SRCAsset{Label: label, Type: a.Type, Role: role})
+		}
+	}
+	flow := ""
+	switch {
+	case storage && gateway && preview:
+		flow = "业务前端/客户端 → 业务 API 网关（上传、预览等接口）→ 对象存储；预览接口跳转预览服务。"
+	case storage && gateway:
+		flow = "业务前端/客户端 → 业务 API 网关 → 对象存储。"
+	}
+	return rows, flow
+}
+
+func (s *Server) srcAssetTypes(fs []*db.DBFinding) map[int64]string {
+	resolved := s.resolveFindingAssets(fs)
+	out := map[int64]string{}
+	for id, a := range resolved {
+		if a != nil {
+			out[id] = a.Type
+		}
+	}
+	return out
+}
+
+func (s *Server) srcAssetLabels(fs []*db.DBFinding) map[int64]string {
+	resolved := s.resolveFindingAssets(fs)
+	out := map[int64]string{}
+	for id, a := range resolved {
+		if a != nil {
+			out[id] = srcAssetLabel(a)
+		}
+	}
+	return out
+}
+
+func srcAssetLabel(a *db.Asset) string {
+	if a.Domain != "" {
+		return a.Domain
+	}
+	if a.URL != "" {
+		if u, err := url.Parse(a.URL); err == nil && u.Host != "" {
+			return u.Host
+		}
+	}
+	return assetLabel(a)
 }

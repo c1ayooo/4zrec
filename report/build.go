@@ -23,7 +23,7 @@ import (
 // touched (they're legitimate vuln content, no antifox-data marker / not /var/folders).
 var (
 	reAntiFoxDataPath = regexp.MustCompile(`/[^\s，、；;）")']*antifox[^\s，、；;）")']*data[^\s，、；;）")']*`)
-	reVarFolders     = regexp.MustCompile(`(?:/private)?/var/folders/[^\s，、；;）")']+`)
+	reVarFolders      = regexp.MustCompile(`(?:/private)?/var/folders/[^\s，、；;）")']+`)
 )
 
 // redactInternalPaths collapses the platform's own absolute scratch paths to a bare
@@ -50,6 +50,7 @@ func redactLines(in []string, dataDir string) []string {
 
 // FindingInput is one confirmed finding, flattened from a graph node.
 type FindingInput struct {
+	Name       string // specific finding title (single-finding export); empty = VulnClass
 	VulnClass  string
 	Severity   string // high|medium|low|critical|info
 	Summary    string
@@ -66,8 +67,12 @@ type FindingInput struct {
 	// the AI is told to skip reconstructing it (saves tokens + can't fabricate). Empty =
 	// fall back to AI-reconstructed test_process / PoC.
 	Reproduction json.RawMessage
+	// PageMarkdown is the detailed report stored on the finding (findings.report).
+	// Single-finding export sets it so docx/PDF render exactly what the detail
+	// page shows, including images and tables. Task-level reports leave it empty.
+	PageMarkdown string
 	CreatedAt    time.Time
-	Enrichment *Enrichment // pre-loaded persisted enrichment; when set the AI call is skipped
+	Enrichment   *Enrichment // pre-loaded persisted enrichment; when set the AI call is skipped
 }
 
 // Reproduction is the structured 复现过程 captured in-situ by the agent (mirrors the
@@ -117,6 +122,10 @@ type GenInput struct {
 	// 富化,报告级综述走模板兜底,复现过程优先结构化 reproduction——秒级出稿,
 	// 不依赖 LLM 配置。
 	NoAI bool
+	// PageOnly renders only the finding detail page content (title + metadata +
+	// the stored Markdown body), without the 5-chapter pentest report skeleton.
+	// Used by single-finding exports so SRC findings don't look like a pentest report.
+	PageOnly bool
 }
 
 // BuildDoc assembles the report JSON: skeleton defaults + AI-written narrative
@@ -147,6 +156,16 @@ func BuildDoc(ctx context.Context, pg *db.DB, in *GenInput) *reportDoc {
 		Methodology:      toNameDesc(sk.Methodology),
 		Tools:            toNameDesc(sk.Tools),
 		Standards:        sk.Standards,
+	}
+
+	// Single-finding export: emit only the detail page content, not the
+	// 5-chapter pentest report skeleton (SRC findings must not look like a
+	// pentest engagement report).
+	if in.PageOnly && len(in.Findings) > 0 {
+		doc.PageOnly = true
+		d := assembleVuln(loc, in.Findings[0], Enrichment{}, "", in.DataDir)
+		doc.SystemsDetail = []systemDetail{{Vulns: []vulnDetail{d}}}
+		return doc
 	}
 
 	// --- concurrent AI: report-level + per-finding narrative ---
@@ -242,7 +261,7 @@ func assembleVuln(loc string, f FindingInput, enr Enrichment, secNo, dataDir str
 	// Vuln NAME: AI-polished title → vulnclass (already a name, e.g. "SSL POODLE
 	// (CVE-2014-3566)") → cleaned summary as last resort. Summary is the long
 	// description, never the name.
-	title := cleanTitle(nz(enr.Title, nz(f.VulnClass, f.Summary)))
+	title := cleanTitle(nz(enr.Title, nz(f.Name, nz(f.VulnClass, f.Summary))))
 	target := nz(enr.Target, f.Target)
 	d := vulnDetail{
 		SecNo: secNo, Title: title,
@@ -267,6 +286,11 @@ func assembleVuln(loc string, f FindingInput, enr Enrichment, secNo, dataDir str
 	}
 	d.RiskAnalysis = enr.RiskAnalysis
 	d.Remediation = enr.Remediation
+	// Single-finding export: render the detail page's Markdown report verbatim
+	// (headings/code/tables/images) so Word and PDF match the page.
+	if strings.TrimSpace(f.PageMarkdown) != "" {
+		d.PageContent = markdownToBlocks(f.PageMarkdown, dataDir)
+	}
 	// 客户报告脱敏：把 AI 富化/PoC 里引用到的平台内部 scratch 路径收敛为文件名。
 	d.Description = redactLines(d.Description, dataDir)
 	d.RiskAnalysis = redactLines(d.RiskAnalysis, dataDir)
@@ -427,6 +451,7 @@ func worstSeverityAll(fs []FindingInput) string {
 	}
 	return worst
 }
+
 // ---- text utils ----
 
 func defaultStr(v, d string) string {
