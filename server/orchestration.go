@@ -538,6 +538,7 @@ func (s *Server) seedOrchestrationTools() {
 	s.reseedReporterPromptV4()        // reporter 提示词:发现方式写真实路径,去掉 SRC 套话(一次性)
 	s.reseedReporterPromptV5()        // reporter 提示词:加入按证据深度定级标尺与措辞红线(一次性)
 	s.reseedReporterPromptV6()        // reporter 提示词:加入截断证据处理规则(一次性)
+	s.reseedReporterPromptV7()        // reporter 提示词:未绑定时改用 traffic_search 读已存证流量(一次性)
 	s.seedFindingTrafficTools()       // 增加可选证据参数及只读证据工具，保留用户配置
 	s.seedFindingWorkflowTools()
 	// 注：pentest 的默认工具绑定无需迁移——BuiltinToolSeeds 在全新初始化时就把
@@ -879,6 +880,30 @@ func (s *Server) reseedReporterPromptV6() {
 		return
 	}
 	log.Printf("[prompts] reporter 提示词已加入截断证据处理规则(一次性)")
+}
+
+// reseedReporterPromptV7 存量库迁移:reporter 提示词补上「未绑定时用 traffic_search
+// 查平台已存证流量」的路径——http_probe 每次调用都完整落库(与被动捕获开关无关),
+// 只有 get_finding_traffic 不足以覆盖未显式绑定的 finding。追加新版本并切换。
+func (s *Server) reseedReporterPromptV7() {
+	const flag = "reporter_prompt_traffic_lookup_v1"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	defer func() { _ = s.m.pg.SetSetting(flag, "true") }()
+	a, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil || a == nil {
+		return // 全新库 seedPrompts 会直接 seed 最新默认
+	}
+	tmpl := agent.ReporterDefaultPrompt
+	if cur, err := s.m.pg.CurrentPrompt(a.ID); err == nil && cur == tmpl {
+		return
+	}
+	if _, err := s.m.pg.ResetPromptToDefault(a.ID, tmpl); err != nil {
+		log.Printf("[prompts] reporter 提示词重刷失败: %v", err)
+		return
+	}
+	log.Printf("[prompts] reporter 提示词已补上已存证流量的检索路径(一次性)")
 }
 
 // collectToolNames 动态枚举全部信息收集工具名(各工具族切片聚合)——recon agent

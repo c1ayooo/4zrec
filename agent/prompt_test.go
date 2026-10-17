@@ -21,6 +21,7 @@ func TestReporterPromptSeverityRubric(t *testing.T) {
 		"推断：基于框架行为或同类接口的推测",
 		"━━ 截断证据的处理 ━━",
 		"已截断，原长 N 字节",
+		"traffic_search(host=<目标主机>)",
 		"交付前自检",
 	} {
 		if !strings.Contains(ReporterDefaultPrompt, want) {

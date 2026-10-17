@@ -318,10 +318,21 @@ func TestFindingWorkflowReporterBindsBeforeWritingReport(t *testing.T) {
 	if offDef.FindingGuidance != "" {
 		t.Fatal("off reporter still receives auto-binding guidance")
 	}
+	// 关闭自动绑定只收回 bind 工具与 guidance；traffic_search/get/blob 是只读
+	// 证据工具，仍要保留——reporter 需要用它们读取 http_probe 已存证的完整正文。
 	for _, tool := range off {
-		if tool.Name() == "traffic_search" || tool.Name() == "traffic_get" || tool.Name() == "traffic_blob" || tool.Name() == "bind_finding_traffic" {
+		if tool.Name() == "bind_finding_traffic" {
 			t.Fatal("auto-binding tool exposed while off", tool.Name())
 		}
+	}
+	var hasSearch bool
+	for _, tool := range off {
+		if tool.Name() == "traffic_search" {
+			hasSearch = true
+		}
+	}
+	if !hasSearch {
+		t.Fatal("read-only traffic tools must stay available with auto-binding off")
 	}
 	workflowCall(t, ctx, workflowTool(t, off, "get_finding_traffic"), map[string]any{"finding_id": f.FindingID}, false)
 	workflowTool(t, off, "update_finding_report")

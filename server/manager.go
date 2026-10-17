@@ -751,11 +751,15 @@ func encodeJSON(v any) json.RawMessage {
 }
 
 // HostTools are runtime host-provided tools added to EVERY agent's base list (via
-// ToolAugment); the tools table then filters them per-agent binding. Currently the
-// traffic tools, gated by the global capture switch: empty when capture is off, so
-// no agent gets traffic_search/traffic_get regardless of binding.
+// ToolAugment); the tools table then filters them per-agent binding.
+//
+// 流量读工具常驻暴露:http_probe 每次调用都会把完整请求/响应写入同一证据库,
+// 即使被动捕获(traffic_capture)关闭也有数据。此前 capture 关闭时直接不注入
+// traffic_search/get/blob,导致 reporter 无法读取这些已存证的流量来补齐被截断
+// 的实体/正文。读工具本身只读,是否可见仍由 tools 表的 agent 绑定决定;被动
+// 捕获开关继续只控制 MITM 代理与 CA 注入。
 func (m *Manager) HostTools() []actool.CoreTool {
-	if m.traffic == nil || !m.TrafficEnabled() {
+	if m.traffic == nil {
 		return nil
 	}
 	return m.traffic.Tools()
