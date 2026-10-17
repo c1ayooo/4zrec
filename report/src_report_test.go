@@ -20,7 +20,7 @@ func TestBuildSRCMarkdown(t *testing.T) {
 
 ### 1.2 发现方式
 
-在 SRC 漏洞挖掘过程中发现。
+通过接口枚举发现匿名可读桶。
 
 ### 1.3 漏洞利用方式
 

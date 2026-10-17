@@ -522,6 +522,7 @@ func (s *Server) seedOrchestrationTools() {
 	s.upgradeReporterTriggerMessage() // 老库补迁移:让 reporter 回传 evidence_version(一次性)
 	s.reseedReporterPromptV2()        // reporter 提示词:按任务性质选择 SRC/渗透口径(一次性)
 	s.reseedReporterPromptV3()        // reporter 提示词:统一 SRC 口径(一次性)
+	s.reseedReporterPromptV4()        // reporter 提示词:发现方式写真实路径,去掉 SRC 套话(一次性)
 	s.seedFindingTrafficTools()       // 增加可选证据参数及只读证据工具，保留用户配置
 	s.seedFindingWorkflowTools()
 	// 注：pentest 的默认工具绑定无需迁移——BuiltinToolSeeds 在全新初始化时就把
@@ -790,6 +791,30 @@ func (s *Server) seedReconAgent() {
 		log.Printf("[recon] 创建触发器失败: %v", err)
 	}
 	log.Printf("[recon] 已预置「信息收集」agent + 任务创建触发器")
+}
+
+// reseedReporterPromptV4 存量库迁移:reporter 提示词去掉「在 SRC 漏洞挖掘过程中
+// 发现/复验」套话,改为写实际发现路径。追加新版本并切换(旧版本留在历史可找回),
+// flag 守卫只做一次;全新库 seed 已是最新默认。
+func (s *Server) reseedReporterPromptV4() {
+	const flag = "reporter_prompt_real_discovery_v1"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	defer func() { _ = s.m.pg.SetSetting(flag, "true") }()
+	a, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil || a == nil {
+		return // 全新库 seedPrompts 会直接 seed 最新默认
+	}
+	tmpl := agent.ReporterDefaultPrompt
+	if cur, err := s.m.pg.CurrentPrompt(a.ID); err == nil && cur == tmpl {
+		return
+	}
+	if _, err := s.m.pg.ResetPromptToDefault(a.ID, tmpl); err != nil {
+		log.Printf("[prompts] reporter 提示词重刷失败: %v", err)
+		return
+	}
+	log.Printf("[prompts] reporter 提示词已追加新默认版本(发现方式写真实路径,去掉 SRC 套话,一次性)")
 }
 
 // collectToolNames 动态枚举全部信息收集工具名(各工具族切片聚合)——recon agent
