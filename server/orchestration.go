@@ -523,6 +523,7 @@ func (s *Server) seedOrchestrationTools() {
 	s.reseedReporterPromptV2()        // reporter 提示词:按任务性质选择 SRC/渗透口径(一次性)
 	s.reseedReporterPromptV3()        // reporter 提示词:统一 SRC 口径(一次性)
 	s.reseedReporterPromptV4()        // reporter 提示词:发现方式写真实路径,去掉 SRC 套话(一次性)
+	s.reseedReporterPromptV5()        // reporter 提示词:加入按证据深度定级标尺与措辞红线(一次性)
 	s.seedFindingTrafficTools()       // 增加可选证据参数及只读证据工具，保留用户配置
 	s.seedFindingWorkflowTools()
 	// 注：pentest 的默认工具绑定无需迁移——BuiltinToolSeeds 在全新初始化时就把
@@ -536,7 +537,7 @@ func (s *Server) seedOrchestrationTools() {
 // reaches an old DB otherwise. Preserves each tool's agent binding + enabled flag.
 // Bump the flag whenever these tools' schemas/descriptions change in code.
 func (s *Server) refreshBuiltinToolSchemas() {
-	const flag = "tool_schema_refresh_v7_list_facts_paging"
+	const flag = "tool_schema_refresh_v8_report_severity"
 	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
 		return
 	}
@@ -554,7 +555,7 @@ func (s *Server) refreshBuiltinToolSchemas() {
 	//     SeedTool 首插入only，旧库已 seed 的 schema 否则收不到这个新参数。
 	//   - list_facts：改为分页，新增 limit/before/q 入参；旧库已 seed 的空 schema 否则
 	//     在工具管理页显示「无参数」，模型也拿不到这几个参数说明。
-	refreshBuiltin := map[string]bool{"goal_met": true, "insert_assets": true, "list_facts": true}
+	refreshBuiltin := map[string]bool{"goal_met": true, "insert_assets": true, "list_facts": true, "report_finding": true}
 	for _, sd := range agent.BuiltinToolSeeds() {
 		if !refreshBuiltin[sd.Key] {
 			continue
@@ -815,6 +816,31 @@ func (s *Server) reseedReporterPromptV4() {
 		return
 	}
 	log.Printf("[prompts] reporter 提示词已追加新默认版本(发现方式写真实路径,去掉 SRC 套话,一次性)")
+}
+
+// reseedReporterPromptV5 存量库迁移:reporter 提示词加入「按证据深度定级」标尺——
+// 四级判据、影响范围与证据深度取较低档、部分验证最高 medium 且标注“未端到端验证”、
+// 数据泄露须抽样读完整实体、理由必须写“为什么不是上一级”,以及措辞红线与交付前自检。
+// 追加新版本并切换,旧版本留在历史可找回;flag 守卫只做一次。
+func (s *Server) reseedReporterPromptV5() {
+	const flag = "reporter_prompt_severity_rubric_v1"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	defer func() { _ = s.m.pg.SetSetting(flag, "true") }()
+	a, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil || a == nil {
+		return // 全新库 seedPrompts 会直接 seed 最新默认
+	}
+	tmpl := agent.ReporterDefaultPrompt
+	if cur, err := s.m.pg.CurrentPrompt(a.ID); err == nil && cur == tmpl {
+		return
+	}
+	if _, err := s.m.pg.ResetPromptToDefault(a.ID, tmpl); err != nil {
+		log.Printf("[prompts] reporter 提示词重刷失败: %v", err)
+		return
+	}
+	log.Printf("[prompts] reporter 提示词已加入证据深度定级标尺(一次性)")
 }
 
 // collectToolNames 动态枚举全部信息收集工具名(各工具族切片聚合)——recon agent

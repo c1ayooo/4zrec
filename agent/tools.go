@@ -1217,7 +1217,7 @@ func (t *ToolSet) goalMet() actool.CoreTool {
 
 func (t *ToolSet) addFinding() actool.CoreTool {
 	return writeTool("report_finding", "记录确认的漏洞，用 evidence 提供命令输出、日志等可验证证据。任务上下文传当前 intent_id。返回的 finding_id 是独立漏洞记录 ID，finding_node_id 是探索节点 ID（第一行保留该节点编号）。", obj(map[string]any{
-		"vulnclass": str("漏洞类别"), "name": str("漏洞名称"), "severity": str("critical|high|medium|low"), "summary": str("发现摘要"),
+		"vulnclass": str("漏洞类别"), "name": str("漏洞名称"), "severity": str("critical|high|medium|low。按证据深度定级（不按想象后果），取「影响范围」与「证据深度」两者中较低一档：critical=未授权 RCE/获取服务器权限，或全量口令/核心业务库明文可读且端到端验证；high=未授权批量读取全量业务数据（≥1 万条或含未公开敏感字段），或未授权写入生产数据且确认落库；medium=未授权可读部分业务数据、功能级授权缺失但数据落地未证实、隔离绕过只读到公开内容；low=版本号/租户名/枚举 oracle/配置项等不含业务数据的信息泄露。证据只到请求进入业务层（400/500/字段校验错误）而未确认数据落地的，最高 medium，且 name/summary 必须标注「（未端到端验证）」"), "summary": str("发现摘要"),
 		"intent_id": idp("当前任务的意图 id"), "asset_ids": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "受影响资产 id"},
 		"evidence":         str("证据/PoC。Markdown 固定规范(详情页按此渲染,必须遵守):按复现步骤组织,每步以单独一行「## N. 标题」开始(N=1,2,…);命令放 ```bash 围栏、响应/输出放 ```json(纯文本输出用无语言围栏);命令与响应不得和说明文字混写在一行,禁止用「→」连接命令与响应;结尾的对照/影响面/合规说明写成引用行,如「> **对照**: …」。复现过程同时填写 reproduction 结构化字段(权威渠道),evidence 保留同内容的步骤化呈现"),
 		"evidence_hint_id": idp("可选：本任务中对应此漏洞的提示节点 ID，自动携带其结构化 traffic_refs；不能引用继承提示或其他漏洞的提示"),
