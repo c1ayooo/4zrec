@@ -1,9 +1,37 @@
 package agent
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
+
+// TestReporterPromptSeverityRubric 钉住报告定级口径:提示词与 report_finding 的
+// severity 说明必须包含按证据深度定级、部分验证最高 medium、为什么不是上一级、
+// 数据泄露抽样范围等硬约束,防止后续编辑把标尺改丢。
+func TestReporterPromptSeverityRubric(t *testing.T) {
+	for _, want := range []string{
+		"定级标尺（按证据深度定级，不按想象后果）",
+		"取「影响范围」与「证据深度」两者中较低的一档",
+		"最高 medium",
+		"（未端到端验证）",
+		"为什么不是上一级",
+		"已确认字段范围",
+		"已抽样确认正文为公开内容",
+		"推断：基于框架行为或同类接口的推测",
+		"交付前自检",
+	} {
+		if !strings.Contains(ReporterDefaultPrompt, want) {
+			t.Errorf("reporter prompt missing %q", want)
+		}
+	}
+	b, _ := json.Marshal(NewToolSet(nil, "").addFinding().InputSchema())
+	for _, want := range []string{"较低一档", "未端到端验证", "数据落地"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("report_finding severity schema missing %q", want)
+		}
+	}
+}
 
 func TestRenderSystemOverrideAndFallback(t *testing.T) {
 	t.Cleanup(func() { PromptOverride = nil })
