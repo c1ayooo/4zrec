@@ -36,6 +36,8 @@ Thumbs.db
 
 # 内嵌前端的单二进制产物
 /artex
+# 改名前的历史二进制备份
+/artex.*
 # 一键更新在可执行文件旁留下的中间产物（暂存件 / 备份 / 失败版本 / 升级标记）
 /artex.new
 /artex.new.sha256
@@ -47,6 +49,11 @@ Thumbs.db
 
 # JWT 签名密钥（运行时生成，存项目根，绝不提交）
 /jwt.key
+/4zrec
+/4zrec.log
+/4zrec.old*
+/4zrec.new*
+/4zrec.pre*
 
 # Docker 部署生成的本地环境（含密码/密钥，不提交）
 .env
