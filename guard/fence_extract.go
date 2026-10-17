@@ -50,6 +50,60 @@ var valueFlags = map[string]bool{
 // urlValueFlags 值需按 URL 解析的旗标。
 var urlValueFlags = map[string]bool{"--url": true, "-u2": true}
 
+// dnsRecordTypes / dnsClasses 是 dig/host/nslookup 的查询类型与类,不是目标。
+// `dig +short $d CNAME`、`dig TXT x.origin.asn.cymru.com` 里的类型 token
+// 曾被当成域名送审,导致每次正常 DNS 查询都误触围栏。
+var dnsRecordTypes = map[string]bool{
+	"A": true, "AAAA": true, "AFSDB": true, "ANY": true, "AXFR": true, "CAA": true,
+	"CDNSKEY": true, "CDS": true, "CERT": true, "CNAME": true, "DHCID": true, "DLV": true,
+	"DNAME": true, "DNSKEY": true, "DS": true, "EUI48": true, "EUI64": true, "HINFO": true,
+	"HIP": true, "HTTPS": true, "IPSECKEY": true, "IXFR": true, "KEY": true, "KX": true,
+	"LOC": true, "MAILA": true, "MAILB": true, "MX": true, "NAPTR": true, "NS": true,
+	"NSEC": true, "NSEC3": true, "NSEC3PARAM": true, "NULL": true, "OPENPGPKEY": true,
+	"OPT": true, "PTR": true, "RRSIG": true, "SIG": true, "SMIMEA": true, "SOA": true,
+	"SRV": true, "SSHFP": true, "SVCB": true, "TA": true, "TKEY": true, "TLSA": true,
+	"TSIG": true, "TXT": true, "URI": true, "ZONEMD": true,
+}
+
+var dnsClasses = map[string]bool{"IN": true, "CH": true, "HS": true, "NONE": true}
+
+// isDNSTypeOrClass 判定 dig/host/nslookup 的查询类型/类 token。
+func isDNSTypeOrClass(tok string) bool {
+	t := strings.ToUpper(strings.TrimSpace(tok))
+	if t == "" {
+		return false
+	}
+	if dnsRecordTypes[t] || dnsClasses[t] {
+		return true
+	}
+	// RFC 3597 的 TYPE1234 形式。
+	if strings.HasPrefix(t, "TYPE") && len(t) > 4 {
+		for _, c := range t[4:] {
+			if c < '0' || c > '9' {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// scanOpenSSLArgs openssl 只从显式连接类旗标取值。子命令(x509/req/...)与
+// `-ext subjectAltName`、证书文件路径都不是目标——此前它们被当作位置参数
+// 送审,正常解析证书反而卡审批。
+func scanOpenSSLArgs(rest []string, addHost func(string)) {
+	for k := 0; k < len(rest); k++ {
+		switch strings.ToLower(rest[k]) {
+		case "-connect", "-host", "-proxy", "-servername", "-verify_hostname", "-verify_ip":
+			if k+1 < len(rest) {
+				k++
+				addHost(rest[k])
+			}
+		}
+	}
+}
+
+
 // reDevTCP /dev/tcp|udp/host/port 重定向。
 var reDevTCP = regexp.MustCompile(`(?i)/dev/(?:tcp|udp)/([^/\s]+)/([0-9]{1,5})`)
 
@@ -222,9 +276,29 @@ func scanCommandSegment(seg string, addHost func(string), addDomain func(string)
 		return
 	}
 	rest := args[i+1:]
+	if cmd == "openssl" {
+		scanOpenSSLArgs(rest, addHost)
+		return
+	}
+	// dig/host/nslookup 的位置参数里混着查询类型与类(CNAME/TXT/IN...),
+	// 它们不是目标;真正的主机名仍按位置参数提取。
+	dnsQuery := cmd == "dig" || cmd == "host" || cmd == "nslookup"
 	for k := 0; k < len(rest); k++ {
 		tok := rest[k]
 		if tok == "" {
+			continue
+		}
+		if dnsQuery {
+			switch {
+			case tok == "-t" || tok == "-c" || tok == "-q" || tok == "-f" || tok == "-p" || tok == "-W":
+				k++ // 旗标值(查询类型/类/文件名/端口/超时)
+			case strings.HasPrefix(tok, "@"), strings.HasPrefix(tok, "+"), strings.HasPrefix(tok, "-"):
+				// 解析器地址与 dig 的 +short 等选项
+			case isDNSTypeOrClass(tok):
+				// 查询类型/类
+			default:
+				addHost(tok)
+			}
 			continue
 		}
 		// --resolve host:port:addr → 取 host
