@@ -5,7 +5,6 @@ on:
 
 permissions:
   contents: write # 创建 Release 需要
-  packages: write # 推送镜像到 GHCR 需要(仓库自带 GITHUB_TOKEN,无需账号)
   packages: write # 推 GHCR 镜像需要
 
 jobs:
