@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -16,6 +17,21 @@ func (s *Server) pgListVulnIntel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"entries": entries, "total": total})
+}
+
+// pgGetVulnIntel 返回单条完整情报（统一漏洞库详情用）。
+func (s *Server) pgGetVulnIntel(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeErr(w, 400, "invalid id")
+		return
+	}
+	entry, err := s.m.PG().GetVulnIntel(id)
+	if err != nil {
+		writeErr(w, 404, "not found")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"entry": entry})
 }
 
 // pgVulnIntelRefresh 触发一次立即轮询(非阻塞,后台执行)。

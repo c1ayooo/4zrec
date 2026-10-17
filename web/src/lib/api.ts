@@ -126,6 +126,7 @@ import type {
   VulnIntelStatus,
   VulnKBEntry,
   VulnKBStats,
+  VulnLibraryEntry,
   WorkspaceFile,
   WorkspaceListing,
 } from "@/lib/types";
@@ -1493,6 +1494,16 @@ export const api = {
   vulnKbEntry: (id: number) => get<{ entry: VulnKBEntry }>(`/vulnkb/${id}`),
   vulnKbStats: () => get<{ stats: VulnKBStats }>("/vulnkb/stats"),
 
+  // ---- 统一漏洞库(1day 库 + 情报流;source 为空表示全部) ----
+  vulnLibrary: (params?: { q?: string; source?: string; page?: number; size?: number }) => {
+    const sp = new URLSearchParams();
+    if (params?.q) sp.set("q", params.q);
+    if (params?.source) sp.set("source", params.source);
+    sp.set("page", String(params?.page ?? 0));
+    sp.set("size", String(params?.size ?? 50));
+    return get<{ entries: VulnLibraryEntry[]; total: number }>(`/vuln-library?${sp}`);
+  },
+
   // ---- vuln intel (自动抓取的漏洞情报流) ----
   vulnIntel: (params?: { q?: string; severity?: string; page?: number; size?: number }) => {
     const sp = new URLSearchParams();
@@ -1502,6 +1513,7 @@ export const api = {
     sp.set("size", String(params?.size ?? 50));
     return get<{ entries: VulnIntelEntry[]; total: number }>(`/vulnintel?${sp}`);
   },
+  vulnIntelEntry: (id: number) => get<{ entry: VulnIntelEntry }>(`/vulnintel/${id}`),
   vulnIntelRefresh: () => post<{ ok: boolean }>("/vulnintel/refresh"),
   vulnIntelStatus: () => get<VulnIntelStatus>("/vulnintel/status"),
 

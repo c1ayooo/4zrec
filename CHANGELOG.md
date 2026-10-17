@@ -2,6 +2,12 @@
 
 本项目的重要变更记录在此文件中，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased]
+
+### 漏洞库
+
+- **合并 1day 库与情报流**：`/function/vuln-kb` 去掉两个 tab，改为单一漏洞库列表；统一搜索、来源筛选（全部 / 1day 库 / 情报流）和分页，详情按来源展示 1day 打击字段或情报富化字段。底层仍保留 `vuln_kb` 与 `vuln_intel` 两张表，不迁移、不丢数据。
+
 ## [0.4.4] - 2026-10-18
 
 本版补齐容器与 Release 包的运行时依赖，避免 Docker 部署出现“能启动但部分功能缺工具/数据”的情况。

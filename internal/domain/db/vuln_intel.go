@@ -99,3 +99,24 @@ LIMIT ` + strconv.Itoa(size) + " OFFSET " + strconv.Itoa(page*size)
 	}
 	return out, total, rows.Err()
 }
+
+// GetVulnIntel 返回单条完整情报（含富化字段），供统一漏洞库详情使用。
+func (d *DB) GetVulnIntel(id int64) (*EnrichedVulnIntel, error) {
+	v := &EnrichedVulnIntel{}
+	err := d.QueryRow(`
+SELECT v.id, v.title, COALESCE(v.description,''), COALESCE(v.severity,''), COALESCE(v.cve,''),
+       COALESCE(v.disclosure,''), COALESCE(v.solutions,''), COALESCE(v.source,''),
+       COALESCE(v.source_url,''), v.tags, v.refs, v.created_at, v.updated_at,
+       v.github_poc, v.cvss_score, COALESCE(v.cvss_vector,''), v.cwes, v.affected,
+       v.lab_only, v.enriched_at
+FROM vuln_intel v WHERE v.id=$1`, id,
+	).Scan(&v.ID, &v.Title, &v.Description, &v.Severity, &v.CVE,
+		&v.Disclosure, &v.Solutions, &v.Source, &v.SourceURL, &v.Tags, &v.Refs,
+		&v.CreatedAt, &v.UpdatedAt,
+		&v.GithubPoc, &v.CvssScore, &v.CvssVector, &v.Cwes, &v.Affected,
+		&v.LabOnly, &v.EnrichedAt)
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
+}

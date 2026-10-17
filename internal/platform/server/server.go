@@ -19,15 +19,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
-	"github.com/c1ayooo/4zrec/internal/toolface/intercept"
+	"github.com/c1ayooo/4zrec/internal/domain/traffic"
+	"github.com/c1ayooo/4zrec/internal/kernel/transcript"
+	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
 	"github.com/c1ayooo/4zrec/internal/platform/llm/llmpool"
 	"github.com/c1ayooo/4zrec/internal/platform/llm/llmrec"
 	"github.com/c1ayooo/4zrec/internal/platform/report"
+	"github.com/c1ayooo/4zrec/internal/toolface/intercept"
 	actool "github.com/c1ayooo/4zrec/internal/toolface/tools"
-	"github.com/c1ayooo/4zrec/internal/domain/traffic"
-	"github.com/c1ayooo/4zrec/internal/kernel/transcript"
 	"github.com/cloudwego/eino/components/model"
 )
 
@@ -831,7 +831,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/vulnkb", s.pgListVulnKB)        // 漏洞知识库(1day 库)
 	mux.HandleFunc("GET /api/vulnkb/stats", s.pgVulnKBStats)
 	mux.HandleFunc("GET /api/vulnkb/{id}", s.pgGetVulnKB)
-	mux.HandleFunc("GET /api/vulnintel", s.pgListVulnIntel) // 漏洞情报流(自动抓取)
+	mux.HandleFunc("GET /api/vuln-library", s.pgListVulnLibrary) // 统一漏洞库(1day + 情报流)
+	mux.HandleFunc("GET /api/vulnintel", s.pgListVulnIntel)      // 漏洞情报流(自动抓取)
+	mux.HandleFunc("GET /api/vulnintel/{id}", s.pgGetVulnIntel)
 	mux.HandleFunc("POST /api/vulnintel/refresh", s.pgVulnIntelRefresh)
 	mux.HandleFunc("GET /api/vulnintel/status", s.pgVulnIntelStatus)
 

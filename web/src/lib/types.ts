@@ -1900,6 +1900,21 @@ export interface VulnKBStats {
   types: { name: string; count: number }[];
 }
 
+/** 统一漏洞库列表条目(1day 库 + 自动抓取情报流)。 */
+export interface VulnLibraryEntry {
+  source: "1day" | "intel";
+  id: number;
+  title: string;
+  product?: string;
+  vuln_type?: string;
+  severity?: string;
+  cve?: string;
+  fingerprint?: string;
+  disclosure?: string;
+  source_name?: string;
+  created_at: string;
+}
+
 /** 自动抓取的漏洞情报一条记录(含富化字段)。 */
 export interface VulnIntelEntry {
   id: number;
