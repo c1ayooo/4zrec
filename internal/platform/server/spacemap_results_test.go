@@ -25,7 +25,8 @@ func TestSpacemapResultsPage(t *testing.T) {
 	stamp := time.Now().UnixNano()
 	results := []*spacemap.Result{
 		{Source: "FOFA", Domain: fmt.Sprintf("f-%d.example", stamp), Host: fmt.Sprintf("f-%d.example", stamp)},
-		{Source: "Quake", IP: "198.51.100.77"},
+		// 不能用 TEST-NET/文档网段:spacemapImport 会按设计丢弃噪音 IP。
+		{Source: "Quake", IP: "93.184.216.34"},
 	}
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{}`))
@@ -66,7 +67,7 @@ func TestSpacemapResultsPage(t *testing.T) {
 	allRows, _, _ := m.pg.SpacemapResultsPage(context.Background(), "", "", 0, 200, 0)
 	seenIP := false
 	for _, r := range allRows {
-		if r.Label == "198.51.100.77" && r.Source == "Quake" {
+		if r.Label == "93.184.216.34" && r.Source == "Quake" {
 			seenIP = true
 		}
 	}

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -21,13 +22,26 @@ func TestSeedReconAgent(t *testing.T) {
 	// 注意用 defer(先于 m.Close 执行)——t.Cleanup 在全部 defer 之后跑,
 	// 那时连接已关,删除会静默失败留下脏行,毒化后续测试。
 	_ = m.pg.SetSetting("recon_agent_seed_v1", "")
+	// 共享测试库下，前面的用例可能已经建过 recon agent；seedReconAgent 遇到
+	// 已存在的 key 会直接返回，必须先清掉旧行，否则测不到播种逻辑。
+	_, _ = m.pg.Exec(`DELETE FROM agent_triggers WHERE agent_key='recon'`)
+	_, _ = m.pg.Exec(`DELETE FROM agents WHERE key='recon'`)
 	defer func() {
 		_, _ = m.pg.Exec(`DELETE FROM agent_triggers WHERE agent_key='recon'`)
 		_, _ = m.pg.Exec(`DELETE FROM agents WHERE key='recon'`)
 		_ = m.pg.SetSetting("recon_agent_seed_v1", "")
 	}()
 
-	s.seedSpacemapTools() // 先播种收集工具的工具表行(生产启动序列在前)
+	// 先播种内置工具目录(生产由 wireTools 完成);否则 list_assets/insert_assets/
+	// add_task_scope 还没有 DB 行,绑定会被静默丢弃。
+	for _, seed := range agent.BuiltinToolSeeds() {
+		schema, _ := json.Marshal(seed.Schema)
+		agents, _ := json.Marshal(seed.Agents)
+		if err := m.pg.SeedTool(seed.Key, seed.Desc, schema, agents); err != nil {
+			t.Fatalf("seed builtin tool %s: %v", seed.Key, err)
+		}
+	}
+	s.seedOrchestrationTools() // 再播种编排/收集工具行(生产启动序列在前)
 	s.seedReconAgent()
 
 	a, err := m.pg.GetAgentByKey("recon")

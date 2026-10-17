@@ -48,6 +48,9 @@ func TestEnvLegacyFallback(t *testing.T) {
 	os.WriteFile(cfgPath, []byte(`{"database":{"dsn":"postgres://legacy/x"}}`), 0o644)
 	t.Setenv("ZREC_CONFIG", "")
 	t.Setenv("ARTEX_CONFIG", cfgPath)
+	// 测试进程可能带着 ZREC_PG_DSN(全量测试用的临时库);清掉它才能验证旧名回退。
+	t.Setenv("ZREC_PG_DSN", "")
+	t.Setenv("ARTEX_PG_DSN", "")
 	got, _, err := PostgresDSN()
 	if err != nil || got != "postgres://legacy/x" {
 		t.Fatalf("旧名回退失效: got %q err %v", got, err)

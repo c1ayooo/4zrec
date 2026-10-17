@@ -15,8 +15,10 @@ func TestHTTPProbePriorityBindings(t *testing.T) {
 	defer m.Close()
 	s := &Server{m: m}
 
-	// 生产启动序:工具行播种 → 一次性补绑。重置 flag 以验证迁移可重跑。
+	// 生产启动序:工具行播种 → recon 播种(含 http_probe 绑定) → 一次性补绑。
+	// 重置 flag 以验证迁移可重跑。
 	s.seedSpacemapTools()
+	s.seedReconAgent()
 	_ = m.pg.SetSetting("http_probe_priority_v1", "")
 	s.rebindHTTPProbeAgents()
 
@@ -49,7 +51,7 @@ func TestHTTPProbePriorityBindings(t *testing.T) {
 	if err := m.pg.UpdateToolSchema("http_probe", []byte(old)); err != nil {
 		t.Fatal(err)
 	}
-	_ = m.pg.SetSetting("http_probe_schema_v2", "")
+	_ = m.pg.SetSetting("http_probe_schema_v3", "")
 	s.mergeHTTPProbeSchema()
 
 	tools, err = m.pg.ListTools()

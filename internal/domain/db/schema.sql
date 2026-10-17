@@ -903,6 +903,22 @@ CREATE TABLE IF NOT EXISTS agent_skill_visibility (
 );
 CREATE INDEX IF NOT EXISTS idx_askv_skill ON agent_skill_visibility(skill_name);
 
+-- projects 是 recon_runs / recon_schedules / connections 等早期表的外键目标，
+-- 必须先于这些表创建；§R 只保留项目范围与授权语义说明。
+CREATE TABLE IF NOT EXISTS projects (
+    id          BIGSERIAL PRIMARY KEY,
+    name        TEXT NOT NULL,
+    company_id  BIGINT REFERENCES companies(id) ON DELETE SET NULL,
+    description TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_projects_company ON projects(company_id) WHERE company_id IS NOT NULL;
+DROP TRIGGER IF EXISTS trg_projects_upd ON projects;
+CREATE TRIGGER trg_projects_upd BEFORE UPDATE ON projects
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
 -- 主动测绘流水线运行记录（recon_run 工具）。一次运行一行：阶段开关、逐阶段
 -- 统计与到达阶段、终态与错误——中断/失败从行内即可追溯（异步 goroutine 的
 -- 事实源；recon_results 工具读这里）。
@@ -1607,19 +1623,7 @@ CREATE TABLE IF NOT EXISTS report_templates (
 -- 状态只升不降:approved/rejected 是终态,范围匹配只能把 pending/NULL 提为
 -- approved,人工拒绝优先于一切范围规则。
 -- =====================================================================
-CREATE TABLE IF NOT EXISTS projects (
-    id          BIGSERIAL PRIMARY KEY,
-    name        TEXT NOT NULL,
-    company_id  BIGINT REFERENCES companies(id) ON DELETE SET NULL,
-    description TEXT NOT NULL DEFAULT '',
-    status      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_projects_company ON projects(company_id) WHERE company_id IS NOT NULL;
-DROP TRIGGER IF EXISTS trg_projects_upd ON projects;
-CREATE TRIGGER trg_projects_upd BEFORE UPDATE ON projects
-    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+-- projects 表已在 §G 之前提前创建（供 recon_runs 等早期表的外键引用）。
 
 -- 项目授权范围,结构同 company_scope(kind/domain/net/value/raw),随项目级联删除。
 -- 域名规则按后缀匹配(根域及其所有子域),cidr/ip 按 net 包含,icp 精确相等,
