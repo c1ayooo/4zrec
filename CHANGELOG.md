@@ -2,6 +2,17 @@
 
 本项目的重要变更记录在此文件中，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.4.4] - 2026-10-18
+
+本版补齐容器与 Release 包的运行时依赖，避免 Docker 部署出现“能启动但部分功能缺工具/数据”的情况。
+
+### 容器与发布包
+
+- **数据资产随镜像/发布包分发**：`configs/`（SaaS 规则、CDN/成功信号覆盖、指纹种子）与 `vulnkb/`（1day 漏洞库）纳入 Docker 镜像和 Release zip。
+- **报告渲染依赖**：镜像安装 `python-docx` 与 Python `playwright`；PDF 导出补充 Chromium 查找路径（Playwright 缓存、`PLAYWRIGHT_BROWSERS_PATH`、`chrome-linux*` / `headless_shell`），并修正 Chromium 版本串校验（`Chromium ...` 不再被误判为不可用）。
+- **常用 CLI 补全**：镜像加入 `openssh-client`、`postgresql-client`、`default-mysql-client`、`sqlmap`、`whatweb`、`masscan`、`gobuster`、`ffuf`、`libpcap`；并以官方 amd64/arm64 预编译包安装 `nuclei`、`subfinder`、`httpx`、`dnsx`、`katana`、`naabu`、`amass`、`feroxbuster`、`puredns`、`shuffledns`，`massdns` 在构建阶段编译。
+- **Nuclei 模板**：构建时尝试更新模板（失败不阻塞构建，运行时可再次更新）。
+
 ## [0.4.3] - 2026-10-17
 
 本版是 0.4.2 之后的报告/证据修复与内部目录整理，无数据库结构变更（仅修正全新库的建表顺序）。
@@ -1106,7 +1117,8 @@
 - [@Autumn-27](https://github.com/Autumn-27)
 - [@neouks](https://github.com/neouks)
 
-[Unreleased]: https://github.com/c1ayooo/4zrec/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/c1ayooo/4zrec/compare/v0.4.4...HEAD
+[0.4.4]: https://github.com/c1ayooo/4zrec/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/c1ayooo/4zrec/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/c1ayooo/4zrec/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/c1ayooo/4zrec/compare/v0.4.0...v0.4.1

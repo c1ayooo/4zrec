@@ -120,9 +120,24 @@ with sync_playwright() as p:
 
 func findChromium() string {
 	candidates := []string{"chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "chrome"}
+	// Playwright-managed browsers live outside PATH. Both the Node and Python
+	// Playwright installs default to ~/.cache/ms-playwright; honor an explicit
+	// PLAYWRIGHT_BROWSERS_PATH too.
+	var cacheDirs []string
 	if home, err := os.UserHomeDir(); err == nil {
-		if matches, _ := filepath.Glob(filepath.Join(home, ".cache", "ms-playwright", "chromium-*", "chrome-linux", "chrome")); len(matches) > 0 {
-			candidates = append(candidates, matches...)
+		cacheDirs = append(cacheDirs, filepath.Join(home, ".cache", "ms-playwright"))
+	}
+	if p := strings.TrimSpace(os.Getenv("PLAYWRIGHT_BROWSERS_PATH")); p != "" {
+		cacheDirs = append(cacheDirs, p)
+	}
+	for _, dir := range cacheDirs {
+		for _, pattern := range []string{
+			filepath.Join(dir, "chromium-*", "chrome-linux*", "chrome"),
+			filepath.Join(dir, "chromium-*", "chrome-linux*", "headless_shell"),
+		} {
+			if matches, _ := filepath.Glob(pattern); len(matches) > 0 {
+				candidates = append(candidates, matches...)
+			}
 		}
 	}
 	for _, name := range candidates {
@@ -131,9 +146,10 @@ func findChromium() string {
 			continue
 		}
 		// A distro wrapper (e.g. /usr/bin/chromium-browser without the snap)
-		// exists on PATH but cannot run; verify before selecting it.
+		// exists on PATH but cannot run; verify before selecting it. Chromium's
+		// version string is "Chromium ...", not "Chrome ...", so match "chrom".
 		out, err := exec.Command(p, "--version").CombinedOutput()
-		if err == nil && strings.Contains(strings.ToLower(string(out)), "chrome") {
+		if err == nil && strings.Contains(strings.ToLower(string(out)), "chrom") {
 			return p
 		}
 	}

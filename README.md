@@ -81,7 +81,14 @@ docker compose up -d          # 拉取 ghcr.io/c1ayooo/4zrec 镜像 + postgres
 # → http://localhost:8787
 ```
 
-镜像已含常用工具（ripgrep/curl/vim/npm/nmap…）；`./skills` 与 `./data` 以绑定挂载持久化。
+镜像内已包含：
+
+- **基础/网络**：`nmap`、`masscan`、`curl`、`wget`、`git`、`jq`、`ripgrep`、`dig`、`ping`、`nc`、`telnet`、`whois`、`ssh`、`psql`、`mysql`
+- **Web/漏洞**：`sqlmap`、`whatweb`、`ffuf`、`gobuster`、`feroxbuster`、`nuclei`（含模板）、`subfinder`、`httpx`、`dnsx`、`katana`、`naabu`、`amass`、`puredns`、`shuffledns`、`massdns`
+- **浏览器/报告**：Node 20、Playwright MCP/CLI、Chromium、Python 3.12、`python-docx`、Python Playwright
+- **数据资产**：`configs/`（SaaS/CDN/成功信号规则与指纹种子）与 `vulnkb/`（1day 漏洞库）
+
+`./skills` 与 `./data` 以绑定挂载持久化；`configs/` 与 `vulnkb/` 已随镜像分发，需要自定义时也可以自行挂载覆盖。
 
 远程 MCP 可在系统设置中选择 `http`（Streamable HTTP）或 `sse`（旧版 SSE）。
 旧版 SSE 服务通常使用 `GET /sse` 建立事件流，再通过服务返回的
@@ -90,7 +97,7 @@ docker compose up -d          # 拉取 ghcr.io/c1ayooo/4zrec 镜像 + postgres
 
 ### 方式三：下载预编译二进制（Releases）
 
-到 [Releases](https://github.com/c1ayooo/4zrec/releases) 下载对应平台的 zip，解压后得到 `4zrec` + `start.sh`（Windows 为 `start.bat`）+ `skills/` + `config.example.json`：
+到 [Releases](https://github.com/c1ayooo/4zrec/releases) 下载对应平台的 zip，解压后得到 `4zrec` + `start.sh`（Windows 为 `start.bat`）+ `skills/` + `configs/` + `vulnkb/` + `config.example.json`：
 
 ```bash
 cp config.example.json config.json   # 填好 database 连接

@@ -182,6 +182,9 @@ package_binary() {
     chmod +x "$package_root/start.sh"
   fi
   cp -R skills "$package_root/"
+  # 运行期数据资产：SaaS/CDN/成功信号规则与指纹种子、1day 漏洞库。
+  cp -R configs "$package_root/"
+  cp -R vulnkb "$package_root/"
   cp config.example.json "$package_root/"
   if [ -f README.md ]; then cp README.md "$package_root/"; fi
   (cd "$ZREC_PACKAGE_DIR" && zip -q -r -9 "$(basename "$archive")" "$(basename "$package_root")")
