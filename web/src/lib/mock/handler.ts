@@ -2317,8 +2317,14 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   if (path === "/proxy-profiles" && m === "GET")
     return {
       profiles: D.settings.proxy_profiles ?? [],
-      selections: D.settings.proxy_selections ?? { global: "", web_search: "", nuclei: "", update: "" },
-      urls: D.settings.proxy_urls ?? { global: "", web_search: "", nuclei: "", update: "" },
+      selections: D.settings.proxy_selections ?? {
+        global: "",
+        web_search: "",
+        nuclei: "",
+        fingerprint: "",
+        update: "",
+      },
+      urls: D.settings.proxy_urls ?? { global: "", web_search: "", nuclei: "", fingerprint: "", update: "" },
     };
   if (path === "/proxy-profiles" && m === "POST")
     return { id: "p-mock", name: String(b.name ?? ""), url: String(b.url ?? ""), note: String(b.note ?? "") };
@@ -2327,10 +2333,10 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     return {
       profiles: D.settings.proxy_profiles ?? [],
       selections: {
-        ...(D.settings.proxy_selections ?? { global: "", web_search: "", nuclei: "", update: "" }),
+        ...(D.settings.proxy_selections ?? { global: "", web_search: "", nuclei: "", fingerprint: "", update: "" }),
         [String(b.slot ?? "")]: String(b.profile_id ?? ""),
       },
-      urls: D.settings.proxy_urls ?? { global: "", web_search: "", nuclei: "", update: "" },
+      urls: D.settings.proxy_urls ?? { global: "", web_search: "", nuclei: "", fingerprint: "", update: "" },
     };
   if (path.startsWith("/proxy-profiles/") && m === "PUT")
     return { id: seg[1] ?? "p-mock", name: String(b.name ?? ""), url: String(b.url ?? ""), note: String(b.note ?? "") };

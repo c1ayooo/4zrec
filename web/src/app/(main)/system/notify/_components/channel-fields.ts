@@ -62,7 +62,12 @@ export const CHANNEL_FIELDS: Record<string, FieldDef[]> = {
       kind: "text",
       placeholder: "https://open.feishu.cn/open-apis/bot/v2/hook/...",
     },
-    { key: "secret", label: "签名校验密钥（群机器人）", kind: "password", help: "机器人开启「签名校验」时填写，否则留空" },
+    {
+      key: "secret",
+      label: "签名校验密钥（群机器人）",
+      kind: "password",
+      help: "机器人开启「签名校验」时填写，否则留空",
+    },
     { key: "app_id", label: "App ID（应用机器人）", kind: "text", placeholder: "cli_..." },
     { key: "app_secret", label: "App Secret（应用机器人）", kind: "password" },
     {
@@ -167,6 +172,7 @@ export type ChannelForm = {
   taskIDsText: string;
   assetIDsText: string;
   onStatusChange: boolean;
+  eventKinds: string[];
 };
 
 export const emptyForm = (kind: string): ChannelForm => ({
@@ -182,6 +188,7 @@ export const emptyForm = (kind: string): ChannelForm => ({
   taskIDsText: "",
   assetIDsText: "",
   onStatusChange: false,
+  eventKinds: [],
 });
 
 // parseKV 解析「每行 KEY=VALUE」的文本域。

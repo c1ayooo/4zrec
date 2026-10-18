@@ -72,13 +72,17 @@ func markdownText(s string, maxRunes int) string {
 // 出现了 `\(1\)` 这种可见的反斜杠。
 func markdownTitle(m Message) string {
 	if m.Batch {
-		return fmt.Sprintf("漏洞汇总 · 共 %d 条", len(m.Items))
+		label := "通知汇总"
+		if m.AllFindings() {
+			label = "漏洞汇总"
+		}
+		return fmt.Sprintf("%s · 共 %d 条", label, len(m.Items))
 	}
 	if len(m.Items) == 0 {
-		return "漏洞通知"
+		return "通知"
 	}
 	it := m.Items[0]
-	return fmt.Sprintf("[%s] %s", SeverityLabel(it.Severity), OneLine(it.Title(), 0))
+	return fmt.Sprintf("[%s] %s", SeverityLabel(it.Severity), OneLine(it.DisplayTitle(), 0))
 }
 
 // markdownBody 渲染消息正文，返回正文与**实际写入的条目数**。
@@ -129,15 +133,28 @@ func markdownBody(m Message, maxBytes int) (string, int) {
 // 而后面那些从未发出的条目在界面上完全不存在。
 func markdownBatchIntro(m Message, items []Item, total int) string {
 	var b strings.Builder
+	unit := "条通知"
+	if m.AllFindings() {
+		unit = "个漏洞"
+	}
 	if m.WindowMinutes > 0 {
-		fmt.Fprintf(&b, "**近 %d 分钟新增 %d 个漏洞**", m.WindowMinutes, total)
+		fmt.Fprintf(&b, "**近 %d 分钟新增 %d %s**", m.WindowMinutes, total, unit)
 	} else {
-		fmt.Fprintf(&b, "**新增 %d 个漏洞**", total)
+		fmt.Fprintf(&b, "**新增 %d %s**", total, unit)
 	}
 	if extra := total - len(items); extra > 0 {
 		fmt.Fprintf(&b, "（本条显示前 %d 条，其余 %d 条将在下一条消息继续）", len(items), extra)
 	}
-	// 按级别给出分布，让读者一眼看到有没有严重项。只统计**本条实际包含**的
+	if !m.AllFindings() {
+		var kinds []string
+		for _, c := range m.KindCounts() {
+			kinds = append(kinds, fmt.Sprintf("%s %d", c.Label, c.Count))
+		}
+		if len(kinds) > 0 {
+			b.WriteString("\n" + strings.Join(kinds, " · "))
+		}
+	}
+	// 按级别给出分布，让读者一眼看到有没有严重项。只统计**本条实际包含的**
 	// 条目，保证「严重 3」和下面能数出来的条目一致。
 	counts := map[string]int{}
 	for _, it := range items {
@@ -165,7 +182,7 @@ func markdownBatchIntro(m Message, items []Item, total int) string {
 // 单行化 + 转义。回链是管理员配置的 public_base_url 拼出来的，不是不可信内容，
 // 且必须是可点的链接，所以原样输出。
 func writeItem(b *strings.Builder, it Item, prefix string, single bool) {
-	line := fmt.Sprintf("%s**%s · %s**", prefix, SeverityLabel(it.Severity), markdownText(it.Title(), 0))
+	line := fmt.Sprintf("%s**%s · %s**", prefix, SeverityLabel(it.Severity), markdownText(it.DisplayTitle(), 0))
 	if !single {
 		// 汇总模式：单行呈现，资产与摘要压缩后跟在后面。
 		var extras []string
@@ -186,7 +203,7 @@ func writeItem(b *strings.Builder, it Item, prefix string, single bool) {
 		fmt.Fprintf(b, "**状态变更**：%s → %s\n",
 			markdownText(StatusLabel(it.FromStatus), 0), markdownText(StatusLabel(it.ToStatus), 0))
 	}
-	if it.VulnClass != "" && it.VulnClass != it.Title() {
+	if it.IsFinding() && it.VulnClass != "" && it.VulnClass != it.Title() {
 		fmt.Fprintf(b, "**类型**：%s\n", markdownText(it.VulnClass, 0))
 	}
 	if a := assetLine(it.Assets, maxAssetsShown); a != "" {

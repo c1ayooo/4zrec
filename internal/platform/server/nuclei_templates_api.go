@@ -2,12 +2,14 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/c1ayooo/4zrec/internal/capability/vuln/nuclei"
+	"github.com/c1ayooo/4zrec/internal/platform/notify"
 )
 
 // nucleiUpdateState 是异步更新任务的快照。
@@ -163,6 +165,22 @@ func (s *Server) startNucleiUpdate(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		s.nucleiUpdateMu.Unlock()
+
+		kind, title, severity := notify.EventNucleiUpdateDone, "nuclei 更新完成", "info"
+		summary := ""
+		if err != nil {
+			kind, title, severity = notify.EventNucleiUpdateFailed, "nuclei 更新失败", "high"
+			summary = err.Error()
+		} else if res != nil {
+			summary = fmt.Sprintf("官方模板 %d 个；自定义 %d 个", res.TemplateCount, res.CustomTemplateCount)
+			if len(res.Warnings) > 0 {
+				summary += "；" + strings.Join(res.Warnings, "；")
+			}
+		}
+		_, _ = s.m.pg.AddNotificationEvent(s.ctx, kind, 0, notify.Snapshot{
+			Kind: kind, Title: title, Category: "规则库", Severity: severity,
+			Summary: summary, ActionURL: "/function/nuclei-templates",
+		})
 	}()
 
 	writeJSON(w, 202, map[string]any{"running": true, "phase": "准备中", "percent": 0, "started_at": started})

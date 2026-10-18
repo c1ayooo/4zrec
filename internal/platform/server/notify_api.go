@@ -103,6 +103,8 @@ func toNotifyDeliveryDTO(dl *db.NotificationDelivery) notifyDeliveryDTO {
 	}
 	if snap.Name != "" {
 		dto.Title = snap.Name
+	} else if snap.Title != "" {
+		dto.Title = snap.Title
 	} else {
 		dto.Title = snap.VulnClass
 	}
@@ -134,6 +136,8 @@ func (s *Server) notifyMeta(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{
 		"kinds":               kinds,
+		"event_kinds":         notify.EventKinds(),
+		"default_event_kinds": notify.DefaultEventKinds(),
 		"enabled":             pg.GetBool(settingNotifyEnabled, true),
 		"public_base_url":     baseURL,
 		"digest_interval_min": digest,

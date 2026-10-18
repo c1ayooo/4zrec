@@ -51,6 +51,18 @@ export default function NotifyPage() {
   const [baseURL, setBaseURL] = React.useState("");
   const [digestMin, setDigestMin] = React.useState("");
 
+  const eventCategories = React.useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const k of meta?.event_kinds ?? []) {
+      if (!seen.has(k.category)) {
+        seen.add(k.category);
+        out.push(k.category);
+      }
+    }
+    return out;
+  }, [meta]);
+
   const load = React.useCallback(() => {
     api
       .notifyMeta()
@@ -80,7 +92,9 @@ export default function NotifyPage() {
 
   function openAdd() {
     setEditing(null);
-    setForm(emptyForm(meta?.kinds[0]?.kind ?? "dingtalk"));
+    const base = emptyForm(meta?.kinds[0]?.kind ?? "dingtalk");
+    base.eventKinds = meta?.default_event_kinds ?? [];
+    setForm(base);
     setOpen(true);
   }
 
@@ -103,6 +117,10 @@ export default function NotifyPage() {
       taskIDsText: (f.task_ids ?? []).join(","),
       assetIDsText: (f.asset_ids ?? []).join(","),
       onStatusChange: f.on_status_change ?? false,
+      eventKinds:
+        f.event_kinds && f.event_kinds.length > 0
+          ? f.event_kinds
+          : ["finding_created", ...(f.on_status_change ? ["finding_status_changed"] : [])],
     });
     setOpen(true);
   }
@@ -159,8 +177,16 @@ export default function NotifyPage() {
       vulnclass_exclude: parseKeywords(form.excludeText),
       task_ids: parseIDs(form.taskIDsText),
       asset_ids: parseIDs(form.assetIDsText),
-      on_status_change: form.onStatusChange,
+      event_kinds: form.eventKinds,
+      on_status_change: form.eventKinds.includes("finding_status_changed"),
     };
+  }
+
+  function toggleEventKind(kind: string, on: boolean) {
+    setForm((f) => ({
+      ...f,
+      eventKinds: on ? Array.from(new Set([...f.eventKinds, kind])) : f.eventKinds.filter((k) => k !== kind),
+    }));
   }
 
   async function saveForm() {
@@ -570,13 +596,50 @@ export default function NotifyPage() {
                     />
                     <p className="text-muted-foreground text-xs">任务/资产留空=不限；填写后要求与漏洞有交集。</p>
                   </div>
-                  <div className="flex items-center gap-2 text-sm">
-                    <Switch
-                      checked={form.onStatusChange}
-                      onCheckedChange={(v) => setF({ onStatusChange: v })}
-                      aria-label="接收状态变更"
-                    />
-                    漏洞处置状态变更时也推送（仅实时模式）
+                  <div className="grid gap-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <Label>通知内容</Label>
+                        <p className="text-muted-foreground text-xs">
+                          只推送勾选的事件类型；每类事件有自己的标题与模板。
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setF({ eventKinds: meta?.default_event_kinds ?? [] })}
+                      >
+                        恢复推荐
+                      </Button>
+                    </div>
+                    {eventCategories.map((category) => (
+                      <div key={category} className="grid gap-2">
+                        <p className="text-xs font-medium">{category}</p>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {(meta?.event_kinds ?? [])
+                            .filter((k) => k.category === category)
+                            .map((k) => (
+                              <div
+                                key={k.kind}
+                                className="flex items-start justify-between gap-3 rounded-md border p-2"
+                              >
+                                <div className="min-w-0">
+                                  <p className="text-sm">{k.label}</p>
+                                  {k.description ? (
+                                    <p className="text-muted-foreground text-xs">{k.description}</p>
+                                  ) : null}
+                                </div>
+                                <Switch
+                                  checked={form.eventKinds.includes(k.kind)}
+                                  onCheckedChange={(v) => toggleEventKind(k.kind, v)}
+                                  aria-label={k.label}
+                                />
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>

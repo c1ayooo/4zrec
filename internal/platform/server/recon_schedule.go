@@ -75,10 +75,14 @@ func (s *Server) executeReconSchedule(id int64) {
 	_ = s.m.pg.MarkScheduleRan(context.Background(), id, sched.IntervalSec, authFail, result, newAssets)
 	// 增量通知:仅新资产 > 0 且未熔断时入事件(渠道渲染投递由既有 notifier 完成)。
 	if newAssets > 0 && !authFail {
-		_, _ = s.m.pg.AddNotificationEvent(context.Background(), "recon_new_assets", 0, notify.Snapshot{
-			Kind: "recon_new_assets", Name: fmt.Sprintf("周期采集「%s」新资产 %d", sched.Name, newAssets),
-			Severity: "info",
-			Summary:  result,
+		_, _ = s.m.pg.AddNotificationEvent(context.Background(), notify.EventReconNewAssets, 0, notify.Snapshot{
+			Kind:      notify.EventReconNewAssets,
+			Title:     fmt.Sprintf("周期采集「%s」新增 %d 个资产", sched.Name, newAssets),
+			Category:  "侦察",
+			Severity:  "info",
+			Summary:   result,
+			ProjectID: derefInt64(sched.ProjectID),
+			ActionURL: "/function/assets",
 		})
 	}
 }

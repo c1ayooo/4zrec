@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/c1ayooo/4zrec/internal/platform/notify"
 )
 
 const FindingRetestAgentKey = "retester"
@@ -253,6 +255,24 @@ func (d *DB) FinishFindingRetest(id int64, status, reason string) error {
 		if _, _, _, _, err := SetFindingStatusTx(context.Background(), tx, findingID, FindingFixed); err != nil {
 			return err
 		}
+	}
+	if finalStatus == "completed" && verdict == "reproduced" {
+		// 复测结论是「仍可复现」：单独发一条高优先级事件，不等人工改状态。
+		var (
+			name, class, severity, summary string
+			taskID                         sql.NullInt64
+		)
+		_ = tx.QueryRow(`SELECT COALESCE(name,''), COALESCE(vulnclass,''), COALESCE(severity,''), COALESCE(summary,''), task_id
+			FROM findings WHERE id=$1`, findingID).Scan(&name, &class, &severity, &summary, &taskID)
+		RecordNotificationEventTx(context.Background(), tx, notify.EventFindingRetestReproduced, findingID, notify.Snapshot{
+			Kind:      notify.EventFindingRetestReproduced,
+			FindingID: findingID,
+			TaskID:    taskID.Int64,
+			VulnClass: class,
+			Name:      name,
+			Severity:  severity,
+			Summary:   summary,
+		})
 	}
 	return tx.Commit()
 }

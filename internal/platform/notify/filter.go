@@ -20,7 +20,11 @@ type Filter struct {
 	// 匹配方式为大小写不敏感的子串——比正则安全：用户配错正则不会让渠道静默失效。
 	VulnClassInclude []string `json:"vulnclass_include"`
 	VulnClassExclude []string `json:"vulnclass_exclude"`
-	// OnStatusChange 决定该渠道是否接收漏洞状态变更事件（仅 realtime 模式有意义）。
+	// EventKinds 是渠道订阅的事件类型集合。非空时只接收其中列出的类型；
+	// 空 = 旧库兼容：只收 finding_created，以及 OnStatusChange 开启时的
+	// finding_status_changed。
+	EventKinds []string `json:"event_kinds,omitempty"`
+	// OnStatusChange 是旧字段，仅当 EventKinds 为空时生效。
 	OnStatusChange bool `json:"on_status_change"`
 }
 
@@ -63,6 +67,11 @@ func (f Filter) Validate() error {
 	if !ValidMinSeverity(f.MinSeverity) {
 		return fmt.Errorf("最低级别 %q 无效，可选：low / medium / high / critical，或留空表示不限", f.MinSeverity)
 	}
+	for _, kind := range f.EventKinds {
+		if !ValidEventKind(kind) {
+			return fmt.Errorf("未知通知事件类型 %q", kind)
+		}
+	}
 	return nil
 }
 
@@ -71,10 +80,25 @@ func (f Filter) Validate() error {
 // **永不返回 error**，理由同 ParseFilter：任何内部异常都按「命中」处理。
 // 判定顺序：事件类型 → 级别门槛 → 任务/资产范围 → 漏洞类型关键词。
 func Match(f Filter, s Snapshot) bool {
-	// 状态变更事件只有显式开启的渠道才接收。默认关，因为绝大多数使用者
-	// 期望「推送」指的是「发现新漏洞」，而不是流水账式地跟进每个状态流转。
-	if s.Kind == EventFindingStatusChanged && !f.OnStatusChange {
-		return false
+	kind := s.Kind
+	if kind == "" {
+		kind = EventFindingCreated // 旧快照没有 kind 字段，按发现漏洞处理
+	}
+	if len(f.EventKinds) > 0 {
+		if !slices.Contains(f.EventKinds, kind) {
+			return false
+		}
+	} else {
+		// 旧库兼容：默认只推 finding_created；状态变更需显式开启。
+		switch kind {
+		case EventFindingCreated:
+		case EventFindingStatusChanged:
+			if !f.OnStatusChange {
+				return false
+			}
+		default:
+			return false
+		}
 	}
 	if !AtLeast(s.Severity, f.MinSeverity) {
 		return false

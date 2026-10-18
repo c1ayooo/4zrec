@@ -76,6 +76,8 @@ import type {
   EntJob,
   FingerprintRule,
   FingerprintSource,
+  FingerprintStatus,
+  FingerprintSyncJob,
   IntelKey,
   SpacemapResultRow,
   SpacemapSearchRow,
@@ -1273,6 +1275,9 @@ export const api = {
       sources: FingerprintSource[];
     }>(`/fingerprint/rules?${q.toString()}`);
   },
+  fingerprintStatus: () => get<FingerprintStatus>(`/fingerprint/status`),
+  fingerprintSync: () => post<FingerprintSyncJob>(`/fingerprint/sync`, {}),
+  fingerprintSyncStatus: () => get<FingerprintSyncJob>(`/fingerprint/sync/status`),
   spacemapSearch: (body: {
     engine: string;
     query: string;

@@ -321,12 +321,12 @@ func feishuButton(label, url string) map[string]any {
 // 的字段一律过 markdownText（单行化 + 转义）——否则一条漏洞标题就能在
 // 飞书里变成可点击的外链。
 func feishuItemLines(it Item) string {
-	out := fmt.Sprintf("**%s · %s**", SeverityLabel(it.Severity), markdownText(it.Title(), 0))
+	out := fmt.Sprintf("**%s · %s**", SeverityLabel(it.Severity), markdownText(it.DisplayTitle(), 0))
 	if it.IsStatusChange() {
 		out += fmt.Sprintf("\n**状态变更**：%s → %s",
 			markdownText(StatusLabel(it.FromStatus), 0), markdownText(StatusLabel(it.ToStatus), 0))
 	}
-	if it.VulnClass != "" && it.VulnClass != it.Title() {
+	if it.IsFinding() && it.VulnClass != "" && it.VulnClass != it.Title() {
 		out += fmt.Sprintf("\n**类型**：%s", markdownText(it.VulnClass, 0))
 	}
 	if a := assetLine(it.Assets, maxAssetsShown); a != "" {
@@ -342,7 +342,7 @@ func feishuItemLines(it Item) string {
 
 // feishuBatchLine 渲染汇总卡片里的一条。
 func feishuBatchLine(it Item, index int) string {
-	line := fmt.Sprintf("**%d. %s · %s**", index, SeverityLabel(it.Severity), markdownText(it.Title(), 0))
+	line := fmt.Sprintf("**%d. %s · %s**", index, SeverityLabel(it.Severity), markdownText(it.DisplayTitle(), 0))
 	if a := assetLine(it.Assets, maxAssetsShown); a != "" {
 		line += " — " + markdownText(a, 0)
 	}

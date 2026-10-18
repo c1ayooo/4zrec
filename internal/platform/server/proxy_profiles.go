@@ -23,16 +23,18 @@ import (
 // nuclei.proxy / update_proxy），选择代理时把解析后的 URL 写进去，
 // 因此各模块不需要知道代理库的存在。
 const (
-	settingProxyProfiles = "proxy.profiles"
-	settingUpdateProxy   = "update_proxy"
+	settingProxyProfiles    = "proxy.profiles"
+	settingUpdateProxy      = "update_proxy"
+	settingFingerprintProxy = "fingerprint_proxy"
 
-	proxySlotGlobal    = "global"
-	proxySlotWebSearch = "web_search"
-	proxySlotNuclei    = "nuclei"
-	proxySlotUpdate    = "update"
+	proxySlotGlobal      = "global"
+	proxySlotWebSearch   = "web_search"
+	proxySlotNuclei      = "nuclei"
+	proxySlotFingerprint = "fingerprint"
+	proxySlotUpdate      = "update"
 )
 
-var proxySlots = []string{proxySlotGlobal, proxySlotWebSearch, proxySlotNuclei, proxySlotUpdate}
+var proxySlots = []string{proxySlotGlobal, proxySlotWebSearch, proxySlotNuclei, proxySlotFingerprint, proxySlotUpdate}
 
 // ProxyProfile 是代理库中的一条命名代理。
 type ProxyProfile struct {
@@ -119,6 +121,8 @@ func (s *Server) proxyGallery() ProxyGallery {
 			g.URLs[slot] = proxy
 		case proxySlotNuclei:
 			g.URLs[slot] = s.nucleiManager().Proxy()
+		case proxySlotFingerprint:
+			g.URLs[slot] = s.m.FingerprintProxy()
 		case proxySlotUpdate:
 			g.URLs[slot] = s.m.UpdateProxy()
 		}
@@ -157,6 +161,8 @@ func (s *Server) setProxySlotURL(slot, raw string) error {
 	case proxySlotNuclei:
 		s.nucleiManager().SetProxy(raw)
 		return nil
+	case proxySlotFingerprint:
+		return s.m.SetFingerprintProxy(raw)
 	case proxySlotUpdate:
 		return s.m.SetUpdateProxy(raw)
 	default:

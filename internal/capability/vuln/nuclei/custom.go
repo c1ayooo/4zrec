@@ -14,10 +14,20 @@ func (m *Manager) ValidateCustomTemplate(yamlText string) (TemplateMeta, error) 
 	if err != nil {
 		return TemplateMeta{}, err
 	}
+	if err := requireTemplateAuthor(meta); err != nil {
+		return meta, err
+	}
 	if existing, ok := m.Index().Get(meta.ID); ok && existing.Source == SourceOfficial {
 		return meta, fmt.Errorf("模板 id 与官方模板重复: %s，请改名后再保存", meta.ID)
 	}
 	return meta, nil
+}
+
+func requireTemplateAuthor(meta TemplateMeta) error {
+	if strings.TrimSpace(meta.Author) == "" {
+		return fmt.Errorf("模板缺少 info.author（nuclei 要求，例如 author: 4zrec）")
+	}
+	return nil
 }
 
 // SaveCustomTemplate 新建自定义模板。overwrite=false 时同 ID 已存在会报错；
@@ -25,6 +35,9 @@ func (m *Manager) ValidateCustomTemplate(yamlText string) (TemplateMeta, error) 
 func (m *Manager) SaveCustomTemplate(yamlText string, overwrite bool) (TemplateMeta, error) {
 	meta, err := ParseTemplateYAML([]byte(yamlText))
 	if err != nil {
+		return TemplateMeta{}, err
+	}
+	if err := requireTemplateAuthor(meta); err != nil {
 		return TemplateMeta{}, err
 	}
 	if existing, ok := m.Index().Get(meta.ID); ok {
@@ -71,6 +84,9 @@ func (m *Manager) UpdateCustomTemplate(id, yamlText string) (TemplateMeta, error
 	}
 	meta, err := ParseTemplateYAML([]byte(yamlText))
 	if err != nil {
+		return TemplateMeta{}, err
+	}
+	if err := requireTemplateAuthor(meta); err != nil {
 		return TemplateMeta{}, err
 	}
 	if !strings.EqualFold(meta.ID, id) {

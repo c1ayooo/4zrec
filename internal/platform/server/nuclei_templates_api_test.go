@@ -15,6 +15,7 @@ import (
 const testCustomTemplateYAML = `id: custom-api
 info:
   name: Custom API Check
+  author: 4zrec
   severity: medium
   tags: custom
 http:

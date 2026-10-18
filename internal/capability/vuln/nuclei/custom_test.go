@@ -12,6 +12,7 @@ func officialTemplate(id string) string {
 id: ` + id + `
 info:
   name: Demo RCE
+  author: 4zrec
   severity: critical
   tags: demo,rce
 http:
@@ -26,6 +27,7 @@ func customTemplate(id string) string {
 id: ` + id + `
 info:
   name: Custom Check
+  author: 4zrec
   severity: medium
   tags: custom
 http:

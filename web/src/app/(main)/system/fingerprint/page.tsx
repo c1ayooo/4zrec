@@ -2,15 +2,17 @@
 
 import * as React from "react";
 
-import { FingerprintIcon, Loader2Icon, RefreshCwIcon, SearchIcon } from "lucide-react";
+import { FingerprintIcon, Loader2Icon, RefreshCwIcon, SearchIcon, UploadCloudIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
+import { ProxySlotSelect } from "@/components/proxy-slot-select";
 import { api } from "@/lib/api";
-import type { FingerprintRule } from "@/lib/types";
+import type { FingerprintRule, FingerprintStatus, FingerprintSyncJob } from "@/lib/types";
 
 // 指纹规则库(只读展示):规则由 24h 上游自动同步维护(wappalyzergo/webanalyze/dddd
 // 三源 + 快照兜底),本页提供搜索、来源分布与同步状态;fingerprint_scan 工具读这里。
@@ -22,6 +24,9 @@ export default function FingerprintPage() {
   const [query, setQuery] = React.useState("");
   const [search, setSearch] = React.useState("");
   const [loading, setLoading] = React.useState(false);
+  const [status, setStatus] = React.useState<FingerprintStatus | null>(null);
+  const [syncJob, setSyncJob] = React.useState<FingerprintSyncJob | null>(null);
+  const [syncing, setSyncing] = React.useState(false);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -41,16 +46,120 @@ export default function FingerprintPage() {
     void load();
   }, [load]);
 
+  const loadStatus = React.useCallback(async () => {
+    try {
+      setStatus(await api.fingerprintStatus());
+    } catch {
+      setStatus(null);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void loadStatus();
+  }, [loadStatus]);
+
+  React.useEffect(() => {
+    if (!status?.syncing) return;
+    const timer = setInterval(() => {
+      void loadStatus();
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [status?.syncing, loadStatus]);
+
+  const runSync = async () => {
+    setSyncing(true);
+    setSyncJob(null);
+    try {
+      setSyncJob(await api.fingerprintSync());
+      for (let i = 0; i < 600; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const job = await api.fingerprintSyncStatus();
+        setSyncJob(job);
+        if (!job.running) {
+          if (job.error) toast.error("更新失败：" + job.error);
+          else {
+            const imported = (job.outcomes ?? []).reduce((n, o) => n + (o.imported ?? 0), 0);
+            toast.success(`指纹规则库已更新（导入 ${imported} 条）`);
+          }
+          break;
+        }
+      }
+      await Promise.all([load(), loadStatus()]);
+    } catch (e) {
+      toast.error("更新失败：" + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">指纹规则库</h1>
         <p className="text-muted-foreground mt-1 text-sm">
           统一指纹规则库(启用 {enabled} 条,多源归一存储)。规则由上游自动同步(24h 周期,失败走内置快照兜底),
-          无需手工维护;fingerprint_scan 工具与 enrich 指纹链路读这里。
+          也可以手动更新;fingerprint_scan 工具与 enrich 指纹链路读这里。
         </p>
       </div>
 
+      <Card>
+        <CardContent className="space-y-3 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm">
+              启用 {status?.enabled ?? enabled} / 共 {status?.total ?? total}
+              {status?.sources?.length ? ` · 来源 ${status.sources.length}` : ""}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <ProxySlotSelect slot="fingerprint" label="同步代理" />
+              <Button onClick={() => void runSync()} disabled={syncing || !!status?.syncing}>
+                {syncing || status?.syncing ? (
+                  <Loader2Icon className="size-4 animate-spin" />
+                ) : (
+                  <UploadCloudIcon className="size-4" />
+                )}
+                {status?.syncing ? "自动同步中…" : syncing ? "更新中…" : "更新规则库"}
+              </Button>
+            </div>
+          </div>
+          {status?.sources?.length ? (
+            <div className="flex flex-wrap gap-2">
+              {status.sources.map((source) => (
+                <Badge key={source.name} variant="outline" className="text-xs">
+                  {source.name} · {source.rule_count} 条
+                  {source.fetched_at ? ` · ${source.fetched_at.slice(0, 10)}` : ""}
+                </Badge>
+              ))}
+            </div>
+          ) : null}
+          {syncJob ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-medium">{syncJob.phase ?? "准备中"}</span>
+                <span className="text-muted-foreground">{syncJob.percent ?? 0}%</span>
+              </div>
+              <Progress value={syncJob.percent ?? 0} />
+              <p className="text-muted-foreground text-xs">
+                {syncJob.message || (syncJob.running ? "正在同步上游规则…" : syncJob.error || "完成")}
+              </p>
+              {syncJob.error ? <p className="text-xs text-red-500">{syncJob.error}</p> : null}
+              {syncJob.outcomes?.length ? (
+                <div className="flex flex-wrap gap-2">
+                  {syncJob.outcomes.map((outcome) => (
+                    <Badge
+                      key={outcome.source}
+                      variant={outcome.error ? "destructive" : "secondary"}
+                      className="text-xs"
+                    >
+                      {outcome.source}: {outcome.error ? "失败" : outcome.reason}
+                      {outcome.imported ? ` (${outcome.imported})` : ""}
+                    </Badge>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="px-0">
@@ -121,7 +230,12 @@ export default function FingerprintPage() {
                 <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
                   上一页
                 </Button>
-                <Button variant="outline" size="sm" disabled={page >= Math.ceil(total / 50)} onClick={() => setPage((p) => p + 1)}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page >= Math.ceil(total / 50)}
+                  onClick={() => setPage((p) => p + 1)}
+                >
                   下一页
                 </Button>
               </div>

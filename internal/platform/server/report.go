@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/c1ayooo/4zrec/internal/domain/db"
+	"github.com/c1ayooo/4zrec/internal/platform/notify"
 	"github.com/c1ayooo/4zrec/internal/platform/report"
 )
 
@@ -65,14 +66,17 @@ func (s *Server) generateReport(w http.ResponseWriter, r *http.Request) {
 	in := s.buildSRCReportInput(t, r.URL.Query())
 	taskID := t.ID
 	taskDesc := t.Description
+	tid, _ := strconv.ParseInt(taskID, 10, 64)
 	go func() {
 		// A panic in the builder must not leave the job stuck in "generating" forever.
 		defer func() {
 			if rec := recover(); rec != nil {
+				msg := fmt.Sprintf("报告生成异常：%v", rec)
 				s.reportMu.Lock()
 				job.Status = "failed"
-				job.Error = fmt.Sprintf("报告生成异常：%v", rec)
+				job.Error = msg
 				s.reportMu.Unlock()
+				s.notifyReportResult(tid, taskDesc, false, msg)
 			}
 		}()
 		outPath, err := report.GenerateDocx(s.ctx, s.m.pg, in, filepath.Join(s.dataDir, "reports"), taskID)
@@ -81,6 +85,7 @@ func (s *Server) generateReport(w http.ResponseWriter, r *http.Request) {
 			job.Status = "failed"
 			job.Error = err.Error()
 			s.reportMu.Unlock()
+			s.notifyReportResult(tid, taskDesc, false, err.Error())
 			return
 		}
 		job.Status = "done"
@@ -92,10 +97,24 @@ func (s *Server) generateReport(w http.ResponseWriter, r *http.Request) {
 		if fi, e := os.Stat(outPath); e == nil {
 			size = fi.Size()
 		}
-		tid, _ := strconv.ParseInt(taskID, 10, 64)
 		_, _ = s.m.pg.AddReport(tid, taskDesc, filepath.Base(outPath), outPath, size, in.CompanyName)
+		s.notifyReportResult(tid, taskDesc, true, filepath.Base(outPath))
 	}()
 	writeJSON(w, 202, snap)
+}
+
+func (s *Server) notifyReportResult(taskID int64, taskDesc string, ok bool, detail string) {
+	kind, title, severity := notify.EventReportReady, "报告生成完成", "info"
+	if !ok {
+		kind, title, severity = notify.EventReportFailed, "报告生成失败", "high"
+	}
+	if strings.TrimSpace(taskDesc) != "" {
+		title += "：" + taskDesc
+	}
+	_, _ = s.m.pg.AddNotificationEvent(s.ctx, kind, 0, notify.Snapshot{
+		Kind: kind, Title: title, Category: "报告", Severity: severity,
+		Summary: detail, TaskID: taskID, ActionURL: "/system/reports",
+	})
 }
 
 // GET /api/report/status?task= — poll async generation state.

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -232,6 +233,10 @@ type Manager struct {
 	companyMu sync.Mutex // serializes task/company-scope commits with live handle registration
 	// vulnIntel 是漏洞情报自动抓取管线(9 公开源,定时轮询入库)。
 	vulnIntel *vulnintel.Manager
+	// fingerprintUpdater 指纹规则库上游同步器（24h 周期 + 手动触发）。
+	fingerprintUpdater *vulnfp.Updater
+	// taskStatusHook 在任务生命周期状态变化后回调（server 层用于发 IM 通知）。
+	taskStatusHook func(taskID, oldStatus, newStatus string)
 	// taskStateMu preserves commit order between PostgreSQL lifecycle writes and
 	// their in-memory mirrors. lifecycleMu makes snapshots race-free, but without
 	// this outer write lock an older request could commit first and publish last.
@@ -385,14 +390,7 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 		log.Printf("[llmusage] create table: %v", err)
 	}
 	// 指纹规则库:建表 + 启动自动同步(24h 周期,上游不可达时快照兜底)。
-	if fpStore, err := vulnfp.NewStore(pg.DB); err != nil {
-		log.Printf("[fingerprint] 建表失败: %v", err)
-	} else {
-		vulnfp.NewUpdater(fpStore, func() string {
-			v, _, _ := pg.GetSetting("fingerprint.github_token")
-			return v
-		}).Start()
-	}
+	// 初始化放在 Manager 构造之后，以便把 proxyFn 接到代理库设置。
 	// 漏洞知识库后台导入:按 content_hash 幂等,放好 vulnkb/ 目录重启即入库。
 	vulnkbDir := strings.TrimSpace(os.Getenv("ZREC_VULNKB_DIR"))
 	if vulnkbDir == "" {
@@ -403,6 +401,15 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	}
 	vulnkb.Bootstrap(pg, vulnkbDir)
 	m := &Manager{dir: dir, pg: pg, assets: pg.Assets(), tasks: map[string]*Task{}, interceptor: intercept.New(pg)}
+	if fpStore, err := vulnfp.NewStore(pg.DB); err != nil {
+		log.Printf("[fingerprint] 建表失败: %v", err)
+	} else {
+		m.fingerprintUpdater = vulnfp.NewUpdater(fpStore, func() string {
+			v, _, _ := pg.GetSetting("fingerprint.github_token")
+			return v
+		}, m.FingerprintProxy)
+		m.fingerprintUpdater.Start()
+	}
 	m.vulnIntel = vulnintel.NewManager(pg)
 	m.vulnIntel.Start()
 	if proxyAddr != "" {
@@ -845,6 +852,39 @@ func (m *Manager) SetUpdateProxy(raw string) error {
 		}
 	}
 	return m.pg.SetSetting(settingUpdateProxy, raw)
+}
+
+// FingerprintProxy 返回指纹规则库上游同步使用的代理。
+func (m *Manager) FingerprintProxy() string {
+	if m == nil || m.pg == nil {
+		return ""
+	}
+	v, _, _ := m.pg.GetSetting(settingFingerprintProxy)
+	return strings.TrimSpace(v)
+}
+
+// SetFingerprintProxy 校验并保存指纹同步代理。
+func (m *Manager) SetFingerprintProxy(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw != "" {
+		if _, err := traffic.ValidateProxyURL(raw); err != nil {
+			return err
+		}
+	}
+	return m.pg.SetSetting(settingFingerprintProxy, raw)
+}
+
+// FingerprintSyncing 报告指纹库是否正在同步。
+func (m *Manager) FingerprintSyncing() bool {
+	return m != nil && m.fingerprintUpdater != nil && m.fingerprintUpdater.Syncing()
+}
+
+// SyncFingerprint 手动触发一次指纹库同步，并透传阶段进度。
+func (m *Manager) SyncFingerprint(ctx context.Context, progress func(vulnfp.Progress)) []vulnfp.SourceOutcome {
+	if m == nil || m.fingerprintUpdater == nil {
+		return nil
+	}
+	return m.fingerprintUpdater.SyncAllWithProgress(ctx, progress)
 }
 
 // SetGlobalProxy validates, persists and applies the global egress proxy
@@ -1473,7 +1513,9 @@ func (m *Manager) SetTaskStatusGuarded(id, status string) (won bool, err error) 
 		return won, err
 	}
 	m.mu.Lock()
+	var old string
 	if t := m.tasks[id]; t != nil {
+		old = t.lifecycleSnapshot().Status
 		t.updateLifecycle(func(state *taskLifecycleState) {
 			state.Status = status
 			if state.CompletedAt == 0 {
@@ -1482,6 +1524,7 @@ func (m *Manager) SetTaskStatusGuarded(id, status string) (won bool, err error) 
 		})
 	}
 	m.mu.Unlock()
+	m.fireTaskStatus(id, old, status)
 	return true, nil
 }
 
@@ -1498,7 +1541,9 @@ func (m *Manager) SetTaskStatus(id, status string) error {
 		return err
 	}
 	m.mu.Lock()
+	var old string
 	if t := m.tasks[id]; t != nil {
+		old = t.lifecycleSnapshot().Status
 		t.updateLifecycle(func(state *taskLifecycleState) {
 			state.Status = status
 			// Mirror the DB's completed_at stamp on the live handle so the DTO shows
@@ -1513,7 +1558,20 @@ func (m *Manager) SetTaskStatus(id, status string) error {
 		})
 	}
 	m.mu.Unlock()
+	m.fireTaskStatus(id, old, status)
 	return nil
+}
+
+// SetTaskStatusHook registers the lifecycle notification hook. Called after the
+// in-memory handle is updated; implementations must not block.
+func (m *Manager) SetTaskStatusHook(fn func(taskID, oldStatus, newStatus string)) {
+	m.taskStatusHook = fn
+}
+
+func (m *Manager) fireTaskStatus(id, old, status string) {
+	if m.taskStatusHook != nil && old != status {
+		m.taskStatusHook(id, old, status)
+	}
 }
 
 // DeleteTask removes a task and optionally its related global data. Traffic has

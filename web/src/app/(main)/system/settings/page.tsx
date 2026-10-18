@@ -28,7 +28,13 @@ import type { NucleiStatus, ProxyProfile, ProxySelections, Settings } from "@/li
 import { ProxyLibrary } from "./_components/proxy-library";
 import { UpdateCard } from "./_components/update-card";
 
-const EMPTY_PROXY_SELECTIONS: ProxySelections = { global: "", web_search: "", nuclei: "", update: "" };
+const EMPTY_PROXY_SELECTIONS: ProxySelections = {
+  global: "",
+  web_search: "",
+  nuclei: "",
+  fingerprint: "",
+  update: "",
+};
 
 export default function SystemSettingsPage() {
   const [trafficCapture, setTrafficCapture] = React.useState(false);

@@ -27,6 +27,7 @@ type TemplateMeta struct {
 	Type        string   `json:"type"`
 	Path        string   `json:"path"`
 	Source      string   `json:"source"` // official | custom
+	Author      string   `json:"author,omitempty"`
 	Description string   `json:"description,omitempty"`
 }
 
@@ -451,6 +452,7 @@ type templateDoc struct {
 	ID   string `yaml:"id"`
 	Info struct {
 		Name           string     `yaml:"name"`
+		Author         string     `yaml:"author"`
 		Severity       string     `yaml:"severity"`
 		Description    string     `yaml:"description"`
 		Tags           stringList `yaml:"tags"`
@@ -509,6 +511,7 @@ func ParseTemplateYAML(b []byte) (TemplateMeta, error) {
 		Tags:        doc.Info.Tags,
 		CVE:         doc.Info.Classification.CVEID,
 		Type:        typ,
+		Author:      strings.TrimSpace(doc.Info.Author),
 		Description: strings.TrimSpace(doc.Info.Description),
 	}, nil
 }

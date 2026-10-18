@@ -32,6 +32,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { ProxySlotSelect } from "@/components/proxy-slot-select";
 import { api } from "@/lib/api";
 import type { NucleiStatus, NucleiTemplateMeta, NucleiUpdateJob } from "@/lib/types";
 
@@ -40,6 +41,7 @@ const PAGE_SIZE = 20;
 const STARTER_TEMPLATE = `id: custom-check
 info:
   name: Custom Check
+  author: 4zrec
   severity: info
   tags: custom
 http:
@@ -250,7 +252,8 @@ export default function NucleiTemplatesPage() {
               "读取 nuclei 状态失败（可点刷新重试）"
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <ProxySlotSelect slot="nuclei" label="更新代理" />
             <Button variant="outline" onClick={() => void refreshStatus()}>
               <RefreshCwIcon className="size-4" /> 刷新状态
             </Button>
@@ -496,6 +499,7 @@ export default function NucleiTemplatesPage() {
                   <span>
                     路径: {editor.meta.source}/{editor.meta.path}
                   </span>
+                  {editor.meta.author ? <span>作者: {editor.meta.author}</span> : null}
                   {editor.meta.tags?.length ? <span>标签: {editor.meta.tags.join(", ")}</span> : null}
                   {editor.meta.cve?.length ? <span>CVE: {editor.meta.cve.join(", ")}</span> : null}
                 </div>

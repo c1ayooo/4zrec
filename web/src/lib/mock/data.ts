@@ -3341,11 +3341,12 @@ export const settings: Settings = {
     { id: "p-mihomo", name: "mihomo 出海", url: "http://127.0.0.1:7890", note: "本机 mihomo" },
     { id: "p-intranet", name: "内网 SOCKS", url: "socks5://127.0.0.1:1080", note: "内网探测" },
   ],
-  proxy_selections: { global: "", web_search: "", nuclei: "p-mihomo", update: "p-mihomo" },
+  proxy_selections: { global: "", web_search: "", nuclei: "p-mihomo", fingerprint: "p-mihomo", update: "p-mihomo" },
   proxy_urls: {
     global: "",
     web_search: "",
     nuclei: "http://127.0.0.1:7890",
+    fingerprint: "http://127.0.0.1:7890",
     update: "http://127.0.0.1:7890",
   },
   update_proxy: "http://127.0.0.1:7890",

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/c1ayooo/4zrec/internal/domain/db"
+	"github.com/c1ayooo/4zrec/internal/platform/notify"
 )
 
 // ctxKey is the unexported context key type to avoid collisions.
@@ -605,6 +606,17 @@ func (i *Interceptor) HandleAsk(ctx context.Context, convID int64, dec Decision,
 	if err != nil {
 		return false
 	}
+	// 审批会阻塞工具调用，是最值得走 IM 的事件之一；失败不影响审批本身。
+	tid, _ := strconv.ParseInt(strings.TrimSpace(taskID), 10, 64)
+	_, _ = i.db.AddNotificationEvent(context.Background(), notify.EventApprovalRequired, 0, notify.Snapshot{
+		Kind:      notify.EventApprovalRequired,
+		Title:     fmt.Sprintf("待审批：工具 %s", toolName),
+		Category:  "审批",
+		Severity:  "high",
+		Summary:   dec.Message,
+		TaskID:    tid,
+		ActionURL: "/system/intercept/approvals",
+	})
 
 	i.bindResult(ctx, pendingID, audit)
 	if len(dec.Targets) > 0 {

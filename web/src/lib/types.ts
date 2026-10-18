@@ -1036,6 +1036,7 @@ export interface ProxySelections {
   global: string;
   web_search: string;
   nuclei: string;
+  fingerprint: string;
   update: string;
 }
 
@@ -1129,6 +1130,7 @@ export interface NucleiTemplateMeta {
   type: string;
   path: string;
   source: "official" | "custom";
+  author?: string;
   description?: string;
 }
 
@@ -1172,7 +1174,8 @@ export interface NotificationFilter {
   asset_ids?: number[]; // 空=不限；非空则要求与漏洞锚定资产有交集
   vulnclass_include?: string[]; // 空=全收；非空则要求漏洞类型命中任一关键词（大小写不敏感子串）
   vulnclass_exclude?: string[]; // 命中任一关键词即排除（排除优先于包含）
-  on_status_change?: boolean; // 是否也接收漏洞处置状态变更事件
+  event_kinds?: string[]; // 订阅的事件类型；空=旧行为（发现漏洞 + 可选状态变更）
+  on_status_change?: boolean; // 旧字段，仅 event_kinds 为空时生效
 }
 
 // NotificationChannel 是一个渠道实例。config 的字段随 kind 而异，
@@ -1200,8 +1203,18 @@ export interface NotificationKind {
   secret_keys: string[];
 }
 
+export interface NotificationEventKind {
+  kind: string;
+  label: string;
+  category: string;
+  default: boolean;
+  description?: string;
+}
+
 export interface NotificationMeta {
   kinds: NotificationKind[];
+  event_kinds: NotificationEventKind[];
+  default_event_kinds: string[];
   enabled: boolean;
   public_base_url: string;
   digest_interval_min: string;
@@ -1464,6 +1477,34 @@ export interface FingerprintSource {
   upstream_url: string;
   rule_count: number;
   fetched_at: string;
+}
+
+export interface FingerprintStatus {
+  sources: FingerprintSource[];
+  total: number;
+  enabled: number;
+  syncing: boolean;
+  proxy: string;
+}
+
+export interface FingerprintSyncOutcome {
+  source: string;
+  changed: boolean;
+  content_hash?: string;
+  imported?: number;
+  reason: string;
+  error?: string;
+}
+
+export interface FingerprintSyncJob {
+  running: boolean;
+  phase?: string;
+  percent?: number;
+  message?: string;
+  started_at?: string;
+  finished_at?: string;
+  error?: string;
+  outcomes?: FingerprintSyncOutcome[];
 }
 
 // ---- 被动源凭据(VT/GitHub) ----

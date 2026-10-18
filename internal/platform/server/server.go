@@ -60,6 +60,9 @@ type Server struct {
 	// nucleiUpdateMu guards the async manual update job shown on the templates page.
 	nucleiUpdateMu sync.Mutex
 	nucleiUpdate   *nucleiUpdateState
+	// fingerprintSyncMu guards the async manual fingerprint sync job.
+	fingerprintSyncMu sync.Mutex
+	fingerprintSync   *fingerprintSyncState
 
 	skillDir string // root directory for skill subdirectories
 	// jwtMu guards jwtKey: password changes rotate the signing key at runtime.
@@ -179,6 +182,9 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	}
 	s.nucleiMgr = nuclei.New(filepath.Join(dataDir, "nuclei"), nucleiSettings)
 	s.nucleiMgr.SetContext(ctx)
+	if m != nil {
+		m.SetTaskStatusHook(s.notifyTaskStatus)
+	}
 	s.reconcileProxySelections()
 	s.initSideQuestions()
 	// 熔断阈值/冷却是失败路径上的热参数，启动时把全局重试策略推给 Registry 一次；
@@ -995,6 +1001,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/spacemap/search", s.spacemapSearch)
 	// 指纹规则库(只读展示,规则由 24h 上游自动同步维护)
 	mux.HandleFunc("GET /api/fingerprint/rules", s.fingerprintRulesList)
+	mux.HandleFunc("GET /api/fingerprint/status", s.fingerprintStatus)
+	mux.HandleFunc("POST /api/fingerprint/sync", s.startFingerprintSync)
+	mux.HandleFunc("GET /api/fingerprint/sync/status", s.fingerprintSyncStatus)
 	// 连接台账(SSH/数据库/协议凭据,明文,项目绑定)
 	mux.HandleFunc("GET /api/connections", s.connList)
 	mux.HandleFunc("POST /api/connections", s.connCreate)

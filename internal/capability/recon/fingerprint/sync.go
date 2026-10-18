@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -136,6 +137,17 @@ func (s *Store) ImportUpstream(ctx context.Context, sourceName, upstreamURL, con
 	return len(rules), nil
 }
 
+// OldestFetchUnix 返回各来源中最早一次成功同步的 Unix 时间；无记录返回 0。
+func (s *Store) OldestFetchUnix(ctx context.Context) int64 {
+	var ts sql.NullInt64
+	_ = s.db.QueryRowContext(ctx,
+		`SELECT EXTRACT(EPOCH FROM MIN(fetched_at))::bigint FROM fingerprint_sources`).Scan(&ts)
+	if !ts.Valid {
+		return 0
+	}
+	return ts.Int64
+}
+
 // signature 规则库签名(条数+最新更新时间):不变即复用编译缓存。
 func (s *Store) signature(ctx context.Context) string {
 	var n int64
@@ -192,12 +204,19 @@ func ActiveRules(db *sql.DB) []CompiledRule {
 
 // SourceOutcome 单一来源的同步结果。
 type SourceOutcome struct {
-	Source  string `json:"source"`
-	Changed bool   `json:"changed"`
-	Hash    string `json:"content_hash,omitempty"`
-	Imported int   `json:"imported,omitempty"`
-	Reason  string `json:"reason"` // unchanged/imported/failed
-	Error   string `json:"error,omitempty"`
+	Source   string `json:"source"`
+	Changed  bool   `json:"changed"`
+	Hash     string `json:"content_hash,omitempty"`
+	Imported int    `json:"imported,omitempty"`
+	Reason   string `json:"reason"` // unchanged/imported/failed
+	Error    string `json:"error,omitempty"`
+}
+
+// Progress 是一次同步的阶段进度，供前端进度条展示。
+type Progress struct {
+	Phase   string `json:"phase"`
+	Percent int    `json:"percent"`
+	Message string `json:"message,omitempty"`
 }
 
 type upstreamSource struct {
@@ -232,34 +251,54 @@ var builtinSources = []upstreamSource{
 	},
 }
 
-// Updater 周期同步器;tokenFn 可为空(匿名)。
+// Updater 周期同步器;tokenFn / proxyFn 可为空。
 type Updater struct {
 	store   *Store
 	tokenFn func() string
+	proxyFn func() string
 
 	mu      sync.Mutex
 	syncing bool
 	stop    chan struct{}
 }
 
-// NewUpdater 构造;tokenFn 返回 GitHub token(可选,加速/提额用)。
-func NewUpdater(store *Store, tokenFn func() string) *Updater {
-	return &Updater{store: store, tokenFn: tokenFn, stop: make(chan struct{})}
+// NewUpdater 构造;tokenFn 返回 GitHub token(可选,加速/提额用);
+// proxyFn 返回当前同步出口代理(空=直连/跟随环境变量)。
+func NewUpdater(store *Store, tokenFn, proxyFn func() string) *Updater {
+	return &Updater{store: store, tokenFn: tokenFn, proxyFn: proxyFn, stop: make(chan struct{})}
 }
 
-// Start 启动:立即同步一次,此后每 24 小时。进程生命周期常驻。
+// Start 启动：先留 2 分钟手动更新窗口；之后若数据不新鲜（任一来源超过
+// 24h）再自动同步，此后每 24 小时。
 func (u *Updater) Start() {
 	go func() {
-		u.SyncAll(context.Background())
+		select {
+		case <-u.stop:
+			return
+		case <-time.After(2 * time.Minute):
+		}
+		if !u.freshEnough() {
+			u.SyncAll(context.Background())
+		}
+		timer := time.NewTimer(syncInterval)
+		defer timer.Stop()
 		for {
 			select {
 			case <-u.stop:
 				return
-			case <-time.After(syncInterval):
+			case <-timer.C:
 				u.SyncAll(context.Background())
+				timer.Reset(syncInterval)
 			}
 		}
 	}()
+}
+
+func (u *Updater) freshEnough() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	oldest := u.store.OldestFetchUnix(ctx)
+	return oldest > 0 && time.Since(time.Unix(oldest, 0)) < syncInterval
 }
 
 // Syncing 是否同步进行中。
@@ -271,6 +310,11 @@ func (u *Updater) Syncing() bool {
 
 // SyncAll 逐来源「拉取→哈希比对→变更才导入」;单源失败不影响其他源。
 func (u *Updater) SyncAll(ctx context.Context) []SourceOutcome {
+	return u.SyncAllWithProgress(ctx, nil)
+}
+
+// SyncAllWithProgress 与 SyncAll 相同，但按来源报告阶段进度。
+func (u *Updater) SyncAllWithProgress(ctx context.Context, progress func(Progress)) []SourceOutcome {
 	u.mu.Lock()
 	if u.syncing {
 		u.mu.Unlock()
@@ -288,28 +332,48 @@ func (u *Updater) SyncAll(ctx context.Context) []SourceOutcome {
 	if u.tokenFn != nil {
 		token = strings.TrimSpace(u.tokenFn())
 	}
-	outcomes := make([]SourceOutcome, 0, len(builtinSources))
-	for _, src := range builtinSources {
+	total := len(builtinSources)
+	outcomes := make([]SourceOutcome, 0, total)
+	for i, src := range builtinSources {
+		reportProgress(progress, "同步 "+src.Name, i*100/total, "拉取上游…")
 		runCtx, cancel := context.WithTimeout(ctx, upstreamFetchTimeout*3+30*time.Second)
 		so := u.runSource(runCtx, src, token)
 		cancel()
 		outcomes = append(outcomes, so)
+		msg := so.Reason
 		if so.Error != "" {
+			msg = "失败: " + so.Error
 			log.Printf("[fingerprint] 同步 %s 失败: %s", so.Source, so.Error)
 		} else {
 			log.Printf("[fingerprint] 同步 %s: %s (导入 %d 条)", so.Source, so.Reason, so.Imported)
 		}
+		reportProgress(progress, "同步 "+src.Name, (i+1)*100/total, msg)
 	}
+	reportProgress(progress, "完成", 100, "")
 	return outcomes
+}
+
+func reportProgress(progress func(Progress), phase string, percent int, message string) {
+	if progress == nil {
+		return
+	}
+	if percent < 0 {
+		percent = 0
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	progress(Progress{Phase: phase, Percent: percent, Message: message})
 }
 
 func (u *Updater) runSource(ctx context.Context, src upstreamSource, token string) SourceOutcome {
 	so := SourceOutcome{Source: src.Name, Reason: "failed"}
 	meta, _, _ := u.store.GetSourceMeta(ctx, src.Name)
+	client := u.httpClient()
 
 	var lastErr error
 	for _, candidate := range src.Candidates {
-		data, err := fetchUpstream(ctx, candidate, token)
+		data, err := fetchUpstream(ctx, candidate, token, client)
 		if err != nil {
 			lastErr = fmt.Errorf("%s: %w", shortURL(candidate), err)
 			continue
@@ -323,7 +387,7 @@ func (u *Updater) runSource(ctx context.Context, src upstreamSource, token strin
 		}
 		var catNames map[string]string
 		if src.Categories != "" {
-			if catData, cerr := fetchUpstream(ctx, src.Categories, token); cerr == nil {
+			if catData, cerr := fetchUpstream(ctx, src.Categories, token, client); cerr == nil {
 				catNames = wappalyzergoCategories(catData)
 			}
 		}
@@ -392,8 +456,21 @@ func shortURL(raw string) string {
 	return raw
 }
 
+// httpClient 每次同步按当前代理设置构造客户端，设置改动无需重启。
+func (u *Updater) httpClient() *http.Client {
+	tr := &http.Transport{Proxy: http.ProxyFromEnvironment}
+	if u.proxyFn != nil {
+		if p := strings.TrimSpace(u.proxyFn()); p != "" {
+			if parsed, err := url.Parse(p); err == nil && parsed.Host != "" {
+				tr.Proxy = http.ProxyURL(parsed)
+			}
+		}
+	}
+	return &http.Client{Timeout: upstreamFetchTimeout, Transport: tr}
+}
+
 // fetchUpstream 拉取上游文件;token 非空附带凭据(api.github.com 用 raw Accept)。
-func fetchUpstream(ctx context.Context, rawURL, token string) ([]byte, error) {
+func fetchUpstream(ctx context.Context, rawURL, token string, client *http.Client) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, upstreamFetchTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
@@ -407,7 +484,10 @@ func fetchUpstream(ctx context.Context, rawURL, token string) ([]byte, error) {
 			req.Header.Set("Accept", "application/vnd.github.raw")
 		}
 	}
-	resp, err := http.DefaultClient.Do(req)
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -427,12 +507,12 @@ func fetchUpstream(ctx context.Context, rawURL, token string) ([]byte, error) {
 
 // FingerprintRuleRow 规则库列表行(前端指纹规则库页)。
 type FingerprintRuleRow struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Category  string `json:"category"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Category   string `json:"category"`
 	Expression string `json:"expression"`
-	Source    string `json:"source"`
-	Enabled   bool   `json:"enabled"`
+	Source     string `json:"source"`
+	Enabled    bool   `json:"enabled"`
 }
 
 // FingerprintSourceRow 数据源同步状态行。

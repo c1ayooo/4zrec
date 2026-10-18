@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -431,6 +432,8 @@ func (n *Notifier) itemFor(ctx context.Context, snap notify.Snapshot, baseURL st
 		log.Printf("[notify] 解析资产名失败 finding=%d: %v", snap.FindingID, err)
 	}
 	item := notify.Item{
+		Kind:       snap.Kind,
+		Category:   snap.Category,
 		FindingID:  snap.FindingID,
 		Name:       snap.Name,
 		VulnClass:  snap.VulnClass,
@@ -440,10 +443,21 @@ func (n *Notifier) itemFor(ctx context.Context, snap notify.Snapshot, baseURL st
 		FromStatus: snap.FromStatus,
 		ToStatus:   snap.ToStatus,
 	}
+	if strings.TrimSpace(snap.Title) != "" {
+		item.Name = snap.Title
+	}
 	if baseURL != "" {
-		// 详情页路由见 web/src/app/(main)/function/findings/detail/page.tsx，
-		// 它从 query 参数 id 读取漏洞 id。
-		item.DetailURL = fmt.Sprintf("%s/function/findings/detail?id=%d", baseURL, snap.FindingID)
+		switch {
+		case strings.TrimSpace(snap.ActionURL) != "":
+			item.DetailURL = snap.ActionURL
+			if strings.HasPrefix(item.DetailURL, "/") {
+				item.DetailURL = baseURL + item.DetailURL
+			}
+		case snap.FindingID > 0:
+			// 详情页路由见 web/src/app/(main)/function/findings/detail/page.tsx，
+			// 它从 query 参数 id 读取漏洞 id。
+			item.DetailURL = fmt.Sprintf("%s/function/findings/detail?id=%d", baseURL, snap.FindingID)
+		}
 	}
 	return item, nil
 }

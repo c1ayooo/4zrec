@@ -23,8 +23,29 @@ const (
 
 // 事件类型，对应 notification_events.kind。
 const (
-	EventFindingCreated       = "finding_created"
-	EventFindingStatusChanged = "finding_status_changed"
+	EventFindingCreated          = "finding_created"
+	EventFindingStatusChanged    = "finding_status_changed"
+	EventFindingRetestReproduced = "finding_retest_reproduced"
+
+	EventTaskStarted = "task_started"
+	EventTaskDone    = "task_done"
+	EventTaskFailed  = "task_failed"
+	EventTaskBlocked = "task_blocked"
+	EventTaskPaused  = "task_paused"
+	EventTaskResumed = "task_resumed"
+	EventTaskTimeout = "task_timeout"
+
+	EventApprovalRequired = "approval_required"
+
+	EventReportReady  = "report_ready"
+	EventReportFailed = "report_failed"
+
+	EventReconNewAssets = "recon_new_assets"
+
+	EventFingerprintSyncDone   = "fingerprint_sync_done"
+	EventFingerprintSyncFailed = "fingerprint_sync_failed"
+	EventNucleiUpdateDone      = "nuclei_update_done"
+	EventNucleiUpdateFailed    = "nuclei_update_failed"
 )
 
 // InitKind 是 config 里为空的 kind 的兜底值。

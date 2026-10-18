@@ -95,7 +95,8 @@ docker compose up -d          # 拉取 ghcr.io/c1ayooo/4zrec 镜像 + postgres
 
 - **基础/网络**：`nmap`、`masscan`、`curl`、`wget`、`git`、`jq`、`ripgrep`、`dig`、`ping`、`nc`、`telnet`、`whois`、`ssh`、`psql`、`mysql`
 - **Web/漏洞**：`sqlmap`、`whatweb`、`ffuf`、`gobuster`、`feroxbuster`、`subfinder`、`httpx`、`dnsx`、`katana`、`naabu`、`amass`、`puredns`、`shuffledns`、`massdns`
-- **nuclei（项目自带）**：镜像不预装 nuclei；首次使用 `nuclei_scan` 时由平台下载到 `data/nuclei/`（二进制 + 模板），并按设置自动更新，不写系统目录或用户 HOME。可在「系统设置 → nuclei 模板扫描」里开关、调整更新间隔/引导版本/扫描上限，并查看安装状态；模板在「功能 → 信息收集 → nuclei 模板」查看，官方只读、自定义可编辑（存放在 `data/nuclei/custom-templates/`）。
+- **nuclei（项目自带）**：镜像不预装 nuclei；首次使用 `nuclei_scan` 时由平台下载到 `data/nuclei/`（二进制 + 模板），并按设置自动更新，不写系统目录或用户 HOME。可在「系统设置 → nuclei 模板扫描」里开关、调整更新间隔/引导版本/扫描上限，并查看安装状态；模板在「功能 → 信息收集 → nuclei 模板」查看，官方只读、自定义可编辑（存放在 `data/nuclei/custom-templates/`，必须带 `info.author`）。模板页可直接选择代理库中的更新代理。
+- **指纹规则库**：24h 自动同步 + 页面手动更新；手动更新带进度条和逐来源结果，并可在页面选择同步代理（代理库中的 mihomo / 内网 SOCKS / 直连）。
 - **浏览器/报告**：Node 20、Playwright MCP/CLI、js-reverse-mcp、Chromium、Python 3.12、`python-docx`、Python Playwright
 - **数据资产**：`configs/`（SaaS/CDN/成功信号规则与指纹种子）与 `vulnkb/`（1day 漏洞库）
 

@@ -15,8 +15,22 @@
 ### 代理库
 
 - **命名代理集中管理**：系统设置新增「代理库」，可保存多条 http / https / socks5 代理（支持 user:pass），提供新增、编辑、删除和连通性测试。
-- **按用途手动选择**：目标流量、网络搜索、nuclei 下载/更新、平台自更新各有一个下拉选择器，可在「内网 SOCKS / mihomo 出海 / 直连 / 自定义 URL」之间切换。选择结果写入对应的运行时设置（`global_proxy` / `web_search_proxy` / `nuclei.proxy` / `update_proxy`），并记录所选代理 ID；编辑或删除代理会同步所有正在使用它的用途。
+- **按用途手动选择**：目标流量、网络搜索、nuclei 下载/更新、指纹规则库同步、平台自更新各有一个下拉选择器，可在「内网 SOCKS / mihomo 出海 / 直连 / 自定义 URL」之间切换。选择结果写入对应的运行时设置（`global_proxy` / `web_search_proxy` / `nuclei.proxy` / `fingerprint_proxy` / `update_proxy`），并记录所选代理 ID；编辑或删除代理会同步所有正在使用它的用途。
 - **兼容原有自定义 URL**：未选择代理时仍可直接填写 URL 或留空直连；平台自更新未单独配置时沿用全局代理。新增 `GET/POST /api/proxy-profiles`、`PUT /api/proxy-profiles/selection`、`PUT/DELETE /api/proxy-profiles/{id}`、`POST /api/proxy-profiles/test`。
+
+### 指纹规则库更新
+
+- **手动更新 + 进度**：指纹规则库页新增「更新规则库」按钮、阶段进度条和逐来源结果（unchanged / imported / failed），使用独立的 `fingerprint` 代理槽，可直接在页面选择代理库中的 mihomo / 内网 SOCKS / 直连。
+- **接口与调度**：新增 `GET /api/fingerprint/status`、`POST /api/fingerprint/sync`、`GET /api/fingerprint/sync/status`。启动后保留 2 分钟手动更新窗口；数据超过 24h 才在后台自动同步，避免每次重启都占住同步锁。
+- **上游代理**：`fingerprint_proxy` 同时作用于 wappalyzergo / webanalyze / dddd 三个上游的拉取；代理改动无需重启。
+
+### IM 通知内容
+
+- **通用事件模型**：通知事件从“只有漏洞”扩展为 18 类，覆盖漏洞、任务、审批、报告、侦察、规则库六个分组；每类事件有独立标题/模板和事件标签。
+- **按渠道勾选内容**：通知渠道编辑页新增「通知内容」开关组，可分别选择发现漏洞、漏洞状态变更、复测仍可复现、任务启动/完成/失败/阻塞/暂停/恢复/超时、待审批、报告生成完成/失败、侦察新增资产、指纹库更新完成/失败、nuclei 更新完成/失败。未勾选的事件不会投递。
+- **不同事件不同文案**：单条消息使用事件自己的标题（如「任务完成：…」「待审批：工具 Bash」「复测仍可复现：…」）；汇总消息对混合事件使用「通知汇总」，并按事件类型统计（如「漏洞 3 · 任务 1 · 待审批 2」），纯漏洞消息仍保持「漏洞汇总」。
+- **兼容旧渠道**：未保存过 `event_kinds` 的渠道保持旧行为（只推发现漏洞；状态变更由旧开关决定），首次编辑保存后迁移到新事件列表。
+- **新增事件生产者**：任务状态变化、待审批、复测仍可复现、报告生成完成/失败、周期采集新资产、指纹库同步、nuclei 更新。
 
 ### 安全边界
 
@@ -51,6 +65,7 @@
 - **默认绑定**：`nuclei_scan`/`nuclei_template_search` 绑 worker、planner、recon、pentest、auto；`nuclei_update`/`nuclei_status` 绑 auto、recon、pentest、mainagent，可在工具页改绑。
 - **系统设置开关**：系统设置页新增 nuclei 卡片：总开关、自动更新、interactsh、更新间隔、引导版本、扫描上限，并展示只读状态（二进制版本 / 模板数量 / 上次更新）；新增 `GET /api/nuclei/status`。设置由 manager 每次扫描/更新重新读取，改完即时生效，无需重启。
 - **模板管理页**：「功能 → 信息收集 → nuclei 模板」新增模板页。官方模板只读，可搜索/按等级/类型/标签筛选、查看 YAML；自定义模板可新建、编辑、校验、删除，存放在 `<dataDir>/nuclei/custom-templates/`，不会被官方模板更新覆盖。扫描未显式指定 templates 时，tags/severity/type 同时作用于官方和自定义目录。新增模板列表/详情/校验/增改删与异步更新接口（`/api/nuclei/templates*`、`/api/nuclei/update`）。
+- **自定义模板必填 author**：nuclei 要求 `info.author`，保存/校验时缺少会直接拒绝；新建模板的默认骨架已带 `author: 4zrec`。模板详情也会展示作者。
 
 ### 证据门禁与报告一致性
 
