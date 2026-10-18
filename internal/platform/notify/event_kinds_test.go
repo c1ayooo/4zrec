@@ -58,6 +58,12 @@ func TestGenericEventTitleAndCounts(t *testing.T) {
 	if got := (Item{Kind: EventApprovalRequired, Name: "Bash"}).DisplayTitle(); !strings.Contains(got, "待审批") {
 		t.Fatalf("display title = %q", got)
 	}
+	if got := (Item{Kind: EventFindingStatusChanged, Name: "SQLi"}).DisplayTitle(); !strings.Contains(got, "状态变更") {
+		t.Fatalf("status change title = %q", got)
+	}
+	if got := (Item{Kind: EventFindingRetestReproduced, Name: "SQLi"}).DisplayTitle(); !strings.Contains(got, "复测") {
+		t.Fatalf("retest title = %q", got)
+	}
 	if !(Message{Items: []Item{{Kind: EventFindingCreated, Name: "SQLi"}}}).AllFindings() {
 		t.Fatal("pure finding messages should keep finding wording")
 	}

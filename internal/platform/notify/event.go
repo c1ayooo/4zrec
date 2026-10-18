@@ -89,9 +89,15 @@ func (i Item) KindLabel() string {
 	return "通知"
 }
 
-// DisplayTitle 是渠道正文使用的标题：漏洞保持原样，通用事件带上事件类型前缀，
-// 让不同事件在 IM 里一眼可区分。
+// DisplayTitle 是渠道正文使用的标题：漏洞状态变更/复测事件带上事件类型前缀，
+// 其余漏洞事件保持原样；通用事件也带上事件类型前缀，让不同事件在 IM 里一眼可区分。
 func (i Item) DisplayTitle() string {
+	switch i.Kind {
+	case EventFindingStatusChanged:
+		return "漏洞状态变更 · " + i.Title()
+	case EventFindingRetestReproduced:
+		return "复测仍可复现 · " + i.Title()
+	}
 	if i.IsFinding() {
 		return i.Title()
 	}
