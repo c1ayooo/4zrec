@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
-	skill "github.com/c1ayooo/4zrec/internal/knowledge/skills"
-	actool "github.com/c1ayooo/4zrec/internal/toolface/tools"
 	"github.com/c1ayooo/4zrec/internal/domain/traffic"
+	skill "github.com/c1ayooo/4zrec/internal/knowledge/skills"
+	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
+	actool "github.com/c1ayooo/4zrec/internal/toolface/tools"
 )
 
 // wireAgentAugment connects the PG agent_visibility table into the agent runtime:

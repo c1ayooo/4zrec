@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -493,13 +494,23 @@ func identity(s string) string { return s }
 // shellQuote single-quotes a value for safe shell interpolation.
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
+// templatePlaceholderRe matches {name} placeholders in a single pass. Rendering
+// the template once (rather than ReplaceAll per param over the already-rendered
+// string) is important: a param value containing another param's placeholder
+// must not be expanded again, which previously allowed breaking out of
+// shellQuote and injecting shell syntax into a multi-param command template.
+var templatePlaceholderRe = regexp.MustCompile(`\{([A-Za-z0-9_]+)\}`)
+
 // renderTemplate replaces {name} placeholders with each param's rendered value.
 func renderTemplate(tmpl string, params map[string]any, quote func(string) string) string {
-	out := tmpl
-	for k, v := range params {
-		out = strings.ReplaceAll(out, "{"+k+"}", quote(valToStr(v)))
-	}
-	return out
+	return templatePlaceholderRe.ReplaceAllStringFunc(tmpl, func(m string) string {
+		name := m[1 : len(m)-1]
+		v, ok := params[name]
+		if !ok {
+			return m
+		}
+		return quote(valToStr(v))
+	})
 }
 
 // valToStr renders a param value: scalars as-is, arrays/objects as compact JSON.

@@ -7,11 +7,12 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 
-	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
-	actool "github.com/c1ayooo/4zrec/internal/toolface/tools"
 	"github.com/c1ayooo/4zrec/internal/domain/traffic"
+	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
+	actool "github.com/c1ayooo/4zrec/internal/toolface/tools"
 )
 
 func (s *Server) seedFindingWorkflowTools() {
@@ -102,6 +103,73 @@ func (s *Server) seedFindingWorkflowTools() {
 	}
 	if err := s.m.pg.AddAgentToToolBinding("reporter", []string{"bind_finding_traffic"}); err != nil {
 		return
+	}
+	_ = s.m.pg.SetSetting(flag, "true")
+}
+
+// mergeReportFindingConfidenceSchema 给存量库的 report_finding 补上 confidence
+// 参数与证据门槛文案。只修改仍是代码默认描述的 schema/description；用户改过的
+// 字段原样保留。幂等，flag 守卫只做一次。
+func (s *Server) mergeReportFindingConfidenceSchema() {
+	const flag = "report_finding_confidence_schema_v1"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	row, err := s.m.pg.GetTool("report_finding")
+	if err != nil {
+		log.Printf("[evidence] load report_finding: %v", err)
+		return
+	}
+	if row == nil || !row.System {
+		return // tool not seeded / user-owned: retry on a later start
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(row.Schema, &schema); err != nil || schema == nil {
+		log.Printf("[evidence] report_finding schema: %v", err)
+		return
+	}
+
+	// 从代码种子取当前默认文案，避免迁移里再抄一份长字符串。
+	var newDesc, newEvidenceDesc string
+	var confidenceProp any
+	for _, seed := range agent.BuiltinToolSeeds() {
+		if seed.Key != "report_finding" {
+			continue
+		}
+		newDesc = seed.Desc
+		if sp, ok := seed.Schema["properties"].(map[string]any); ok {
+			if ep, ok := sp["evidence"].(map[string]any); ok {
+				newEvidenceDesc, _ = ep["description"].(string)
+			}
+			confidenceProp = sp["confidence"]
+		}
+		break
+	}
+
+	props := objectProperty(schema, "properties")
+	if _, exists := props["confidence"]; !exists && confidenceProp != nil {
+		props["confidence"] = confidenceProp
+	}
+	if newEvidenceDesc != "" {
+		if ep, ok := props["evidence"].(map[string]any); ok {
+			if d, _ := ep["description"].(string); strings.HasPrefix(d, "证据/PoC。") && !strings.Contains(d, "证据门槛") {
+				ep["description"] = newEvidenceDesc
+			}
+		}
+	}
+	raw, _ := json.Marshal(schema)
+	result, err := s.m.pg.Exec(`UPDATE tools SET schema=$1::jsonb,updated_at=now()
+WHERE key='report_finding' AND system AND schema=$2::jsonb`, string(raw), string(row.Schema))
+	if err != nil {
+		log.Printf("[evidence] upgrade report_finding schema: %v", err)
+		return
+	}
+	if n, _ := result.RowsAffected(); n != 1 {
+		return // concurrent user edit; retry next start
+	}
+	if newDesc != "" && strings.Contains(row.Description, "用 evidence 提供命令输出") && !strings.Contains(row.Description, "证据门槛") {
+		_, _ = s.m.pg.Exec(`UPDATE tools SET description=$1,updated_at=now()
+WHERE key='report_finding' AND system AND description=$2`, newDesc, row.Description)
 	}
 	_ = s.m.pg.SetSetting(flag, "true")
 }

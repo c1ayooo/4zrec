@@ -24,6 +24,7 @@ FROM tasks owner
 JOIN task_relations relation ON relation.task_id=owner.id
 JOIN tasks source ON source.id=relation.source_task_id AND source.deleted_at IS NULL
 WHERE owner.exploration_id=$1 AND owner.deleted_at IS NULL
+  AND (owner.project_id IS NULL OR source.project_id = owner.project_id)
 ORDER BY relation.created_at, source.id`, s.expID)
 	if err != nil {
 		return nil, err

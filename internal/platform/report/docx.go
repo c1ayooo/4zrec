@@ -62,6 +62,8 @@ func GenerateDocx(ctx context.Context, pg *db.DB, in *GenInput, workDir, taskID 
 	if _, err := os.Stat(outPath); err != nil {
 		return "", fmt.Errorf("渲染完成但未找到输出文件: %w", err)
 	}
+	// Reports contain target findings and evidence; keep them owner-only.
+	_ = os.Chmod(outPath, 0o600)
 	return outPath, nil
 }
 

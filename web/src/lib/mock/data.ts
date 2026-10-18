@@ -3330,6 +3330,25 @@ export const settings: Settings = {
   llm_pool_enabled: true,
   llm_pool_bind_fallback: false,
   noa_compaction: false,
+  nuclei_enabled: true,
+  nuclei_auto_update: true,
+  nuclei_update_interval_hours: 24,
+  nuclei_version: "3.11.1",
+  nuclei_interactsh: false,
+  nuclei_max_scan_seconds: 600,
+  nuclei_proxy: "http://127.0.0.1:7890",
+  proxy_profiles: [
+    { id: "p-mihomo", name: "mihomo 出海", url: "http://127.0.0.1:7890", note: "本机 mihomo" },
+    { id: "p-intranet", name: "内网 SOCKS", url: "socks5://127.0.0.1:1080", note: "内网探测" },
+  ],
+  proxy_selections: { global: "", web_search: "", nuclei: "p-mihomo", update: "p-mihomo" },
+  proxy_urls: {
+    global: "",
+    web_search: "",
+    nuclei: "http://127.0.0.1:7890",
+    update: "http://127.0.0.1:7890",
+  },
+  update_proxy: "http://127.0.0.1:7890",
 };
 
 // ── LLM 轮询（故障转移）──────────────────────────────────────────────────────

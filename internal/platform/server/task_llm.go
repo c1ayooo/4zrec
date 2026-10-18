@@ -13,12 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/4zrec/internal/platform/llm/acllm"
-	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
+	"github.com/c1ayooo/4zrec/internal/kernel/transcript"
+	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
+	"github.com/c1ayooo/4zrec/internal/platform/llm/acllm"
 	"github.com/c1ayooo/4zrec/internal/platform/llm/llmpool"
 	"github.com/c1ayooo/4zrec/internal/platform/llm/llmrec"
-	"github.com/c1ayooo/4zrec/internal/kernel/transcript"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 )
@@ -692,6 +692,12 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	pl.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
 	pl.SetWebSearch(s.webSearchFor("planner"))
 	pl.SetConstraintInject(s.constraintInjectPlanner) // 操作约束注入 planner(可配置,默认开)
+	if t.Guard != nil {
+		// planner/mainagent 同样有 Bash/Read/Write，必须与 worker 共用同一套
+		// 拦截规则 + 资产围栏，否则目标侧提示注入可以绕过整个安全边界。
+		hooks := t.Guard.Hooks()
+		pl.SetGuardHooks(hooks)
+	}
 	// cold-digest §7: 冷节点后台压缩。引擎经权威解析器实际驱动的就是这套 per-task planner
 	// (agentsForTask),Compactor 必须接在这里。走任务路由的 planner provider(§4:与 agent
 	// 同模型,随任务 LLM 链解析),压缩用 Generate 一次性生成 body。
@@ -705,6 +711,9 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	main.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
 	main.SetWebSearch(s.webSearchFor("mainagent"))
 	main.SetSteerWork(s.engine.SteerWork) // steer_work：人对运行中 work 实时纠偏
+	if t.Guard != nil {
+		main.SetGuardHooks(t.Guard.Hooks())
+	}
 	bundle := &taskAgentBundle{
 		runtime: goalRuntime, plannerRuntime: plannerRuntime, workerRuntime: workerRuntime,
 		mainRuntime: mainRuntime, pl: pl, wk: wk, main: main,

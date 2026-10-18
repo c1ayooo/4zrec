@@ -17,9 +17,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/c1ayooo/4zrec/internal/capability/recon/spacemap"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
 	"github.com/c1ayooo/4zrec/internal/toolface/guard"
-	"github.com/c1ayooo/4zrec/internal/capability/recon/spacemap"
 	actool "github.com/c1ayooo/4zrec/internal/toolface/tools"
 )
 

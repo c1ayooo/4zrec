@@ -14,20 +14,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/4zrec/internal/domain/db"
-	"github.com/c1ayooo/4zrec/internal/toolface/intercept"
 	"github.com/c1ayooo/4zrec/internal/capability/recon/exposure"
 	"github.com/c1ayooo/4zrec/internal/capability/recon/portscan"
 	"github.com/c1ayooo/4zrec/internal/capability/recon/svcid"
+	"github.com/c1ayooo/4zrec/internal/domain/db"
+	"github.com/c1ayooo/4zrec/internal/toolface/intercept"
 	actool "github.com/c1ayooo/4zrec/internal/toolface/tools"
 )
 
-// roeProjectID 解析当前调用的项目上下文:显式参数 > 任务归属项目 > 会话归属项目。
-// 与围栏 resolveProject 同语义(guard 包私有,这里为 RoE 门控复刻)。
+// roeProjectID 解析当前调用的项目上下文:任务/会话归属优先,其次才看显式参数。
+// 显式 project_id 由模型填写,只是"缺省提示";一旦运行上下文已绑定项目,它就
+// 不能再把 RoE 切到别的项目(否则提示注入可借他项目范围放行扫描)。
 func (s *Server) roeProjectID(ctx context.Context, explicit int64) int64 {
-	if explicit > 0 {
-		return explicit
-	}
 	if taskIDStr, _ := intercept.TaskInfoFromContext(ctx); taskIDStr != "" {
 		if id, err := strconv.ParseInt(strings.TrimSpace(taskIDStr), 10, 64); err == nil && id > 0 {
 			if pid, err := s.m.pg.TaskProjectID(id); err == nil && pid > 0 {
@@ -39,6 +37,9 @@ func (s *Server) roeProjectID(ctx context.Context, explicit int64) int64 {
 		if pid, err := s.m.pg.ConvProjectID(convID); err == nil && pid > 0 {
 			return pid
 		}
+	}
+	if explicit > 0 {
+		return explicit
 	}
 	return 0
 }

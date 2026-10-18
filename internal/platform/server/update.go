@@ -227,7 +227,7 @@ func (s *Server) updateCheck(w http.ResponseWriter, r *http.Request) {
 
 	// 顶栏提示走缓存（默认）；用户点"检查更新"时带 force=1 强制回源。
 	force := r.URL.Query().Get("force") != ""
-	client := selfupdate.NewClient(s.m.GlobalProxy())
+	client := selfupdate.NewClient(s.m.UpdateProxy())
 	rel, err := relCache.get(r.Context(), client, force)
 	if err != nil {
 		out["error"] = err.Error()
@@ -271,7 +271,7 @@ func (s *Server) updateApply(w http.ResponseWriter, r *http.Request) {
 	current := BuildVersion
 
 	// 走缓存：确保装上的就是用户在界面上看到并确认的那个版本。
-	client := selfupdate.NewClient(s.m.GlobalProxy())
+	client := selfupdate.NewClient(s.m.UpdateProxy())
 	rel, err := relCache.get(r.Context(), client, false)
 	if err != nil {
 		writeErr(w, 502, err.Error())

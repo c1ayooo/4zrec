@@ -311,15 +311,16 @@ type FindingDTO struct {
 	ReportStale           bool                       `json:"report_stale"`
 	TrafficBindings       []db.FindingTrafficBinding `json:"traffic_bindings,omitempty"`
 
-	ID        string `json:"id"`
-	FindingID string `json:"finding_id,omitempty"` // standalone findings-table id — the handle for status updates
-	VulnClass string `json:"vulnclass"`
-	Name      string `json:"name,omitempty"` // 漏洞名称;为空时前端回退展示 vulnclass
-	Severity  string `json:"severity"`       // critical | high | medium | low
-	Status    string `json:"status"`         // pending | in_progress | confirmed | resolved | fixed | false_positive | ignored | duplicate | risk_accepted
-	Summary   string `json:"summary"`
-	Evidence  string `json:"evidence"`
-	Report    string `json:"report,omitempty"` // 详细报告(Markdown);仅详情接口返回,列表为空
+	ID         string `json:"id"`
+	FindingID  string `json:"finding_id,omitempty"` // standalone findings-table id — the handle for status updates
+	VulnClass  string `json:"vulnclass"`
+	Name       string `json:"name,omitempty"`       // 漏洞名称;为空时前端回退展示 vulnclass
+	Severity   string `json:"severity"`             // critical | high | medium | low
+	Status     string `json:"status"`               // pending | in_progress | confirmed | resolved | fixed | false_positive | ignored | duplicate | risk_accepted
+	Confidence string `json:"confidence,omitempty"` // verified | partial | inferred
+	Summary    string `json:"summary"`
+	Evidence   string `json:"evidence"`
+	Report     string `json:"report,omitempty"` // 详细报告(Markdown);仅详情接口返回,列表为空
 	// 结构化复现过程(agent report_finding 时就地上报;详情页按步骤确定性渲染,空=未记录)。
 	Reproduction json.RawMessage `json:"reproduction,omitempty"`
 
@@ -478,14 +479,15 @@ func findingFromDB(f *db.DBFinding, assets map[int64]*db.Asset) FindingDTO {
 		FindingID:    i64s(f.ID),
 		TrafficCount: f.TrafficCount, EvidenceVersion: f.EvidenceVersion, ReportEvidenceVersion: f.ReportEvidenceVersion,
 		ReportStale: f.Report != "" && f.EvidenceVersion != f.ReportEvidenceVersion, TrafficBindings: f.TrafficBindings,
-		VulnClass: f.VulnClass,
-		Name:      f.Name,
-		Severity:  f.Severity,
-		Status:    status,
-		Summary:   f.Summary,
-		Evidence:  f.Evidence,
-		Report:    f.Report,
-		TS:        rfc3339(f.CreatedAt),
+		VulnClass:  f.VulnClass,
+		Name:       f.Name,
+		Severity:   f.Severity,
+		Status:     status,
+		Confidence: f.Confidence,
+		Summary:    f.Summary,
+		Evidence:   f.Evidence,
+		Report:     f.Report,
+		TS:         rfc3339(f.CreatedAt),
 	}
 	// agent 未填时是 SQL NULL(空 slice)或字面 "null",都不下发。
 	if len(f.Reproduction) > 0 && string(f.Reproduction) != "null" {

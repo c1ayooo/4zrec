@@ -48,7 +48,26 @@ func (s *Server) attachTaskAssets(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "scope 与 asset_ids 不能同时提交")
 		return
 	}
+	// 项目级 Key 只能挂本项目资产:否则可以把他项目/未归属资产的 id 挂到自己
+	// 的任务上,再经 asset-refs 读到标签与类型。
+	if scopeProject := scopedProjectID(r.Context()); scopeProject > 0 && len(request.AssetIDs) > 0 {
+		outside, err := s.m.pg.AssetsNotOwnedByProject(request.AssetIDs, scopeProject)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if len(outside) > 0 {
+			writeErr(w, http.StatusForbidden, "asset_ids 包含未归属本项目或他项目的资产")
+			return
+		}
+	}
 	if request.Scope != nil {
+		// 任务作用域必须落在项目授权范围内;项目级 API Key 不能直接写 scope
+		// (RegisterTaskAssetScopes 不走 fenceAgentScope,会把范围写出项目边界)。
+		if !APIScopeFrom(r.Context()).Global {
+			writeErr(w, http.StatusForbidden, "项目级 API Key 不能直接写任务作用域")
+			return
+		}
 		mutation, err := s.m.Assets().RegisterTaskAssetScopes(taskID, request.Scope)
 		if err != nil {
 			writeTaskAssetError(w, err)

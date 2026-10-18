@@ -12,10 +12,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/c1ayooo/4zrec/internal/platform/llm/acllm"
-	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
-	"github.com/c1ayooo/4zrec/internal/kernel/askernel"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
+	"github.com/c1ayooo/4zrec/internal/kernel/askernel"
+	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
+	"github.com/c1ayooo/4zrec/internal/platform/llm/acllm"
 	"github.com/c1ayooo/4zrec/internal/toolface/intercept"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -816,6 +816,36 @@ func resetPlannerTimer(timer *time.Timer, d time.Duration) {
 	timer.Reset(d)
 }
 
+// goalMetDrainGrace 是任务判定完成后，给在跑 worker 写回最后一条 finding 的
+// 收尾窗口。窗口内 worker 可以继续当前 run；超时后才硬取消。
+const goalMetDrainGrace = 30 * time.Second
+
+// drainInFlightAfter 在 grace 内等待该任务的在跑操作自然结束；仍有残留时
+// 才 cancelExec。用于 goal-met 的软收尾，避免把刚确认的发现丢在模型输出阶段。
+func (e *Engine) drainInFlightAfter(ctx context.Context, taskID string, grace time.Duration, cause error) {
+	go func() {
+		deadline := time.NewTimer(grace)
+		defer deadline.Stop()
+		tick := time.NewTicker(250 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			if e.inflightCount(taskID) <= 0 {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-deadline.C:
+				if e.inflightCount(taskID) > 0 {
+					e.cancelExec(taskID, cause)
+				}
+				return
+			case <-tick.C:
+			}
+		}
+	}()
+}
+
 func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 	interval := plannerHeartbeatInterval(t)
 	// 心跳定时器在 loop 入口臂 = 从任务 start 计时:即使是跳过首轮 planner 的 seed 任务
@@ -883,6 +913,9 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 		e.touch(t.ID)
 		emit := func(r db.Activity) { e.emitActivity(t, r) }
 		ectx := e.clockCtx(e.execContextFor(ctx, t.ID), t, false) // cancellable by Pause; 带任务 deadline
+		// 与 worker 一样带上任务上下文：Guard 的拦截规则/资产围栏靠它解析项目
+		// 与审计归属；没有它，planner 的 Bash 会绕过围栏。
+		ectx = intercept.WithTaskContext(ectx, t.ID, "planner", emit)
 		if ectx.Err() != nil || e.IsDeleting(t.ID) {
 			return
 		}
@@ -907,10 +940,12 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 			if err := e.m.SetTaskStatus(t.ID, "done"); err != nil {
 				log.Printf("[planner] task %s 标记完成落库失败: %v", t.ID, err)
 			}
-			// 任务已判完成 → 立刻取消在跑的 worker：它们手头的意图跑出来也没意义了。
-			// 下一轮 worker 循环撞终态门就不再领新意图;被取消的这批走下方"任务已完成"分支
-			// 归为 stopped(而非 blocked)。
-			e.cancelExec(t.ID, agent.AbortGoalMet)
+			// 目标已达成，但 worker 可能刚验证完一条链、还没写回。给它一个短暂的
+			// 收尾窗口（默认 30s）把已确认的 finding 落地，再取消；否则刚测出的
+			// SSRF/上传链会因为 kill 掉在模型输出阶段而丢失。
+			// 下一轮 worker 循环撞终态门就不再领新意图;超时被取消的这批走下方
+			// "任务已完成"分支归为 stopped(而非 blocked)。
+			e.drainInFlightAfter(ctx, t.ID, goalMetDrainGrace, agent.AbortGoalMet)
 		default:
 			log.Printf("[planner] task %s 规划完成", t.ID)
 		}

@@ -84,3 +84,19 @@ func httpToolPolicyBlock() string {
 var httpProbePriorityAgents = map[string]bool{
 	"pentest": true, "recon": true, "auto": true,
 }
+
+// diffProbePolicyBlock 是代码固定注入的尾巴(不入库、不可编辑)：需要对照的
+// 注入/盲注验证必须走 differential_probe，避免把单次请求差异直接当结论。
+// 工具未绑定时这段只是建议，不会造成悬空调用。
+func diffProbePolicyBlock() string {
+	return "\n\n**差分验证（工具集中有 differential_probe 时）**：\n" +
+		"- 验证 SQL 注入/布尔盲注/时间盲注/错误注入等**需要对照**的假设时，用 differential_probe：给出正常基线和你构造的变体，让它重复采样并返回状态/长度/相似度/时延统计/DBMS 错误特征/traffic_id。\n" +
+		"- 布尔对照用 role=true/false 成对提交；时间盲注设 repeats>=3 与 timing_delta_ms（如 1000）；错误注入把带引号/运算符的变体交给它自动匹配错误特征。\n" +
+		"- verdict=signal 只代表观测到稳定差异，**不是漏洞结论**；必须结合响应内容和业务语义确认。拿不到可复现证据就按 inferred fact 记录，不要直接 report_finding。\n" +
+		"- 不要用单次请求的微小差异（几字节、几十毫秒）下结论；先增加采样或换对照。"
+}
+
+// diffProbeAgents 是拿到 diffProbePolicyBlock 的 chat agent key。
+var diffProbeAgents = map[string]bool{
+	"pentest": true, "retester": true,
+}

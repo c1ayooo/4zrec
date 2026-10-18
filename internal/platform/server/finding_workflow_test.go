@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
+	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
 	actool "github.com/c1ayooo/4zrec/internal/toolface/tools"
 )
 
@@ -178,7 +178,7 @@ func TestFindingWorkflowAutoHintToPlannerAndSetting(t *testing.T) {
 	if offRecord.FindingID <= 0 || len(offRecord.Traffic.Bindings) != 0 || offRecord.EvidenceStatus != "not_bound" || !strings.Contains(offRecord.EvidenceNote, "已关闭") {
 		t.Fatal("disabled binding discarded finding or bound evidence", offResult)
 	}
-	workflowCall(t, ctx, report, map[string]any{"vulnclass": "TCP", "severity": "low", "summary": "no packet needed"}, false)
+	workflowCall(t, ctx, report, map[string]any{"vulnclass": "TCP", "severity": "low", "summary": "no packet needed", "evidence": "nmap command output proves the exposed service"}, false)
 	if notices != 3 {
 		t.Fatal("optional no-packet report failed")
 	}
@@ -336,4 +336,46 @@ func TestFindingWorkflowReporterBindsBeforeWritingReport(t *testing.T) {
 	}
 	workflowCall(t, ctx, workflowTool(t, off, "get_finding_traffic"), map[string]any{"finding_id": f.FindingID}, false)
 	workflowTool(t, off, "update_finding_report")
+}
+
+// TestMergeReportFindingConfidenceSchema 验证存量库的 report_finding 会补上
+// confidence 参数，同时用户改过的 schema/描述不被覆盖。
+func TestMergeReportFindingConfidenceSchema(t *testing.T) {
+	s, _, _ := trafficEvidenceServer(t)
+	pg := s.m.pg
+	old, err := pg.GetTool("report_finding")
+	if err != nil || old == nil {
+		t.Fatalf("load report_finding: %v", err)
+	}
+	agents, _ := json.Marshal(old.Agents)
+	t.Cleanup(func() {
+		_ = pg.UpdateTool("report_finding", old.Description, old.Schema, agents, old.Enabled)
+		_ = pg.SetSetting("report_finding_confidence_schema_v1", "true")
+	})
+
+	// 模拟旧库：schema 里没有 confidence。
+	var schema map[string]any
+	if err := json.Unmarshal(old.Schema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	props, _ := schema["properties"].(map[string]any)
+	if props == nil {
+		t.Fatal("report_finding schema missing properties")
+	}
+	delete(props, "confidence")
+	raw, _ := json.Marshal(schema)
+	if err := pg.UpdateTool("report_finding", old.Description, raw, agents, old.Enabled); err != nil {
+		t.Fatal(err)
+	}
+	_ = pg.SetSetting("report_finding_confidence_schema_v1", "")
+
+	s.mergeReportFindingConfidenceSchema()
+
+	got, err := pg.GetTool("report_finding")
+	if err != nil || got == nil {
+		t.Fatalf("reload report_finding: %v", err)
+	}
+	if !strings.Contains(string(got.Schema), `"confidence"`) {
+		t.Fatalf("confidence missing after migration: %s", got.Schema)
+	}
 }

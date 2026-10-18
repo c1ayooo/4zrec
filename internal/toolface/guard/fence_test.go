@@ -131,9 +131,11 @@ func TestExtractFenceTargets(t *testing.T) {
 			domains: []string{"sub.example.com"},
 		},
 		{
-			// 新口径:python/node 等脚本执行命令整段跳过(用户明确要求样本分析不卡审批)。
-			name: "python -c 代码内容不扫描",
-			cmd:  `python3 -c 'import requests; requests.get("https://api.evil.com/x")'`,
+			// 2026-10-18 新口径:解释器代码里的 URL 是真实命令对象，提取出来送审；
+			// 代码含网络调用时仍标记 Opaque（动态拼接的目标无法穷举）。
+			name:    "python -c 代码里的 URL 按对象提取",
+			cmd:     `python3 -c 'import requests; requests.get("https://api.evil.com/x")'`,
+			domains: []string{"api.evil.com"},
 		},
 		{
 			name:    "双引号包裹的真实目标仍识别",

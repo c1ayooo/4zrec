@@ -13,9 +13,9 @@ import (
 	"strings"
 
 	"github.com/c1ayooo/4zrec/internal/domain/db"
+	"github.com/c1ayooo/4zrec/internal/platform/llm/llmrec"
 	"github.com/c1ayooo/4zrec/internal/toolface/guard"
 	"github.com/c1ayooo/4zrec/internal/toolface/intercept"
-	"github.com/c1ayooo/4zrec/internal/platform/llm/llmrec"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 )

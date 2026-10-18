@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
+	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
 )
 
 const maxBatchControlIDs = 100
@@ -241,6 +241,40 @@ func (s *Server) applyIntentControl(ctx context.Context, t *Task, iid int64, act
 		return out, fmt.Errorf("action must be pause|resume|cancel")
 	}
 	return out, nil
+}
+
+// pauseAllTasks is the global kill switch: pause every non-terminal task the
+// caller can see, without requiring the client to enumerate IDs. Project-scoped
+// API keys only affect their own project.
+func (s *Server) pauseAllTasks(w http.ResponseWriter, r *http.Request) {
+	tasks := s.m.List()
+	items := make([]batchControlItem, 0, len(tasks))
+	paused := 0
+	for _, t := range tasks {
+		if t == nil || isTerminalStatus(t.lifecycleSnapshot().Status) || s.engine.IsDeleting(t.ID) {
+			continue
+		}
+		if scopeProject := scopedProjectID(r.Context()); scopeProject > 0 {
+			if t.ProjectID == nil || *t.ProjectID != scopeProject {
+				continue
+			}
+		}
+		item := batchControlItem{ID: t.ID}
+		if s.engine.IsPaused(t.ID) {
+			item.OK, item.Status = true, "paused"
+			items = append(items, item)
+			continue
+		}
+		result, err := s.applyTaskControl(t, "pause")
+		if err != nil {
+			item.Error = err.Error()
+		} else {
+			item.OK, item.Status, item.Queued = true, result.Status, result.Queued
+			paused++
+		}
+		items = append(items, item)
+	}
+	writeJSON(w, 200, map[string]any{"items": items, "paused": paused})
 }
 
 func (s *Server) controlTasksBatch(w http.ResponseWriter, r *http.Request) {

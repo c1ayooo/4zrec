@@ -7,11 +7,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/c1ayooo/4zrec/internal/kernel/askernel"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
+	"github.com/c1ayooo/4zrec/internal/kernel/askernel"
+	"github.com/c1ayooo/4zrec/internal/kernel/transcript"
 	"github.com/c1ayooo/4zrec/internal/toolface/intercept"
 	actool "github.com/c1ayooo/4zrec/internal/toolface/tools"
-	"github.com/c1ayooo/4zrec/internal/kernel/transcript"
 	"github.com/cloudwego/eino/components/model"
 )
 
@@ -38,6 +38,7 @@ type Planner struct {
 	noaEnabledFn      func() bool                            // resolver: use experimental noa compaction? (nil = off)
 	maxTokensFn       func() int                             // resolver: per-reply output cap (nil/0 = send no cap)
 	compactor         *Compactor                             // cold-node compaction (§7); nil = disabled
+	guardHooks        askernel.HookRunner                    // safety boundary hooks (guard/intercept); nil = off
 
 	// todos keeps ONE plan-scratchpad per task (keyed by exploration id) so the
 	// planner's multi-step plan survives across wake-ups — each Plan() is a fresh
@@ -57,6 +58,13 @@ func (p *Planner) SetCompactionWindowResolver(fn func() int) { p.windowFn = fn }
 // planner wake-up to advance the round counter, maintain cold stamps, and
 // (off the hot path) fold cold nodes into digests. nil = feature disabled.
 func (p *Planner) SetCompactor(c *Compactor) { p.compactor = c }
+
+// SetGuardHooks attaches the task's safety boundary (intercept rules + asset
+// fence) to each planning session. nil = off.
+func (p *Planner) SetGuardHooks(h askernel.HookRunner) { p.guardHooks = h }
+
+// GuardHooksSet reports whether the safety boundary is attached (wiring test).
+func (p *Planner) GuardHooksSet() bool { return p.guardHooks != nil }
 
 // SetNonStreaming wires a resolver deciding whether runs use the non-streaming
 // model path (true = non-streaming). nil/unset = streaming (default).
@@ -343,7 +351,7 @@ const plannerDefaultTmpl = `你是一个网络安全平台授权渗透测试系�
 
 func plannerSystem(goal, dataDir, workDir, assetSummary string) string {
 	body := renderSystem("planner", plannerDefaultTmpl, PlannerVars{Goal: goal, AssetSummary: assetSummary, DataDir: dataDir, Now: nowStr()})
-	return body + httpToolPolicyBlock() + artifactSpec(workDir)
+	return body + httpToolPolicyBlock() + diffProbePolicyBlock() + artifactSpec(workDir)
 }
 
 // Plan runs one planning round. emit, if non-nil, receives the planner's execution
@@ -415,6 +423,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 		Tools:          sessionTools(tools, todos, true),
 		DeferredTools:  def.Deferred,
 		Unlock:         def.Unlock,
+		Hooks:          p.guardHooks,
 		PermissionMode: actool.ModeBypass,
 		EnableWebFetch: true, // 走记录代理留痕；载入代理 CA 验证 MITM 重签的 HTTPS 证书
 		WebFetch:       actool.WebFetchConfig{Proxy: p.proxyAddr, CACert: p.proxyCACert},

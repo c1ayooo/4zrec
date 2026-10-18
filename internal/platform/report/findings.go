@@ -69,6 +69,12 @@ func FindingsMarkdown(fs []*db.DBFinding, generatedAt time.Time) string {
 			fmt.Fprintf(&b, "- **类别**：%s\n", f.VulnClass)
 		}
 		fmt.Fprintf(&b, "- **状态**：%s\n", nz(f.Status, "pending"))
+		if c := confidenceCN(f.Confidence); c != "" {
+			fmt.Fprintf(&b, "- **证据等级**：%s\n", c)
+		}
+		if r := retestVerdictCN(f.RetestVerdict); r != "" {
+			fmt.Fprintf(&b, "- **复测结论**：%s\n", r)
+		}
 		if desc := strings.TrimSpace(f.TaskDescription); desc != "" {
 			fmt.Fprintf(&b, "- **所属任务**：%s\n", desc)
 		}
@@ -99,6 +105,12 @@ func SingleFindingMarkdown(f *db.DBFinding, generatedAt time.Time) string {
 	}
 	fmt.Fprintf(&b, "- **严重等级**：%s\n", nz(f.Severity, "info"))
 	fmt.Fprintf(&b, "- **状态**：%s\n", nz(f.Status, "pending"))
+	if c := confidenceCN(f.Confidence); c != "" {
+		fmt.Fprintf(&b, "- **证据等级**：%s\n", c)
+	}
+	if r := retestVerdictCN(f.RetestVerdict); r != "" {
+		fmt.Fprintf(&b, "- **复测结论**：%s\n", r)
+	}
 	if desc := strings.TrimSpace(f.TaskDescription); desc != "" {
 		fmt.Fprintf(&b, "- **所属任务**：%s\n", desc)
 	}
@@ -149,7 +161,7 @@ func FindingsCSV(fs []*db.DBFinding) []byte {
 	var buf bytes.Buffer
 	buf.WriteString("\xEF\xBB\xBF") // UTF-8 BOM
 	w := csv.NewWriter(&buf)
-	_ = w.Write([]string{"ID", "名称", "类别", "严重等级", "状态", "所属任务", "发现时间", "概述", "流量证据数量", "流量证据ID"})
+	_ = w.Write([]string{"ID", "名称", "类别", "严重等级", "状态", "证据等级", "复测结论", "所属任务", "发现时间", "概述", "流量证据数量", "流量证据ID"})
 	for _, f := range items {
 		_ = w.Write([]string{
 			fmt.Sprintf("%d", f.ID),
@@ -157,6 +169,8 @@ func FindingsCSV(fs []*db.DBFinding) []byte {
 			f.VulnClass,
 			nz(f.Severity, "info"),
 			nz(f.Status, "pending"),
+			confidenceCN(f.Confidence),
+			retestVerdictCN(f.RetestVerdict),
 			f.TaskDescription,
 			f.CreatedAt.Format("2006-01-02 15:04:05"),
 			strings.TrimSpace(f.Summary),

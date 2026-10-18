@@ -517,3 +517,80 @@ func TestAddFindingFollowUpIntent(t *testing.T) {
 		t.Fatalf("missing source node: want ErrFindingOriginUnavailable, got %v", err)
 	}
 }
+
+// TestFindingsExportAndStatsExcludeTriaged 验证误报/忽略/重复不进入汇总导出
+// 与统计，而 pending/fixed 正常计入。
+func TestFindingsExportAndStatsExcludeTriaged(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	defer d.Close()
+
+	const vc = "__test_vc_export_filter__"
+	cleanup := func() { _, _ = d.Exec(`DELETE FROM findings WHERE vulnclass=$1`, vc) }
+	cleanup()
+	defer cleanup()
+
+	before, err := d.FindingStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seed := []struct {
+		sev, status string
+	}{
+		{"high", FindingPending},
+		{"high", FindingFixed},
+		{"critical", FindingFalsePositive},
+		{"low", FindingIgnored},
+		{"medium", FindingDuplicate},
+	}
+	for i, s := range seed {
+		id, err := d.AddFinding(0, 0, vc, fmt.Sprintf("export filter %d", i), s.sev, "summary", "poc", "tester", nil)
+		if err != nil {
+			t.Fatalf("AddFinding[%d]: %v", i, err)
+		}
+		if _, err := d.SetFindingStatus(id, s.status); err != nil {
+			t.Fatalf("SetFindingStatus[%d]: %v", i, err)
+		}
+	}
+
+	got, err := d.ListFindingsForExport(FindingFilter{VulnClass: vc}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("export rows = %d, want 2 (pending+fixed); rows=%+v", len(got), got)
+	}
+	for _, f := range got {
+		if f.Status == FindingFalsePositive || f.Status == FindingIgnored || f.Status == FindingDuplicate {
+			t.Fatalf("triaged row leaked into export: %+v", f)
+		}
+	}
+
+	after, err := d.FindingStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 只有 pending + fixed 两行计入；误报(critical)/忽略(low)/重复(medium)
+	// 不应改变任何计数。TestMain 串行化 DB 测试，因此前后差值稳定。
+	if got := after.Total - before.Total; got != 2 {
+		t.Fatalf("total delta = %d, want 2", got)
+	}
+	if got := after.Pending - before.Pending; got != 1 {
+		t.Fatalf("pending delta = %d, want 1", got)
+	}
+	if got := after.High - before.High; got != 2 {
+		t.Fatalf("high delta = %d, want 2", got)
+	}
+	for name, delta := range map[string]int{
+		"critical": after.Critical - before.Critical,
+		"medium":   after.Medium - before.Medium,
+		"low":      after.Low - before.Low,
+	} {
+		if delta != 0 {
+			t.Fatalf("%s delta = %d, want 0 (triaged rows must not count)", name, delta)
+		}
+	}
+}

@@ -2,7 +2,17 @@
 
 import * as React from "react";
 
-import { CpuIcon, FlaskConicalIcon, KeyboardIcon, RadioTowerIcon, SearchIcon, ShieldAlertIcon } from "lucide-react";
+import Link from "next/link";
+
+import {
+  CpuIcon,
+  FlaskConicalIcon,
+  KeyboardIcon,
+  RadioTowerIcon,
+  ScanSearchIcon,
+  SearchIcon,
+  ShieldAlertIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -13,9 +23,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { CHAT_SEND_MODE_OPTIONS, type ChatSendMode, setChatSendMode, useChatSendMode } from "@/lib/chat-send-mode";
-import type { Settings } from "@/lib/types";
+import type { NucleiStatus, ProxyProfile, ProxySelections, Settings } from "@/lib/types";
 
+import { ProxyLibrary } from "./_components/proxy-library";
 import { UpdateCard } from "./_components/update-card";
+
+const EMPTY_PROXY_SELECTIONS: ProxySelections = { global: "", web_search: "", nuclei: "", update: "" };
 
 export default function SystemSettingsPage() {
   const [trafficCapture, setTrafficCapture] = React.useState(false);
@@ -43,6 +56,24 @@ export default function SystemSettingsPage() {
   const [injectWorker, setInjectWorker] = React.useState(true);
   // 实验功能:noa 上下文压缩(默认关)。
   const [noaCompaction, setNoaCompaction] = React.useState(false);
+  // nuclei（项目自带外部二进制）。
+  const [nucleiEnabled, setNucleiEnabled] = React.useState(true);
+  const [nucleiAutoUpdate, setNucleiAutoUpdate] = React.useState(true);
+  const [nucleiInterval, setNucleiInterval] = React.useState("24");
+  const [nucleiVersion, setNucleiVersion] = React.useState("3.11.1");
+  const [nucleiInteractsh, setNucleiInteractsh] = React.useState(false);
+  const [nucleiMaxScan, setNucleiMaxScan] = React.useState("600");
+  const [nucleiProxy, setNucleiProxy] = React.useState("");
+  const [nucleiStatus, setNucleiStatus] = React.useState<NucleiStatus | null>(null);
+  const [loadingNucleiStatus, setLoadingNucleiStatus] = React.useState(false);
+  const [savingNuclei, setSavingNuclei] = React.useState(false);
+  // 代理库：命名代理 + 每个用途的手动选择。
+  const [proxyProfiles, setProxyProfiles] = React.useState<ProxyProfile[]>([]);
+  const [proxySelections, setProxySelections] = React.useState<ProxySelections>(EMPTY_PROXY_SELECTIONS);
+  const [proxyUrls, setProxyUrls] = React.useState<ProxySelections>(EMPTY_PROXY_SELECTIONS);
+  const [proxyCustom, setProxyCustom] = React.useState<Record<string, boolean>>({});
+  const [updateProxyInput, setUpdateProxyInput] = React.useState("");
+  const [savingUpdateProxy, setSavingUpdateProxy] = React.useState(false);
   // 纯前端偏好：不走 /api/settings，直接读写 localStorage。
   const sendMode = useChatSendMode();
 
@@ -60,7 +91,78 @@ export default function SystemSettingsPage() {
     setInjectPlanner(s.constraints_inject_planner !== false);
     setInjectWorker(s.constraints_inject_worker !== false);
     setNoaCompaction(!!s.noa_compaction);
+    setNucleiEnabled(s.nuclei_enabled !== false);
+    setNucleiAutoUpdate(s.nuclei_auto_update !== false);
+    setNucleiInterval(String(s.nuclei_update_interval_hours ?? 24));
+    setNucleiVersion(s.nuclei_version ?? "3.11.1");
+    setNucleiInteractsh(!!s.nuclei_interactsh);
+    setNucleiMaxScan(String(s.nuclei_max_scan_seconds ?? 600));
+    setNucleiProxy(s.nuclei_proxy ?? "");
+    setProxyProfiles(s.proxy_profiles ?? []);
+    setProxySelections(s.proxy_selections ?? EMPTY_PROXY_SELECTIONS);
+    setProxyUrls(s.proxy_urls ?? EMPTY_PROXY_SELECTIONS);
+    setUpdateProxyInput(s.update_proxy ?? "");
   }, []);
+
+  const isProxyCustom = (slot: keyof ProxySelections) =>
+    !!proxyCustom[slot] || (!proxySelections[slot] && !!proxyUrls[slot]);
+
+  const proxySelectValue = (slot: keyof ProxySelections) =>
+    proxySelections[slot] || (isProxyCustom(slot) ? "custom" : "direct");
+
+  const refreshProxyGallery = React.useCallback(async () => {
+    const [g, s] = await Promise.all([api.proxyProfiles(), api.settings()]);
+    setProxyProfiles(g.profiles);
+    setProxySelections(g.selections);
+    setProxyUrls(g.urls);
+    apply(s);
+  }, [apply]);
+
+  const selectProxySlot = async (slot: keyof ProxySelections, value: string) => {
+    if (value === "custom") {
+      setProxyCustom((prev) => ({ ...prev, [slot]: true }));
+      return;
+    }
+    setProxyCustom((prev) => ({ ...prev, [slot]: false }));
+    try {
+      if (value === "direct") {
+        const patch: Partial<Settings> =
+          slot === "global"
+            ? { global_proxy: "" }
+            : slot === "web_search"
+              ? { web_search_proxy: "" }
+              : slot === "nuclei"
+                ? { nuclei_proxy: "" }
+                : { update_proxy: "" };
+        apply(await api.setSettings(patch));
+        toast.success("已切换为直连");
+      } else {
+        const g = await api.selectProxyProfile(slot, value);
+        setProxyProfiles(g.profiles);
+        setProxySelections(g.selections);
+        setProxyUrls(g.urls);
+        setGlobalProxyInput(g.urls.global);
+        setProxyInput(g.urls.web_search);
+        setNucleiProxy(g.urls.nuclei);
+        setUpdateProxyInput(g.urls.update);
+        toast.success("代理已切换");
+      }
+    } catch (e) {
+      toast.error("切换失败：" + (e as Error).message);
+    }
+  };
+
+  const saveUpdateProxy = async () => {
+    setSavingUpdateProxy(true);
+    try {
+      apply(await api.setSettings({ update_proxy: updateProxyInput.trim() }));
+      toast.success("已保存平台更新代理");
+    } catch (e) {
+      toast.error("保存失败：" + (e as Error).message);
+    } finally {
+      setSavingUpdateProxy(false);
+    }
+  };
 
   const saveWorkers = () => {
     const n = Number(workers);
@@ -106,6 +208,19 @@ export default function SystemSettingsPage() {
       .catch(() => undefined)
       .finally(() => setLoaded(true));
   }, [apply]);
+
+  const loadNucleiStatus = React.useCallback(() => {
+    setLoadingNucleiStatus(true);
+    api
+      .nucleiStatus()
+      .then(setNucleiStatus)
+      .catch(() => setNucleiStatus(null))
+      .finally(() => setLoadingNucleiStatus(false));
+  }, []);
+
+  React.useEffect(() => {
+    loadNucleiStatus();
+  }, [loadNucleiStatus]);
 
   const toggleTraffic = (v: boolean) => {
     setTrafficCapture(v); // optimistic
@@ -161,6 +276,84 @@ export default function SystemSettingsPage() {
         setNoaCompaction(!v); // revert on failure
         toast.error(`保存失败：${(e as Error).message}`);
       });
+  };
+
+  const toggleNucleiEnabled = (v: boolean) => {
+    setNucleiEnabled(v); // optimistic
+    setSavingNuclei(true);
+    api
+      .setSettings({ nuclei_enabled: v })
+      .then((s) => {
+        apply(s);
+        toast.success(v ? "已启用 nuclei 工具" : "已停用 nuclei 工具");
+      })
+      .catch((e) => {
+        setNucleiEnabled(!v);
+        toast.error(`保存失败：${(e as Error).message}`);
+      })
+      .finally(() => setSavingNuclei(false));
+  };
+
+  const toggleNucleiAutoUpdate = (v: boolean) => {
+    setNucleiAutoUpdate(v); // optimistic
+    setSavingNuclei(true);
+    api
+      .setSettings({ nuclei_auto_update: v })
+      .then((s) => {
+        apply(s);
+        toast.success(v ? "已开启 nuclei 自动更新" : "已关闭 nuclei 自动更新");
+      })
+      .catch((e) => {
+        setNucleiAutoUpdate(!v);
+        toast.error(`保存失败：${(e as Error).message}`);
+      })
+      .finally(() => setSavingNuclei(false));
+  };
+
+  const toggleNucleiInteractsh = (v: boolean) => {
+    setNucleiInteractsh(v); // optimistic
+    setSavingNuclei(true);
+    api
+      .setSettings({ nuclei_interactsh: v })
+      .then((s) => {
+        apply(s);
+        toast.success(v ? "已开启 interactsh（目标流量会引到公共 OAST 服务）" : "已关闭 interactsh");
+      })
+      .catch((e) => {
+        setNucleiInteractsh(!v);
+        toast.error(`保存失败：${(e as Error).message}`);
+      })
+      .finally(() => setSavingNuclei(false));
+  };
+
+  const saveNucleiConfig = () => {
+    const hours = Number(nucleiInterval);
+    const maxScan = Number(nucleiMaxScan);
+    if (!Number.isInteger(hours) || hours < 1 || hours > 720) {
+      toast.error("更新间隔需在 1 到 720 小时之间");
+      return;
+    }
+    if (!Number.isInteger(maxScan) || maxScan < 60 || maxScan > 1800) {
+      toast.error("扫描时长需在 60 到 1800 秒之间");
+      return;
+    }
+    setSavingNuclei(true);
+    const patch: Partial<Settings> = {
+      nuclei_update_interval_hours: hours,
+      nuclei_version: nucleiVersion.trim(),
+      nuclei_max_scan_seconds: maxScan,
+    };
+    if (isProxyCustom("nuclei")) {
+      patch.nuclei_proxy = nucleiProxy.trim();
+    }
+    api
+      .setSettings(patch)
+      .then((s) => {
+        apply(s);
+        toast.success("已保存 nuclei 配置");
+      })
+      .catch((e) => toast.error(`保存失败：${(e as Error).message}`))
+      .finally(() => setSavingNuclei(false));
   };
 
   // Persist a web-search patch (enable and/or backend). Optimistic with refetch.
@@ -254,6 +447,17 @@ export default function SystemSettingsPage() {
   // brave-free selected but no key stored and none being entered → tool stays off.
   const braveNeedsKey = webSearch && backend === "brave-free" && !braveKeySet;
 
+  const nucleiStatusLabel = React.useMemo(() => {
+    if (loadingNucleiStatus) return "读取状态…";
+    if (!nucleiStatus) return "未读取到状态（可点刷新重试）";
+    if (!nucleiStatus.binary_exists) return "二进制未安装 · 首次 nuclei_scan 时自动下载";
+    const ver = nucleiStatus.binary_version ? ` · ${nucleiStatus.binary_version}` : "";
+    const tpl = nucleiStatus.templates_exists ? ` · 官方模板 ${nucleiStatus.template_count}` : " · 模板未安装";
+    const custom = ` · 自定义 ${nucleiStatus.custom_template_count ?? 0}`;
+    const last = nucleiStatus.last_update ? ` · 上次更新 ${nucleiStatus.last_update.slice(0, 10)}` : "";
+    return `已安装${ver}${tpl}${custom}${last}`;
+  }, [loadingNucleiStatus, nucleiStatus]);
+
   return (
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
       <div>
@@ -267,6 +471,17 @@ export default function SystemSettingsPage() {
           column-gap 只管列间距，行间距要由子元素自己给。 */}
       <div className="columns-1 gap-4 md:gap-6 lg:columns-2">
         <UpdateCard />
+
+        <ProxyLibrary
+          profiles={proxyProfiles}
+          selections={proxySelections}
+          urls={proxyUrls}
+          updateProxyInput={updateProxyInput}
+          setUpdateProxyInput={setUpdateProxyInput}
+          saveUpdateProxy={saveUpdateProxy}
+          savingUpdate={savingUpdateProxy}
+          onRefresh={refreshProxyGallery}
+        />
 
         <Card className="mb-4 break-inside-avoid md:mb-6">
           <CardHeader>
@@ -341,26 +556,49 @@ export default function SystemSettingsPage() {
               亲自拨号，工具无感知、稳定生效。
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col gap-2">
-            <Label htmlFor="global-proxy" className="text-sm font-normal text-muted-foreground">
-              代理地址
-            </Label>
-            <div className="flex items-center gap-2">
-              <Input
-                id="global-proxy"
-                autoComplete="off"
-                placeholder="socks5://user:pass@host:1080 或 http://host:port（留空=直连）"
-                value={globalProxyInput}
+          <CardContent className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Label htmlFor="global-proxy-select" className="text-sm font-normal text-muted-foreground">
+                使用代理
+              </Label>
+              <Select
+                value={proxySelectValue("global")}
+                onValueChange={(v) => void selectProxySlot("global", v)}
                 disabled={!loaded || savingGlobalProxy}
-                onChange={(e) => setGlobalProxyInput(e.target.value)}
-              />
-              <Button type="button" onClick={saveGlobalProxy} disabled={!loaded || savingGlobalProxy}>
-                保存
-              </Button>
+              >
+                <SelectTrigger id="global-proxy-select" className="w-64">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="direct">直连</SelectItem>
+                  {proxyProfiles.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="custom">自定义 URL</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <p className="text-muted-foreground text-xs">
-              {globalProxyInput.trim() ? "已配置 · 所有目标流量经此代理出网" : "未配置 · 目标流量直连出网"}
-            </p>
+            {isProxyCustom("global") ? (
+              <div className="flex items-center gap-2">
+                <Input
+                  id="global-proxy"
+                  autoComplete="off"
+                  placeholder="socks5://user:pass@host:1080 或 http://host:port（留空=直连）"
+                  value={globalProxyInput}
+                  disabled={!loaded || savingGlobalProxy}
+                  onChange={(e) => setGlobalProxyInput(e.target.value)}
+                />
+                <Button type="button" onClick={saveGlobalProxy} disabled={!loaded || savingGlobalProxy}>
+                  保存
+                </Button>
+              </div>
+            ) : (
+              <p className="text-muted-foreground text-xs">
+                当前：{proxyUrls.global || "直连"} · 所有目标流量经此代理出网
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -435,6 +673,152 @@ export default function SystemSettingsPage() {
         <Card className="mb-4 break-inside-avoid md:mb-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
+              <ScanSearchIcon className="size-4" />
+              nuclei 模板扫描
+            </CardTitle>
+            <CardDescription>
+              项目自带 nuclei 外部二进制：二进制、模板、扫描结果都在数据目录的 <code>nuclei/</code> 下，
+              不写系统目录或用户 HOME。首次 <code>nuclei_scan</code> 会自动下载并安装模板，之后按更新间隔自动更新。
+              关闭总开关后 Agent 的 <code>nuclei_*</code> 工具不可用。
+              <br />
+              <b>interactsh</b> 默认关闭，避免把目标流量引到公共 OAST 服务；需要带外验证时再开。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <div className="flex items-center justify-between gap-4">
+              <Label htmlFor="nuclei-enabled" className="text-sm font-normal text-muted-foreground">
+                启用 nuclei 工具{nucleiEnabled ? " · 已开启" : " · 已关闭"}
+              </Label>
+              <Switch
+                id="nuclei-enabled"
+                checked={nucleiEnabled}
+                disabled={!loaded || savingNuclei}
+                onCheckedChange={toggleNucleiEnabled}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <Label htmlFor="nuclei-auto-update" className="text-sm font-normal text-muted-foreground">
+                自动更新二进制与模板{nucleiAutoUpdate ? " · 已开启" : " · 已关闭"}
+              </Label>
+              <Switch
+                id="nuclei-auto-update"
+                checked={nucleiAutoUpdate}
+                disabled={!loaded || savingNuclei || !nucleiEnabled}
+                onCheckedChange={toggleNucleiAutoUpdate}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <Label htmlFor="nuclei-interactsh" className="text-sm font-normal text-muted-foreground">
+                interactsh 带外验证{nucleiInteractsh ? " · 已开启" : " · 已关闭"}
+              </Label>
+              <Switch
+                id="nuclei-interactsh"
+                checked={nucleiInteractsh}
+                disabled={!loaded || savingNuclei || !nucleiEnabled}
+                onCheckedChange={toggleNucleiInteractsh}
+              />
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="nuclei-interval" className="text-sm font-normal text-muted-foreground">
+                  更新间隔（小时）
+                </Label>
+                <Input
+                  id="nuclei-interval"
+                  type="number"
+                  min={1}
+                  max={720}
+                  value={nucleiInterval}
+                  disabled={!loaded || savingNuclei}
+                  onChange={(e) => setNucleiInterval(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="nuclei-version" className="text-sm font-normal text-muted-foreground">
+                  引导版本
+                </Label>
+                <Input
+                  id="nuclei-version"
+                  placeholder="3.11.1（留空=默认）"
+                  value={nucleiVersion}
+                  disabled={!loaded || savingNuclei}
+                  onChange={(e) => setNucleiVersion(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="nuclei-max-scan" className="text-sm font-normal text-muted-foreground">
+                  扫描上限（秒）
+                </Label>
+                <Input
+                  id="nuclei-max-scan"
+                  type="number"
+                  min={60}
+                  max={1800}
+                  value={nucleiMaxScan}
+                  disabled={!loaded || savingNuclei}
+                  onChange={(e) => setNucleiMaxScan(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Label htmlFor="nuclei-proxy-select" className="text-sm font-normal text-muted-foreground">
+                  下载/更新代理
+                </Label>
+                <Select
+                  value={proxySelectValue("nuclei")}
+                  onValueChange={(v) => void selectProxySlot("nuclei", v)}
+                  disabled={!loaded || savingNuclei}
+                >
+                  <SelectTrigger id="nuclei-proxy-select" className="w-64">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="direct">直连</SelectItem>
+                    {proxyProfiles.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value="custom">自定义 URL</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {isProxyCustom("nuclei") ? (
+                <Input
+                  id="nuclei-proxy"
+                  placeholder="http://127.0.0.1:7890（留空=直连）"
+                  value={nucleiProxy}
+                  disabled={!loaded || savingNuclei}
+                  onChange={(e) => setNucleiProxy(e.target.value)}
+                />
+              ) : (
+                <p className="text-muted-foreground text-xs">当前：{proxyUrls.nuclei || "直连"}</p>
+              )}
+              <p className="text-muted-foreground text-xs">
+                仅用于下载/更新 nuclei 二进制和官方模板（以及 nuclei 子进程的更新请求），不影响目标扫描流量。
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+              <p className="text-muted-foreground text-xs">{nucleiStatusLabel}</p>
+              <div className="flex items-center gap-2">
+                <Link href="/function/nuclei-templates" className="text-primary text-xs underline">
+                  管理模板
+                </Link>
+                <Button type="button" variant="outline" onClick={loadNucleiStatus} disabled={loadingNucleiStatus}>
+                  {loadingNucleiStatus ? "读取中…" : "刷新状态"}
+                </Button>
+                <Button type="button" onClick={saveNucleiConfig} disabled={!loaded || savingNuclei}>
+                  保存
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="mb-4 break-inside-avoid md:mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
               <SearchIcon className="size-4" />
               网络搜索
             </CardTitle>
@@ -444,8 +828,8 @@ export default function SystemSettingsPage() {
               记录代理，独立于流量捕获。
               <br />
               来源可选 <b>DuckDuckGo（ddgs）</b>（无需 Key）、<b>Brave（免费版）</b>（需填写 Brave API Key）、{" "}
-              <b>Tavily</b>（需填写 Tavily API Key）或 <b>DeepSeek</b>（复用当前 LLM 配置）。总开关关闭时，各
-              Agent 的网络搜索开关不可用。
+              <b>Tavily</b>（需填写 Tavily API Key）或 <b>DeepSeek</b>（复用当前 LLM 配置）。总开关关闭时，各 Agent
+              的网络搜索开关不可用。
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
@@ -577,22 +961,46 @@ export default function SystemSettingsPage() {
 
             {webSearch && (
               <div className="flex flex-col gap-2">
-                <Label htmlFor="ws-proxy" className="text-sm font-normal text-muted-foreground">
-                  出口代理（可选）
-                </Label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    id="ws-proxy"
-                    autoComplete="off"
-                    placeholder="http://host:port 或 socks5://host:port（留空=直连）"
-                    value={proxyInput}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Label htmlFor="ws-proxy-select" className="text-sm font-normal text-muted-foreground">
+                    出口代理（可选）
+                  </Label>
+                  <Select
+                    value={proxySelectValue("web_search")}
+                    onValueChange={(v) => void selectProxySlot("web_search", v)}
                     disabled={!loaded || savingProxy}
-                    onChange={(e) => setProxyInput(e.target.value)}
-                  />
-                  <Button type="button" onClick={saveProxy} disabled={!loaded || savingProxy}>
-                    保存
-                  </Button>
+                  >
+                    <SelectTrigger id="ws-proxy-select" className="w-64">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="direct">直连</SelectItem>
+                      {proxyProfiles.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value="custom">自定义 URL</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
+                {isProxyCustom("web_search") ? (
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="ws-proxy"
+                      autoComplete="off"
+                      placeholder="http://host:port 或 socks5://host:port（留空=直连）"
+                      value={proxyInput}
+                      disabled={!loaded || savingProxy}
+                      onChange={(e) => setProxyInput(e.target.value)}
+                    />
+                    <Button type="button" onClick={saveProxy} disabled={!loaded || savingProxy}>
+                      保存
+                    </Button>
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground text-xs">当前：{proxyUrls.web_search || "直连"}</p>
+                )}
                 <p className="text-muted-foreground text-xs">
                   独立出口代理，仅用于访问搜索端点（VPN/SOCKS 等）。与记录流量的 MITM 代理无关；网络不通时经此代理访问。
                 </p>

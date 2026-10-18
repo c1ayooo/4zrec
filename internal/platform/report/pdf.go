@@ -49,12 +49,12 @@ func GeneratePDF(ctx context.Context, in *PDFInput, workDir string) (string, err
 	if chromium == "" {
 		return "", fmt.Errorf("未找到 Chromium/Chrome（PDF 导出需要 chromium 或 google-chrome）")
 	}
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
+	if err := os.MkdirAll(workDir, 0o700); err != nil {
 		return "", fmt.Errorf("创建 PDF 目录失败: %w", err)
 	}
 	doc := buildFindingHTML(in)
 	htmlPath := filepath.Join(workDir, fmt.Sprintf("finding-%d.html", in.FindingID))
-	if err := os.WriteFile(htmlPath, []byte(doc), 0o644); err != nil {
+	if err := os.WriteFile(htmlPath, []byte(doc), 0o600); err != nil {
 		return "", fmt.Errorf("写 HTML 失败: %w", err)
 	}
 	outPath := filepath.Join(workDir, fmt.Sprintf("finding-%d.pdf", in.FindingID))
@@ -69,6 +69,7 @@ func GeneratePDF(ctx context.Context, in *PDFInput, workDir string) (string, err
 	out, err := exec.CommandContext(cctx, chromium, base...).CombinedOutput()
 	if err == nil {
 		if fi, statErr := os.Stat(outPath); statErr == nil && fi.Size() > 0 {
+			_ = os.Chmod(outPath, 0o600)
 			return outPath, nil
 		}
 	}
@@ -83,6 +84,7 @@ func GeneratePDF(ctx context.Context, in *PDFInput, workDir string) (string, err
 	if fi, statErr := os.Stat(outPath); statErr != nil || fi.Size() == 0 {
 		return "", fmt.Errorf("未生成有效 PDF: %v", statErr)
 	}
+	_ = os.Chmod(outPath, 0o600)
 	return outPath, nil
 }
 

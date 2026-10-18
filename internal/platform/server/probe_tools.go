@@ -19,11 +19,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/4zrec/internal/domain/db"
 	"github.com/c1ayooo/4zrec/internal/capability/recon/fingerprint"
 	"github.com/c1ayooo/4zrec/internal/capability/web/httpprobe"
-	actool "github.com/c1ayooo/4zrec/internal/toolface/tools"
+	"github.com/c1ayooo/4zrec/internal/domain/db"
 	"github.com/c1ayooo/4zrec/internal/domain/traffic"
+	actool "github.com/c1ayooo/4zrec/internal/toolface/tools"
 )
 
 // toolHTTPProbe 结构化 HTTP 请求(单发+批量/矩阵差分;替代手写 curl 脚本)。
@@ -107,6 +107,14 @@ func (s *Server) toolHTTPProbe() actool.CoreTool {
 			workDir := ""
 			if tc != nil {
 				workDir = tc.WorkingDir
+			}
+			// upload_file 只允许任务工作目录/临时目录内的文件:目标侧内容可提示
+			// 注入 Agent,若放任任意绝对路径,一次 multipart 请求就能把宿主机
+			// 密钥文件外传出去。
+			for _, sp := range specs {
+				if !s.localFileAllowed(sp.UploadFile, workDir) {
+					return actool.Errorf("upload_file 只能读取任务工作目录内的文件: " + sp.UploadFile), nil
+				}
 			}
 			// 串行链状态:vars 由 extract 填充,后续请求 {var} 回填;jar 是批量内
 			// 的 Cookie 罐(cookie_jar=true 且显式 Cookie 头缺席时注入)。

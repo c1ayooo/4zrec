@@ -21,6 +21,11 @@ func (s *Server) autoCaptureConnection(ctx context.Context, c *db.Connection) st
 	if s.m == nil || s.m.pg == nil {
 		return ""
 	}
+	// 连接台账存的是"可复用的已验证凭据",空 secret 没有复用价值,还会让
+	// 台账出现一条看起来验证成功、实际无法认证的假记录。
+	if strings.TrimSpace(c.Secret) == "" {
+		return "(空凭据不写入连接台账)"
+	}
 	projectID := s.roeProjectID(ctx, 0)
 	if projectID <= 0 {
 		return "(未挂项目,凭据未入连接台账——在对话/任务上挂载项目后验证可自动落库)"

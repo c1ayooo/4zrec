@@ -3,7 +3,7 @@
 #
 # 用法：
 #   ./start.sh                       前台运行（Ctrl-C 停止）
-#   nohup ./start.sh >4zrec.log 2>&1 &   后台常驻
+#   nohup ./start.sh >4zrec.log 2>&1 &   后台常驻（日志含首次启动密码，建议 umask 077）
 #   ./start.sh -addr :9000           额外参数原样透传给 4zrec
 #
 # 它只做一件事：把 4zrec 跑起来，进程退出后按退出码决定要不要再拉起。

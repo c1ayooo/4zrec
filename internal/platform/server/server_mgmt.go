@@ -23,10 +23,10 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/c1ayooo/4zrec/internal/platform/llm/acllm"
-	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
 	skill "github.com/c1ayooo/4zrec/internal/knowledge/skills"
+	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
+	"github.com/c1ayooo/4zrec/internal/platform/llm/acllm"
 )
 
 // validSkillName checks the agentskills.io name constraints, widened so a skill can

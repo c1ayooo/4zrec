@@ -466,13 +466,13 @@ func (s *Server) deleteAssets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if scopeProject := scopedProjectID(r.Context()); scopeProject > 0 {
-		outside, err := as.DB().AssetsOutsideProject(req.IDs, scopeProject)
+		outside, err := as.DB().AssetsNotOwnedByProject(req.IDs, scopeProject)
 		if err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
 		if len(outside) > 0 {
-			writeErr(w, 403, "ids 包含其他项目的资产")
+			writeErr(w, 403, "ids 包含未归属本项目或他项目的资产")
 			return
 		}
 	}
@@ -602,7 +602,13 @@ func (s *Server) insertAssets(w http.ResponseWriter, r *http.Request) {
 		// 出处:API 批量登记默认记为 manual(已有更具体来源时不覆盖)。
 		as.DB().StampAssetSource(r.Context(), id, "manual")
 		if req.ProjectID > 0 {
-			if _, cerr := as.ClaimAssetToProject(id, req.ProjectID); cerr != nil {
+			// 全局凭据 = 操作者手工登记,可以直接归属并授权;
+			// 项目级 API Key 只能登记为 pending,范围命中才 approved。
+			if APIScopeFrom(r.Context()).Global {
+				if _, cerr := as.ClaimAssetToProject(id, req.ProjectID); cerr != nil {
+					errs = append(errs, errEntry{Index: i, Error: "资产已登记但归属项目失败: " + cerr.Error()})
+				}
+			} else if _, cerr := as.StampDiscoveredAsset(id, req.ProjectID); cerr != nil {
 				errs = append(errs, errEntry{Index: i, Error: "资产已登记但归属项目失败: " + cerr.Error()})
 			}
 		}

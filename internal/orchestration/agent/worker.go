@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/4zrec/internal/platform/llm/acllm"
-	"github.com/c1ayooo/4zrec/internal/kernel/askernel"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
+	"github.com/c1ayooo/4zrec/internal/kernel/askernel"
+	"github.com/c1ayooo/4zrec/internal/kernel/transcript"
+	"github.com/c1ayooo/4zrec/internal/platform/llm/acllm"
 	"github.com/c1ayooo/4zrec/internal/toolface/intercept"
 	actool "github.com/c1ayooo/4zrec/internal/toolface/tools"
-	"github.com/c1ayooo/4zrec/internal/kernel/transcript"
 	"github.com/cloudwego/eino/components/model"
 )
 
@@ -291,7 +291,7 @@ func workerSystem(proxyAddr, caCert, dataDir, runDir string) string {
 	// caCert is present only when the recording MITM is on, which is exactly when
 	// the traffic_* tools are registered — so it gates the traffic-tool note.
 	// Optional finding guidance is added for every role after tool resolution.
-	return body + httpToolPolicyBlock() + workerTrafficBlock(caCert != "") + workerArtifactSpec(runDir)
+	return body + httpToolPolicyBlock() + diffProbePolicyBlock() + workerTrafficBlock(caCert != "") + workerArtifactSpec(runDir)
 }
 
 // renderIntentTask formats the claimed intent for the worker's launch USER message:

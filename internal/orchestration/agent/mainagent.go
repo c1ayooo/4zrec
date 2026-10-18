@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/c1ayooo/4zrec/internal/kernel/askernel"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
+	"github.com/c1ayooo/4zrec/internal/kernel/askernel"
+	"github.com/c1ayooo/4zrec/internal/kernel/transcript"
 	"github.com/c1ayooo/4zrec/internal/toolface/intercept"
 	actool "github.com/c1ayooo/4zrec/internal/toolface/tools"
-	"github.com/c1ayooo/4zrec/internal/kernel/transcript"
 	"github.com/cloudwego/eino/components/model"
 )
 
@@ -32,7 +32,15 @@ type MainAgent struct {
 	nonStreamingFn  func() bool                            // resolver: use non-streaming (Complete) path? (nil = streaming)
 	noaEnabledFn    func() bool                            // resolver: use experimental noa compaction? (nil = off)
 	maxTokensFn     func() int                             // resolver: per-reply output cap (nil/0 = send no cap)
+	guardHooks      askernel.HookRunner                    // safety boundary hooks (guard/intercept); nil = off
 }
+
+// SetGuardHooks attaches the task's safety boundary (intercept rules + asset
+// fence) to each main-agent session. nil = off.
+func (m *MainAgent) SetGuardHooks(h askernel.HookRunner) { m.guardHooks = h }
+
+// GuardHooksSet reports whether the safety boundary is attached (wiring test).
+func (m *MainAgent) GuardHooksSet() bool { return m.guardHooks != nil }
 
 // SetNoaEnabled wires a resolver deciding whether runs use the experimental noa
 // context-compression mechanism. nil/unset = off (built-in compaction). Read per
@@ -145,6 +153,7 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 		Tools:          sessionTools(tools, todos, true),
 		DeferredTools:  def.Deferred,
 		Unlock:         def.Unlock,
+		Hooks:          m.guardHooks,
 		PermissionMode: actool.ModeBypass,
 		EnableWebFetch: true, // 走记录代理留痕；载入代理 CA 验证 MITM 重签的 HTTPS 证书
 		WebFetch:       actool.WebFetchConfig{Proxy: m.proxyAddr, CACert: m.proxyCACert},

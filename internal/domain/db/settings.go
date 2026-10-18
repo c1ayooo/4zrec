@@ -43,6 +43,43 @@ ON CONFLICT (key) DO NOTHING`, key, value)
 	return n > 0, nil
 }
 
+// InitSettingPair atomically inserts primaryKey only if absent and writes
+// secondaryKey only when that insert won. Used by first-run auth setup so a
+// losing concurrent request cannot rewrite auth.username after failing to set
+// the password.
+func (d *DB) InitSettingPair(primaryKey, primaryValue, secondaryKey, secondaryValue string) (bool, error) {
+	tx, err := d.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	res, err := tx.Exec(`
+INSERT INTO settings(key, value) VALUES ($1, $2)
+ON CONFLICT (key) DO NOTHING`, primaryKey, primaryValue)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if n == 0 {
+		return false, nil
+	}
+	if secondaryValue != "" {
+		if _, err := tx.Exec(`
+INSERT INTO settings(key, value) VALUES ($1, $2)
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+			secondaryKey, secondaryValue); err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // GetBool returns the boolean setting, or def when unset/unparseable.
 func (d *DB) GetBool(key string, def bool) bool {
 	v, ok, err := d.GetSetting(key)

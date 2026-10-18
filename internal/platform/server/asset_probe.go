@@ -68,13 +68,13 @@ func (s *Server) assetsProbe(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		req.ProjectID = scopeProject
-		outside, err := pg.AssetsOutsideProject(req.IDs, scopeProject)
+		outside, err := pg.AssetsNotOwnedByProject(req.IDs, scopeProject)
 		if err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
 		if len(outside) > 0 {
-			writeErr(w, 403, "ids 包含其他项目的资产")
+			writeErr(w, 403, "ids 包含未归属本项目或他项目的资产")
 			return
 		}
 	}

@@ -16,6 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
+import { auth } from "@/lib/auth";
 
 export function ChangePasswordDialog({
   open,
@@ -63,8 +64,10 @@ export function ChangePasswordDialog({
     const renamed = username.trim() !== currentUsername;
     api
       .changePassword(oldPassword, newPassword, renamed ? username.trim() : undefined)
-      .then(() => {
-        toast.success(renamed ? "密码与用户名已修改（下次登录用新用户名）" : "密码已修改");
+      .then((res) => {
+        // 改密会轮换 JWT 签名密钥，旧 token 立即失效；用后端返回的新 token 续上当前会话。
+        if (res.token) auth.setToken(res.token);
+        toast.success(renamed ? "密码与用户名已修改（其他设备需重新登录）" : "密码已修改（其他设备需重新登录）");
         onOpenChange(false);
       })
       .catch((err) => toast.error(`修改失败：${(err as Error).message}`))
@@ -78,7 +81,7 @@ export function ChangePasswordDialog({
           <DialogHeader>
             <DialogTitle>修改密码</DialogTitle>
             <DialogDescription>
-              可同时修改登录用户名。需先输入当前密码验证；修改后已签发的登录 token 仍有效直至过期。
+              可同时修改登录用户名。需先输入当前密码验证；修改后旧 token 会立即失效，其他设备需要重新登录。
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3 py-4">

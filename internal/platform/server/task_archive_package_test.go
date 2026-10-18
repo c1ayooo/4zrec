@@ -154,7 +154,7 @@ func TestTaskArchiveStageJournalRollsBackInterruptedMoves(t *testing.T) {
 	if len(journal.Moves) != 2 {
 		t.Fatalf("journal moves=%d, want 2", len(journal.Moves))
 	}
-	recovered := &taskArchiveFileStage{root: stage.root, payload: stage.payload, journal: journal}
+	recovered := &taskArchiveFileStage{dataDir: dataDir, root: stage.root, payload: stage.payload, journal: journal}
 	if err := recovered.rollback(); err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestTaskArchiveRestoreJournalRollsBackInterruptedInstall(t *testing.T) {
 	if journal.ArchiveID != 11 || len(journal.Moves) != 1 {
 		t.Fatalf("unexpected restore journal: %+v", journal)
 	}
-	recovered := &taskArchiveRestoreFiles{extracted: extracted, moves: journal.Moves}
+	recovered := &taskArchiveRestoreFiles{dataDir: dataDir, extracted: extracted, moves: journal.Moves}
 	if err := recovered.rollback(); err != nil {
 		t.Fatal(err)
 	}

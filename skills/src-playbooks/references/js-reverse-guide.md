@@ -2,6 +2,14 @@
 
 > 进站强制步骤见 SKILL.md「进站打法」：**不只抽 `/api/` path**。盐、密文 id 公钥、hidden/admin 路由、写死的演示号有就进清单，没有写「无」。演示号当钥匙，不是登录框字典。
 
+## 工具与启用
+
+- 使用内置 `js-reverse` MCP（`js-reverse-mcp`）。默认启用；若被关闭，在「系统设置 → MCP」重新启用。`src-playbooks` 技能已声明 `mcps: browser, js-reverse`，加载技能后解锁工具。
+- Agent 侧工具名带前缀，如 `mcp__js-reverse__break_on_xhr`；下文为简洁省略前缀。
+- 容器内由 `scripts/js-reverse-mcp-4zrec.mjs` 启动无头 Chromium 并通过 CDP 接入，无需额外安装 Chrome。本地运行需 `npm install -g js-reverse-mcp@4.0.5`，并确保包装脚本与可执行文件在同一安装根目录（Docker/Release 包已带）。
+- 默认是无头 attach；桌面环境想用上游默认的有头 Chrome（反检测更好）时，在该 MCP 的环境变量里设 `JS_REVERSE_MCP_DIRECT=1`，并要求系统已装 Google Chrome。无头模式的反检测能力弱于上游默认，强风控站点优先在有头模式跑。
+- 本地文件工具默认不受限；需要收紧时在 MCP 参数里加 `--allowedRoots <工作目录>`（可重复），会同时禁用 `file:` 页面。
+
 ## 使用场景
 
 - 页面接口有加密参数，无法直接用 curl 重放
@@ -15,7 +23,7 @@
 
 ### 1. 查看网络请求
 
-使用 js-reverse MCP 工具（浏览器已打开目标页面时）：
+使用 js-reverse MCP 工具（服务器名 `js-reverse`；浏览器已打开目标页面时）：
 
 ```
 操作: list_network_requests()

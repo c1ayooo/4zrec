@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
+	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
 )
 
 // 没有任何配置时，解析结果必须是全零 —— 也就是 SDK 与 task_llm 各自的内置默认，

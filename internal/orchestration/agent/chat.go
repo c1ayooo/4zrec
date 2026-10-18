@@ -6,12 +6,12 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/c1ayooo/4zrec/internal/kernel/askernel"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
+	"github.com/c1ayooo/4zrec/internal/kernel/askernel"
+	"github.com/c1ayooo/4zrec/internal/kernel/transcript"
 	"github.com/c1ayooo/4zrec/internal/toolface/guard"
 	"github.com/c1ayooo/4zrec/internal/toolface/intercept"
 	actool "github.com/c1ayooo/4zrec/internal/toolface/tools"
-	"github.com/c1ayooo/4zrec/internal/kernel/transcript"
 	"github.com/cloudwego/eino/components/model"
 )
 
@@ -88,6 +88,9 @@ func chatSystem(agentKey, dataDir, workDir string) string {
 	body := renderSystem(agentKey, DefaultAssistantPrompt, chatVars{DataDir: dataDir, Now: nowStr()}) + chatWorkDirSpec(workDir)
 	if httpProbePriorityAgents[agentKey] {
 		body += httpToolPolicyBlock()
+	}
+	if diffProbeAgents[agentKey] {
+		body += diffProbePolicyBlock()
 	}
 	return body
 }

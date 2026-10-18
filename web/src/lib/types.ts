@@ -560,6 +560,8 @@ export interface Finding {
   name?: string; // 漏洞名称;为空时展示回退到 vulnclass
   severity: Severity;
   status: FindingStatus;
+  // 服务端证据等级：verified 已验证 / partial 部分验证 / inferred 推断。
+  confidence?: "verified" | "partial" | "inferred";
   summary: string;
   evidence: string;
   report?: string; // 详细报告(Markdown);仅详情接口返回,列表为空
@@ -1022,6 +1024,27 @@ export interface TrafficHost {
   count: number;
 }
 
+// ---- 代理库 ----
+export interface ProxyProfile {
+  id: string;
+  name: string;
+  url: string;
+  note?: string;
+}
+
+export interface ProxySelections {
+  global: string;
+  web_search: string;
+  nuclei: string;
+  update: string;
+}
+
+export interface ProxyGallery {
+  profiles: ProxyProfile[];
+  selections: ProxySelections;
+  urls: ProxySelections;
+}
+
 // ---- App settings (runtime toggles) ----
 export interface Settings {
   traffic_capture: boolean;
@@ -1058,10 +1081,85 @@ export interface Settings {
   // worker/主 agent/对话)由 noa 接管上下文压缩,取代内置 compaction;每 run 读一次,对
   // 之后启动的 run 生效。
   noa_compaction?: boolean;
+  // ---- nuclei（项目自带外部二进制，见 data/nuclei）----
+  nuclei_enabled?: boolean; // 工具总开关，默认 true
+  nuclei_auto_update?: boolean; // 扫描前/后台自动更新，默认 true
+  nuclei_update_interval_hours?: number; // 更新间隔，默认 24 小时
+  nuclei_version?: string; // 首次下载的引导版本，默认 3.11.1
+  nuclei_interactsh?: boolean; // 是否启用 interactsh，默认 false
+  nuclei_max_scan_seconds?: number; // 默认扫描时长上限，默认 600 秒
+  nuclei_proxy?: string; // 下载/更新 nuclei 二进制与模板使用的代理；空=直连
+  // ---- 代理库（命名代理 + 每个用途的手动选择）----
+  proxy_profiles?: ProxyProfile[];
+  proxy_selections?: ProxySelections;
+  proxy_urls?: ProxySelections;
+  update_proxy?: string; // 平台自更新代理；空=直连
   // ---- 漏洞 IM 推送（渠道本身是独立资源，见 /api/notify/*，这里只有三项全局配置）----
   notify_enabled?: boolean; // 推送总开关，默认开；用于维护期一键止血
   notify_public_base_url?: string; // 漏洞详情回链的外部访问地址；空=消息不带回链
   notify_digest_interval_min?: number; // 汇总模式周期（分钟），默认 30
+}
+
+// nuclei_status 接口返回：项目内二进制的安装/更新状态。
+export interface NucleiStatus {
+  root: string;
+  binary_path: string;
+  binary_exists: boolean;
+  binary_version?: string;
+  templates_dir: string;
+  custom_templates_dir?: string;
+  templates_exists: boolean;
+  custom_templates_exists?: boolean;
+  template_count: number;
+  custom_template_count?: number;
+  version_setting: string;
+  auto_update: boolean;
+  update_interval_hours: number;
+  last_update?: string;
+  interactsh: boolean;
+  warnings?: string[];
+}
+
+export interface NucleiTemplateMeta {
+  id: string;
+  name: string;
+  severity: string;
+  tags?: string[];
+  cve?: string[];
+  type: string;
+  path: string;
+  source: "official" | "custom";
+  description?: string;
+}
+
+export interface NucleiTemplateList {
+  items: NucleiTemplateMeta[];
+  total: number;
+  page: number;
+  size: number;
+  warning?: string;
+}
+
+export interface NucleiTemplateDetail {
+  meta: NucleiTemplateMeta;
+  content: string;
+  editable: boolean;
+}
+
+export interface NucleiUpdateJob {
+  running: boolean;
+  phase?: string;
+  percent?: number;
+  message?: string;
+  started_at?: string;
+  finished_at?: string;
+  error?: string;
+  result?: {
+    binary_version?: string;
+    template_count?: number;
+    custom_template_count?: number;
+    warnings?: string[];
+  };
 }
 
 // ---- 漏洞 IM 推送 ----

@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c1ayooo/4zrec/internal/capability/vuln/nuclei"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
 	"github.com/c1ayooo/4zrec/internal/domain/traffic"
 	"github.com/c1ayooo/4zrec/internal/kernel/transcript"
@@ -54,8 +55,17 @@ type Server struct {
 	reportJobs map[string]*reportJob
 	dataDir    string
 
+	// nucleiMgr 管理项目自带的 nuclei 外部二进制/模板（<dataDir>/nuclei）。
+	nucleiMgr *nuclei.Manager
+	// nucleiUpdateMu guards the async manual update job shown on the templates page.
+	nucleiUpdateMu sync.Mutex
+	nucleiUpdate   *nucleiUpdateState
+
 	skillDir string // root directory for skill subdirectories
-	jwtKey   []byte // HS256 signing key loaded from / generated into dataDir/jwt.key
+	// jwtMu guards jwtKey: password changes rotate the signing key at runtime.
+	jwtMu      sync.RWMutex
+	jwtKey     []byte // HS256 signing key loaded from / generated into keyDir/jwt.key
+	jwtKeyPath string // on-disk key file; rotation rewrites it atomically
 
 	// concMu serializes concurrency-cap decisions (admission + reconcile) so a
 	// scheduler tick and an HTTP settings change / task creation can't both count
@@ -156,12 +166,20 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	if err != nil {
 		log.Fatalf("[auth] JWT key: %v", err)
 	}
-	s := &Server{m: m, engine: NewEngine(m), ctx: ctx, skillDir: skillDir, jwtKey: key, dataDir: dataDir, enrichJobs: map[int64]*enrichJob{}, reportJobs: map[string]*reportJob{}, chatBusy: map[string]bool{},
+	s := &Server{m: m, engine: NewEngine(m), ctx: ctx, skillDir: skillDir, jwtKey: key,
+		jwtKeyPath: filepath.Join(keyDir, jwtKeyFilename), dataDir: dataDir, enrichJobs: map[int64]*enrichJob{}, reportJobs: map[string]*reportJob{}, chatBusy: map[string]bool{},
 		chatCancel: map[string]context.CancelCauseFunc{}, triggerQ: map[string][]triggeredRun{},
 		triggerActive: map[string]int{}, triggerCfg: map[string]triggerBehavior{},
 		profChatAgents: map[int64]*agent.ChatAgent{},
 		provByProfile:  map[int64]*provEntry{}, llmHealth: newLLMHealthRegistry(m.pg),
 		taskAgents: map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1)}
+	var nucleiSettings nuclei.Settings
+	if m != nil && m.pg != nil {
+		nucleiSettings = m.pg
+	}
+	s.nucleiMgr = nuclei.New(filepath.Join(dataDir, "nuclei"), nucleiSettings)
+	s.nucleiMgr.SetContext(ctx)
+	s.reconcileProxySelections()
 	s.initSideQuestions()
 	// 熔断阈值/冷却是失败路径上的热参数，启动时把全局重试策略推给 Registry 一次；
 	// 之后每次保存策略再推一次（saveLLMRetryPolicy）。
@@ -236,6 +254,8 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		if err := s.seedFindingRetester(); err != nil {
 			log.Printf("[retester] seed: %v", err)
 		}
+		s.seedDifferentialProbeTool()     // 差分测量工具(worker/planner/pentest/retester)
+		s.rebindDifferentialProbeAgents() // 存量库补绑
 		go s.evidenceStore().RunGC(s.ctx)
 		s.seedPythonInterpreter()     // 自定义脚本工具:开机检测 python 解释器入库(仅空时)
 		go newScheduler(s).Run(s.ctx) // P3 触发器调度(定时/finding/目标事件),仅自定义 agent
@@ -711,6 +731,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/tasks/{id}/intercept-rules/{rid}", s.taskInterceptDeleteRule)
 	mux.HandleFunc("POST /api/tasks/{id}/intercept-rules/{rid}/toggle", s.taskInterceptToggleRule)
 	mux.HandleFunc("POST /api/tasks/control/batch", s.controlTasksBatch)
+	mux.HandleFunc("POST /api/tasks/control/pause-all", s.pauseAllTasks)
 	mux.HandleFunc("GET /api/task-archives", s.listTaskArchives)
 	mux.HandleFunc("GET /api/task-archives/{id}", s.getTaskArchive)
 	mux.HandleFunc("POST /api/tasks/{id}/archive", s.queueTaskArchive)
@@ -864,6 +885,21 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/llm/pricing", s.llmPricingPut)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
+	mux.HandleFunc("GET /api/nuclei/status", s.getNucleiStatus)
+	mux.HandleFunc("GET /api/proxy-profiles", s.getProxyProfiles)
+	mux.HandleFunc("POST /api/proxy-profiles", s.createProxyProfile)
+	mux.HandleFunc("POST /api/proxy-profiles/test", s.testProxyProfile)
+	mux.HandleFunc("PUT /api/proxy-profiles/selection", s.selectProxyProfile)
+	mux.HandleFunc("PUT /api/proxy-profiles/{id}", s.updateProxyProfile)
+	mux.HandleFunc("DELETE /api/proxy-profiles/{id}", s.deleteProxyProfile)
+	mux.HandleFunc("GET /api/nuclei/templates", s.getNucleiTemplates)
+	mux.HandleFunc("POST /api/nuclei/templates", s.createNucleiTemplate)
+	mux.HandleFunc("POST /api/nuclei/templates/validate", s.validateNucleiTemplate)
+	mux.HandleFunc("GET /api/nuclei/templates/{id}", s.getNucleiTemplate)
+	mux.HandleFunc("PUT /api/nuclei/templates/{id}", s.updateNucleiTemplate)
+	mux.HandleFunc("DELETE /api/nuclei/templates/{id}", s.deleteNucleiTemplate)
+	mux.HandleFunc("POST /api/nuclei/update", s.startNucleiUpdate)
+	mux.HandleFunc("GET /api/nuclei/update/status", s.nucleiUpdateStatus)
 	// 漏洞 IM 推送。渠道是「多实例 + 各自过滤规则」的资源，因此独立成一组
 	// REST 接口，而不是塞进扁平的 /api/settings 键值里。
 	mux.HandleFunc("GET /api/notify/meta", s.notifyMeta)
@@ -1034,7 +1070,22 @@ func (s *Server) Handler() http.Handler {
 	root := http.NewServeMux()
 	root.Handle("/api/", api)
 	root.Handle("/", s.webuiHandler())
-	return root
+	return securityHeaders(root)
+}
+
+// securityHeaders adds browser-side hardening that does not depend on the
+// reverse proxy. CSP deliberately only pins frame-ancestors/object-src/base-uri:
+// the statically exported Next UI needs inline bootstrap scripts.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Content-Security-Policy", "frame-ancestors 'none'; object-src 'none'; base-uri 'self'")
+		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // --- handlers ---
@@ -1497,10 +1548,15 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	// API Key 解析优先级：表单输入 > 指定 profile 存的 key > 全局配置的 key。
 	// 已存 profile 的 key 不回传浏览器，所以测试已存配置时表单为空，需从 DB 取。
 	// 会话头名同理：表单未带时用已存 profile 的值兜底。
-	if req.ProfileID != nil && (cfg.APIKey == "" || cfg.SessionHeaderKey == "") {
+	//
+	// 安全约束：只要 Key 来自服务端存储，base_url/proxy 就必须用同一份存储配置。
+	// 否则任何持有全局凭据的人都能让服务端把已存 Key 发到任意端点。
+	if req.ProfileID != nil {
 		if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
 			if cfg.APIKey == "" {
 				cfg.APIKey = p.APIKey
+				cfg.BaseURL = p.BaseURL
+				cfg.Proxy = p.Proxy
 			}
 			if cfg.SessionHeaderKey == "" {
 				cfg.SessionHeaderKey = p.SessionHeaderKey
@@ -1510,6 +1566,10 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	if cfg.APIKey == "" {
 		s.cfgMu.Lock()
 		cfg.APIKey = s.llmCfg.APIKey
+		if cfg.APIKey != "" {
+			cfg.BaseURL = s.llmCfg.BaseURL
+			cfg.Proxy = s.llmCfg.Proxy
+		}
 		s.cfgMu.Unlock()
 	}
 	if cfg.APIKey == "" {
@@ -1603,6 +1663,15 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		if _, ok := s.m.Task(strconv.FormatInt(id, 10)); !ok {
 			writeErr(w, 400, fmt.Sprintf("关联任务 #%d 不存在", id))
 			return
+		}
+		// 项目级 API Key 只能关联本项目任务,否则可通过源任务继承读到
+		// 他项目的 scope/findings。返回 404 避免泄露任务存在性。
+		if scopeProject := scopedProjectID(r.Context()); scopeProject > 0 {
+			pid, perr := s.m.pg.TaskProjectID(id)
+			if perr != nil || pid != scopeProject {
+				writeErr(w, 404, fmt.Sprintf("关联任务 #%d 不存在", id))
+				return
+			}
 		}
 		seenSources[id] = true
 		sourceIDs = append(sourceIDs, id)
@@ -3643,6 +3712,7 @@ func (s *Server) settingsPayload() map[string]any {
 	if concLimit == 0 {
 		concLimit = defaultConcurrencyLimit // 关闭时也回显一个合理默认值给 UI
 	}
+	gallery := s.proxyGallery()
 	return map[string]any{
 		"traffic_capture":          s.m.TrafficEnabled(),
 		"agent_traffic_binding":    s.m.pg.GetBool(settingAgentTrafficBinding, false),
@@ -3667,6 +3737,21 @@ func (s *Server) settingsPayload() map[string]any {
 		// 实验功能:noa 模型驱动上下文压缩(默认关)。开启后平台接入的四类 agent 由 noa
 		// 接管上下文压缩,取代内置 compaction;每 run 读一次,对之后启动的 run 生效。
 		"noa_compaction": s.m.NoaCompactionEnabled(),
+		// nuclei（项目自带外部二进制）。这些值由 manager 从 settings 读取，
+		// 每次扫描/更新重新解析，切换即时生效。
+		"nuclei_enabled":               s.nucleiManager().Enabled(),
+		"nuclei_auto_update":           s.nucleiManager().AutoUpdate(),
+		"nuclei_update_interval_hours": s.nucleiManager().UpdateIntervalHours(),
+		"nuclei_version":               s.nucleiManager().VersionSetting(),
+		"nuclei_interactsh":            s.nucleiManager().Interactsh(),
+		"nuclei_max_scan_seconds":      s.nucleiManager().MaxScanSeconds(),
+		"nuclei_proxy":                 s.nucleiManager().Proxy(),
+		// 代理库：命名代理 + 每个用途的当前选择。运行时 URL 仍走上面的
+		// global_proxy / web_search_proxy / nuclei_proxy / update_proxy。
+		"proxy_profiles":   gallery.Profiles,
+		"proxy_selections": gallery.Selections,
+		"proxy_urls":       gallery.URLs,
+		"update_proxy":     s.m.UpdateProxy(),
 		// 漏洞 IM 推送的全局项。渠道本身是独立资源，走 /api/notify/* 管理；
 		// 这里只放「作用于全部渠道」的三项。
 		"notify_enabled":             s.m.pg.GetBool(settingNotifyEnabled, true),
@@ -3725,6 +3810,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		TavilyKey        *string `json:"tavily_search_api_key"`
 		WebSearchProxy   *string `json:"web_search_proxy"`   // 独立出口代理(http/https/socks5)；null=不改，""=清空
 		GlobalProxy      *string `json:"global_proxy"`       // 全局出口代理(http/https/socks5)；null=不改，""=清空(直连)
+		UpdateProxy      *string `json:"update_proxy"`       // 平台自更新代理；null=不改，""=直连(不回退全局)
 		PythonInterp     *string `json:"python_interpreter"` // 自定义脚本工具的 python 解释器路径
 		Workers          *int    `json:"workers"`            // 并发工作 agent 数(>0)；对之后启动的任务生效
 		// 任务并发上限:同时「运行中」的任务数上限。关闭=不限;开启后新建任务超限则排队,有空位自动启动。
@@ -3739,6 +3825,15 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		ConstraintsInjectWorker  *bool `json:"constraints_inject_worker"`
 		// 实验功能:noa 上下文压缩开关(默认关);每 run 读,对之后启动的 run 生效,无需重建 agent。
 		NoaCompaction *bool `json:"noa_compaction"`
+		// nuclei 项目内外部二进制的全局开关/自动更新配置。manager 每次扫描/更新
+		// 重新读取，切换即时生效；不需要重建 agent。
+		NucleiEnabled             *bool   `json:"nuclei_enabled"`
+		NucleiAutoUpdate          *bool   `json:"nuclei_auto_update"`
+		NucleiUpdateIntervalHours *int    `json:"nuclei_update_interval_hours"`
+		NucleiVersion             *string `json:"nuclei_version"`
+		NucleiInteractsh          *bool   `json:"nuclei_interactsh"`
+		NucleiMaxScanSeconds      *int    `json:"nuclei_max_scan_seconds"`
+		NucleiProxy               *string `json:"nuclei_proxy"`
 		// 漏洞 IM 推送的全局项。三者都由投递引擎每轮读一次，改完即时生效，
 		// 不需要重建 agent 或重启。
 		NotifyEnabled    *bool   `json:"notify_enabled"`
@@ -3764,6 +3859,48 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	if req.NoaCompaction != nil {
 		// 每 run 读的解析器,切换即时对之后启动的 run 生效,无需 applyLLM 重建。
 		if err := s.m.SetNoaCompaction(*req.NoaCompaction); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.NucleiEnabled != nil {
+		s.nucleiManager().SetEnabled(*req.NucleiEnabled)
+	}
+	if req.NucleiAutoUpdate != nil {
+		s.nucleiManager().SetAutoUpdate(*req.NucleiAutoUpdate)
+	}
+	if req.NucleiUpdateIntervalHours != nil {
+		if *req.NucleiUpdateIntervalHours < 1 || *req.NucleiUpdateIntervalHours > 720 {
+			writeErr(w, 400, "nuclei 更新间隔需在 1 到 720 小时之间")
+			return
+		}
+		s.nucleiManager().SetUpdateIntervalHours(*req.NucleiUpdateIntervalHours)
+	}
+	if req.NucleiVersion != nil {
+		s.nucleiManager().SetVersion(*req.NucleiVersion)
+	}
+	if req.NucleiInteractsh != nil {
+		s.nucleiManager().SetInteractsh(*req.NucleiInteractsh)
+	}
+	if req.NucleiMaxScanSeconds != nil {
+		if *req.NucleiMaxScanSeconds < 60 || *req.NucleiMaxScanSeconds > 1800 {
+			writeErr(w, 400, "nuclei 扫描时长需在 60 到 1800 秒之间")
+			return
+		}
+		s.nucleiManager().SetMaxScanSeconds(*req.NucleiMaxScanSeconds)
+	}
+	if req.NucleiProxy != nil {
+		p := strings.TrimSpace(*req.NucleiProxy)
+		if p != "" {
+			u, err := url.Parse(p)
+			if err != nil || u.Host == "" ||
+				(u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "socks5") {
+				writeErr(w, 400, "nuclei 代理地址需为 http://、https:// 或 socks5://")
+				return
+			}
+		}
+		s.nucleiManager().SetProxy(p)
+		if err := s.m.pg.SetSetting(proxySelectionKey(proxySlotNuclei), ""); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
@@ -3877,6 +4014,10 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, err.Error())
 			return
 		}
+		if err := s.m.pg.SetSetting(proxySelectionKey(proxySlotGlobal), ""); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
 		changed = true // capture-off egress is baked into agents at build time → rebuild
 	}
 	if req.WebSearchEnabled != nil || req.WebSearchBackend != nil || req.BraveKey != nil || req.TavilyKey != nil || req.WebSearchProxy != nil {
@@ -3888,11 +4029,35 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		if req.WebSearchBackend != nil {
 			backend = *req.WebSearchBackend
 		}
+		if req.WebSearchProxy != nil {
+			if raw := strings.TrimSpace(*req.WebSearchProxy); raw != "" {
+				if _, err := traffic.ValidateProxyURL(raw); err != nil {
+					writeErr(w, 400, err.Error())
+					return
+				}
+			}
+		}
 		if err := s.m.SetWebSearch(on, backend, req.BraveKey, req.TavilyKey, req.WebSearchProxy); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
+		if req.WebSearchProxy != nil {
+			if err := s.m.pg.SetSetting(proxySelectionKey(proxySlotWebSearch), ""); err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
+		}
 		changed = true
+	}
+	if req.UpdateProxy != nil {
+		if err := s.m.SetUpdateProxy(*req.UpdateProxy); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		if err := s.m.pg.SetSetting(proxySelectionKey(proxySlotUpdate), ""); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
 	}
 	if changed {
 		// rebuild agents so the new proxy/tools/prompt/web-search take hold (only if LLM configured).
@@ -4103,7 +4268,9 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			taskDir := filepath.Join(s.m.dir, "tasks", t.ID)
 			agentMsg := composeAgentMessage(agentMessage, req.Attachments, taskDir)
 			s.engine.BeginLLMCall(t.ID)
-			_, err := ma.Chat(ctx, maTaskID, mainSeg, s.m.Assets(), t.Store, t.Goal, taskAssetSummary(ctx, s.m, t), agentMsg, emit, t.Notify, resume, t.NotifyGoal, t.NotifyHint)
+			// 任务上下文让 Guard 的拦截规则/资产围栏对主 Agent 也生效。
+			runCtx := intercept.WithTaskContext(ctx, t.ID, "mainagent", emit)
+			_, err := ma.Chat(runCtx, maTaskID, mainSeg, s.m.Assets(), t.Store, t.Goal, taskAssetSummary(runCtx, s.m, t), agentMsg, emit, t.Notify, resume, t.NotifyGoal, t.NotifyHint)
 			s.engine.EndLLMCall(t.ID)
 			if err != nil && ctx.Err() == nil {
 				s.engine.emitActivity(t, db.Activity{Worker: "mainagent", Kind: "text", IsError: true, Summary: "（主 Agent 出错：" + err.Error() + "）", MainSeg: segPtr})

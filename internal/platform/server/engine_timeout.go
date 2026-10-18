@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
+	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
 )
 
 // 任务级超时协调器(见 docs/任务级超时与收尾设计.md §4/§8.5)。

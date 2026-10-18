@@ -63,6 +63,26 @@ func severityName(locale, sev string) string {
 func statusPending(locale string) string {
 	return pick(locale, "待修复", "待修復", "Pending")
 }
+
+// fixStatus maps a findings triage state to the report's remediation status.
+func fixStatus(locale, status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "fixed":
+		return pick(locale, "已修复", "已修復", "Fixed")
+	case "resolved":
+		return pick(locale, "已处理", "已處理", "Resolved")
+	case "risk_accepted":
+		return pick(locale, "风险接受", "風險接受", "Risk accepted")
+	case "false_positive":
+		return pick(locale, "误报", "誤報", "False positive")
+	case "ignored":
+		return pick(locale, "忽略", "忽略", "Ignored")
+	case "duplicate":
+		return pick(locale, "重复", "重複", "Duplicate")
+	default:
+		return statusPending(locale)
+	}
+}
 func statusRemarkFirst(locale string) string {
 	return pick(locale, "本次为首次发现", "本次為首次發現", "First identified in this assessment")
 }

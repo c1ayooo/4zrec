@@ -100,6 +100,11 @@ func (s *Server) uploadReportLogo(w http.ResponseWriter, r *http.Request) {
 // GET /api/report-assets/{file} — serve an uploaded logo (base name only, no traversal).
 func (s *Server) serveReportAsset(w http.ResponseWriter, r *http.Request) {
 	file := filepath.Base(r.PathValue("file"))
+	if strings.HasSuffix(strings.ToLower(file), ".svg") {
+		// SVG can carry script. Never render it inline in the console origin.
+		w.Header().Set("Content-Disposition", "attachment")
+		w.Header().Set("Content-Security-Policy", "sandbox")
+	}
 	http.ServeFile(w, r, filepath.Join(s.dataDir, "report_assets", file))
 }
 

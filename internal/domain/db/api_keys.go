@@ -166,6 +166,33 @@ WHERE id = ANY($1::bigint[])
 	return out, rows.Err()
 }
 
+// AssetsNotOwnedByProject returns asset ids that are not strictly owned by the
+// given project. Unlike AssetsOutsideProject it treats unowned (NULL) rows as
+// outside, so destructive/probing operations by a project-scoped key can only
+// touch that project's own assets.
+func (d *DB) AssetsNotOwnedByProject(ids []int64, projectID int64) ([]int64, error) {
+	if len(ids) == 0 || projectID <= 0 {
+		return nil, nil
+	}
+	rows, err := d.Query(`
+SELECT id FROM assets
+WHERE id = ANY($1::bigint[])
+  AND (project_id IS NULL OR project_id <> $2)`, ids, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // FindingTaskProjects maps finding id → owning task's project id (0 when the
 // task is missing/unattached). Used to enforce project-scoped API keys.
 func (d *DB) FindingTaskProjects(ids []int64) (map[int64]int64, error) {

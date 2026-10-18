@@ -128,7 +128,16 @@ func BuildSRCMarkdownWithChains(findings []*db.DBFinding, title string, assets [
 			}
 			for _, f := range g.Findings {
 				parts := srcSectionsOf(f.Report)
+				fallback := srcFallbackSections(f)
 				body := strings.TrimSpace(parts[sec.key])
+				if body == "" {
+					body = strings.TrimSpace(fallback[sec.key])
+				}
+				// report 为空时至少让漏洞出现在「描述」段，避免整条记录被静默跳过。
+				if body == "" && sec.key == "d1" {
+					body = fmt.Sprintf("**%s**\n\n%s", srcFindingTitle(f),
+						nz(strings.TrimSpace(f.Summary), "（该漏洞未附详细报告与证据，请人工补充。）"))
+				}
 				if body == "" {
 					continue
 				}
@@ -137,6 +146,9 @@ func BuildSRCMarkdownWithChains(findings []*db.DBFinding, title string, assets [
 					fmt.Fprintf(&b, "#### %d. %s（%s）\n\n", n, srcFindingTitle(f), severityCN(f.Severity))
 				} else {
 					fmt.Fprintf(&b, "### %d. %s（%s）\n\n", n, srcFindingTitle(f), severityCN(f.Severity))
+				}
+				if meta := srcFindingMetaLine(f); meta != "" {
+					b.WriteString(meta + "\n\n")
 				}
 				b.WriteString(reSubHeading.ReplaceAllString(body, "#### "))
 				b.WriteString("\n\n")
@@ -247,5 +259,99 @@ func severityCN(s string) string {
 		return "低危"
 	default:
 		return s
+	}
+}
+
+// srcFallbackSections keeps a finding visible when the reporter's Markdown report
+// is missing: summary feeds the description section, evidence/reproduction feeds
+// the reproduction section. This prevents a confirmed finding from silently
+// disappearing from the consolidated report.
+func srcFallbackSections(f *db.DBFinding) map[string]string {
+	out := map[string]string{}
+	if s := strings.TrimSpace(f.Summary); s != "" {
+		out["d1"] = s
+	}
+	if s := strings.TrimSpace(f.Evidence); s != "" {
+		out["d2"] = s
+	} else if len(f.Reproduction) > 2 && string(f.Reproduction) != "null" {
+		out["d2"] = "```json\n" + string(f.Reproduction) + "\n```"
+	}
+	return out
+}
+
+// srcFindingMetaLine renders the structured evidence/triage/retest labels that
+// used to be invisible in the SRC report.
+func srcFindingMetaLine(f *db.DBFinding) string {
+	var parts []string
+	if c := confidenceCN(f.Confidence); c != "" {
+		parts = append(parts, "证据等级："+c)
+	}
+	if s := findingStatusCN(f.Status); s != "" {
+		parts = append(parts, "处置状态："+s)
+	}
+	if r := retestVerdictCN(f.RetestVerdict); r != "" {
+		line := "复测结论：" + r
+		if f.RetestFinishedAt != nil {
+			line += "（" + f.RetestFinishedAt.Format("2006-01-02") + "）"
+		}
+		if s := strings.TrimSpace(f.RetestSummary); s != "" {
+			line += "；" + s
+		}
+		parts = append(parts, line)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "> " + strings.Join(parts, "；")
+}
+
+func confidenceCN(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "verified":
+		return "已验证"
+	case "partial":
+		return "部分验证"
+	case "inferred":
+		return "推断"
+	default:
+		return ""
+	}
+}
+
+func findingStatusCN(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "pending":
+		return "待处理"
+	case "in_progress":
+		return "处理中"
+	case "confirmed":
+		return "已确认"
+	case "resolved":
+		return "已处理"
+	case "fixed":
+		return "已修复"
+	case "risk_accepted":
+		return "风险接受"
+	case "false_positive":
+		return "误报"
+	case "ignored":
+		return "忽略"
+	case "duplicate":
+		return "重复"
+	default:
+		return ""
+	}
+}
+
+func retestVerdictCN(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "reproduced":
+		return "仍可复现"
+	case "fixed":
+		return "已修复"
+	case "inconclusive":
+		return "无法确认"
+	default:
+		return ""
 	}
 }

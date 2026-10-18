@@ -181,6 +181,12 @@ function FindingDetailInner() {
           <Separator orientation="vertical" className="mx-1 h-4" />
           <StatusBadge domain="severity" value={finding.severity} dot />
           <StatusBadge domain="finding" value={finding.status} dot />
+          {finding.confidence && (
+            <Badge variant="outline" title="服务端按证据深度标注的可信度">
+              证据：
+              {finding.confidence === "verified" ? "已验证" : finding.confidence === "partial" ? "部分验证" : "推断"}
+            </Badge>
+          )}
           {finding.inherited && finding.source_task_id && (
             <Badge variant="outline">来源任务 #{finding.source_task_id} · 只读</Badge>
           )}

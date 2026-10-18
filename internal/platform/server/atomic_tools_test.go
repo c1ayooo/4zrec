@@ -6,6 +6,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/miekg/dns"
 )
@@ -46,6 +47,21 @@ func stubCNAMECNDNS(t *testing.T) string {
 	}
 	go func() { _ = server.ActivateAndServe() }()
 	t.Cleanup(func() { _ = server.Shutdown() })
+	// Wait until the read loop is live; otherwise the tool's first query can race
+	// startup and intermittently resolve NXDOMAIN.
+	probe := &dns.Client{Timeout: 200 * time.Millisecond}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		m := new(dns.Msg)
+		m.SetQuestion("cname.test.example.", dns.TypeCNAME)
+		if _, _, err := probe.Exchange(m, pc.LocalAddr().String()); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("stub DNS server did not become ready")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	return pc.LocalAddr().String()
 }
 

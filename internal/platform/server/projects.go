@@ -443,14 +443,20 @@ func (s *Server) assetsBind(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// 手工归属 = 操作者的人工授权决定:直接 approved,不再进待审批二次确认。
+	// 手工归属 = 操作者的人工授权决定:全局凭据直接 approved。
+	// 项目级 API Key 没有授权权:只登记归属,范围命中才 approved,否则 pending。
+	globalCaller := APIScopeFrom(r.Context()).Global
+	approvedCount := 0
 	for _, id := range in.IDs {
 		_, _ = as.StampDiscoveredAsset(id, in.ProjectID)
-		_ = as.SetAssetAuthz([]int64{id}, "approved")
+		if globalCaller {
+			_ = as.SetAssetAuthz([]int64{id}, "approved")
+			approvedCount++
+		}
 	}
 	bound := len(in.IDs)
 	// 子资产跟随归属:所选资产(根域名/子域名)的同根 IP/子域名/服务一并归属
-	// (只认领未归属,不抢他项目),并同样直接 approved。
+	// (只认领未归属,不抢他项目)。授权状态只在全局凭据下直接 approved。
 	// 子资产根集合:逐 id 查询(数量小)。
 	rootsSet := map[string]bool{}
 	for _, id := range in.IDs {
@@ -470,12 +476,16 @@ func (s *Server) assetsBind(w http.ResponseWriter, r *http.Request) {
 			args = append(args, r)
 			ph = append(ph, fmt.Sprintf("$%d", len(args)))
 		}
+		authzSet := ""
+		if globalCaller {
+			authzSet = ", authz='approved'"
+		}
 		_, _ = pg.ExecContext(context.Background(), `
-UPDATE assets SET project_id=COALESCE(project_id,$1), authz='approved', updated_at=now()
+UPDATE assets SET project_id=COALESCE(project_id,$1)`+authzSet+`, updated_at=now()
 WHERE root_domain IN (`+strings.Join(ph, ",")+`) AND (project_id IS NULL OR project_id=$1)`, args...)
 	}
 	if bound > 0 {
 		_, _ = pg.Projects().RecomputeProjectAttribution()
 	}
-	writeJSON(w, 200, map[string]any{"bound": bound, "approved": bound, "pending": 0})
+	writeJSON(w, 200, map[string]any{"bound": bound, "approved": approvedCount, "pending": bound - approvedCount})
 }

@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -20,6 +21,30 @@ import (
 )
 
 const githubTokenSetting = "githubsearch.token"
+
+// credsRoE applies the same project authorization check as the other active
+// network tools. Without it, credential_verify_db/ssh (Permissions=Allowed)
+// bypass the asset fence and can probe loopback/internal hosts.
+func (s *Server) credsRoE(ctx context.Context, host string) string {
+	projectID := s.roeProjectID(ctx, 0)
+	if projectID <= 0 {
+		return ""
+	}
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return "host 必填"
+	}
+	var domains, ips []string
+	if net.ParseIP(host) != nil {
+		ips = []string{host}
+	} else {
+		domains = []string{host}
+	}
+	if !s.m.pg.AuthorizedTarget(projectID, domains, ips) {
+		return fmt.Sprintf("【RoE 拒绝】目标 %s 不在项目 %d 授权范围内", host, projectID)
+	}
+	return ""
+}
 
 // githubDorkClient 构造 dork 客户端(token: env > settings;BaseURL 可被测试注入)。
 func (s *Server) githubDorkClient() *creds.Client {
@@ -107,6 +132,9 @@ func (s *Server) toolCredVerifyDB() actool.CoreTool {
 			if err := json.Unmarshal(input, &in); err != nil {
 				return actool.Errorf("参数解析失败: " + err.Error()), nil
 			}
+			if msg := s.credsRoE(ctx, in.Host); msg != "" {
+				return actool.Errorf(msg), nil
+			}
 			res, err := creds.VerifyDB(ctx, in)
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
@@ -116,8 +144,13 @@ func (s *Server) toolCredVerifyDB() actool.CoreTool {
 			if res.Alive && !res.Authed {
 				b.WriteString("(服务可达,凭据未通过——弱口令字典可换候选重试)\n")
 			}
-			// 验证成功 → 自动落连接台账(项目上下文时)。
-			if res.Alive && res.Authed {
+			// 验证成功且确实提供了口令 → 自动落连接台账(项目上下文时)。
+			// 空口令不能算"已验证凭据":开放实例无需认证,存空 secret 只会让
+			// 台账显示一条无法复用的假记录(目标后续开启 requirepass 就会失效)。
+			if res.Alive && res.Authed && strings.TrimSpace(in.Password) == "" {
+				b.WriteString("(服务可达且无需认证——未授权访问;未写入连接台账)\n")
+			}
+			if res.Alive && res.Authed && strings.TrimSpace(in.Password) != "" {
 				note := s.autoCaptureConnection(ctx, &db.Connection{
 					Kind: strings.ToLower(strings.TrimSpace(in.Type)), Host: in.Host, Port: in.Port,
 					Username: in.Username, Secret: in.Password, Status: "alive",
@@ -156,18 +189,21 @@ func (s *Server) toolCredVerifySSH() actool.CoreTool {
 			if err := json.Unmarshal(input, &in); err != nil {
 				return actool.Errorf("参数解析失败: " + err.Error()), nil
 			}
+			if msg := s.credsRoE(ctx, in.Host); msg != "" {
+				return actool.Errorf(msg), nil
+			}
 			res, err := creds.VerifySSH(ctx, in)
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
 			}
 			var b strings.Builder
 			fmt.Fprintf(&b, "%s\n", res.Detail)
-			// 验证成功 → 自动落连接台账(项目上下文时)。
-			if res.Alive && res.Authed {
-				secret := in.Password
-				if secret == "" {
-					secret = in.PrivateKey
-				}
+			// 验证成功且确实提供了凭据 → 自动落连接台账(项目上下文时)。
+			secret := in.Password
+			if secret == "" {
+				secret = in.PrivateKey
+			}
+			if res.Alive && res.Authed && strings.TrimSpace(secret) != "" {
 				note := s.autoCaptureConnection(ctx, &db.Connection{
 					Kind: "ssh", Host: in.Host, Port: in.Port,
 					Username: in.Username, Secret: secret, Status: "alive",

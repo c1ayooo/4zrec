@@ -101,6 +101,13 @@ func run() int {
 	}
 	defer mgr.Close()
 
+	// First run: generate a random admin password and print it once. Doing this
+	// before the HTTP listener starts closes the window where anyone reaching
+	// /api/auth/init could claim the instance.
+	if _, _, _, err := server.BootstrapAdminPassword(mgr); err != nil {
+		log.Fatalf("[auth] 初始化管理员密码失败: %v", err)
+	}
+
 	// Surviving this long means a freshly swapped-in build actually works, so drop
 	// the upgrade marker and stop counting attempts. Until it fires, every boot
 	// increments the count and a build that keeps dying gets rolled back.

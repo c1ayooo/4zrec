@@ -16,10 +16,10 @@ import (
 	"time"
 
 	"github.com/c1ayooo/4zrec/internal/capability/recon/collect"
-	"github.com/c1ayooo/4zrec/internal/domain/db"
-	"github.com/c1ayooo/4zrec/internal/platform/notify"
 	"github.com/c1ayooo/4zrec/internal/capability/recon/pipeline"
 	"github.com/c1ayooo/4zrec/internal/capability/recon/spacemap"
+	"github.com/c1ayooo/4zrec/internal/domain/db"
+	"github.com/c1ayooo/4zrec/internal/platform/notify"
 )
 
 // runReconScheduleWorker 阻塞运行到 ctx 取消(启动时 go 起)。

@@ -45,6 +45,28 @@ type TrafficRef struct {
 	Note      string `json:"note"`
 }
 
+// UnmarshalJSON accepts both the documented object form and a bare traffic-id
+// string. Models frequently emit `traffic_refs: ["ev-..."]`; that should bind
+// the evidence instead of failing the whole report_finding call.
+func (r *TrafficRef) UnmarshalJSON(data []byte) error {
+	trimmed := strings.TrimSpace(string(data))
+	if strings.HasPrefix(trimmed, `"`) {
+		var id string
+		if err := json.Unmarshal(data, &id); err != nil {
+			return err
+		}
+		r.TrafficID, r.Role, r.Note = id, "proof", "模型以字符串形式提供的 traffic_id"
+		return nil
+	}
+	type plain TrafficRef
+	var p plain
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	*r = TrafficRef(p)
+	return nil
+}
+
 func NormalizeTrafficRefs(refs []TrafficRef) ([]TrafficRef, error) {
 	out := make([]TrafficRef, 0, len(refs))
 	seen := map[string]bool{}
@@ -328,7 +350,9 @@ func (d *DB) EditFindingTraffic(ctx context.Context, findingID, bindingID, versi
 type RecordFindingInput struct {
 	TaskID, ExplorationID, IntentID                      int64
 	VulnClass, Name, Severity, Summary, Evidence, Worker string
-	AssetIDs                                             []int64
+	// Confidence 证据可信度：verified / partial / inferred（空 = inferred）。
+	Confidence string
+	AssetIDs   []int64
 }
 
 type RecordedFinding struct {
@@ -361,7 +385,8 @@ func RecordFindingTx(ctx context.Context, tx *sql.Tx, in RecordFindingInput, pre
 			return nil, errors.New("intent_id 必须是本任务的意图（关联任务意图只读）")
 		}
 	}
-	payload, _ := json.Marshal(map[string]any{"vulnclass": in.VulnClass, "name": in.Name, "severity": in.Severity, "summary": in.Summary, "evidence": map[string]any{"by": in.Worker, "poc": in.Evidence}})
+	confidence := NormalizeFindingConfidence(in.Confidence)
+	payload, _ := json.Marshal(map[string]any{"vulnclass": in.VulnClass, "name": in.Name, "severity": in.Severity, "summary": in.Summary, "confidence": confidence, "evidence": map[string]any{"by": in.Worker, "poc": in.Evidence}})
 	out := &RecordedFinding{}
 	if err := tx.QueryRow(`INSERT INTO exploration_nodes(exploration_id,kind,payload,priority,state,origin)
 VALUES($1,'finding',$2,9,'confirmed',$3) RETURNING id`, in.ExplorationID, string(payload), in.Worker).Scan(&out.NodeID); err != nil {
@@ -382,8 +407,8 @@ VALUES($1,'finding',$2,9,'confirmed',$3) RETURNING id`, in.ExplorationID, string
 		assets = []int64{}
 	}
 	raw, _ := json.Marshal(assets)
-	if err := tx.QueryRow(`INSERT INTO findings(task_id,node_id,vulnclass,name,severity,summary,evidence,worker,asset_ids)
-VALUES(NULLIF($1,0),$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, in.TaskID, out.NodeID, in.VulnClass, in.Name, in.Severity, in.Summary, in.Evidence, in.Worker, string(raw)).Scan(&out.FindingID); err != nil {
+	if err := tx.QueryRow(`INSERT INTO findings(task_id,node_id,vulnclass,name,severity,summary,evidence,worker,asset_ids,confidence)
+VALUES(NULLIF($1,0),$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, in.TaskID, out.NodeID, in.VulnClass, in.Name, in.Severity, in.Summary, in.Evidence, in.Worker, string(raw), confidence).Scan(&out.FindingID); err != nil {
 		return nil, err
 	}
 	// 在**同一事务**里登记一条推送事件：提交即保证「漏洞落库」与「推送任务存在」
@@ -486,8 +511,9 @@ func (d *DB) SetFindingReportVersionByNodeID(ctx context.Context, nodeID int64, 
 func (d *DB) SetFindingReportWithSeverityByNodeID(ctx context.Context, nodeID int64, report string, version *int64, requestedSeverity string) (n int64, effective string, downgraded bool, err error) {
 	err = d.WithEvidenceTx(ctx, func(tx *sql.Tx) error {
 		var id int64
-		var cur string
-		if err := tx.QueryRow(`SELECT id, COALESCE(severity,'') FROM findings WHERE node_id=$1`, nodeID).Scan(&id, &cur); err != nil {
+		var cur, vulnclass, name, summary, evidence string
+		if err := tx.QueryRow(`SELECT id, COALESCE(severity,''), COALESCE(vulnclass,''), COALESCE(name,''), COALESCE(summary,''), COALESCE(evidence,'')
+			FROM findings WHERE node_id=$1`, nodeID).Scan(&id, &cur, &vulnclass, &name, &summary, &evidence); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil
 			}
@@ -498,8 +524,22 @@ func (d *DB) SetFindingReportWithSeverityByNodeID(ctx context.Context, nodeID in
 		}
 		effective = cur
 		req := strings.ToLower(strings.TrimSpace(requestedSeverity))
+		floor := SeverityFloor(vulnclass, name, summary, evidence)
+		// 高影响证据的服务端下限：reporter 不得把未授权管理员接管/完整凭据
+		// 泄露写成更低等级。拒绝保存，迫使报告正文与生效等级一致。
+		if req != "" && ValidSeverity(req) && floor != "" && SeverityRank(req) < SeverityRank(floor) {
+			return fmt.Errorf("severity %s 低于服务端下限 %s（未授权管理员接管或完整凭据泄露）；请按 %s 重写报告后保存", req, floor, floor)
+		}
+		target := cur
 		if req != "" && ValidSeverity(req) && SeverityRank(req) < SeverityRank(cur) {
-			res, err := tx.Exec(`UPDATE findings SET report=$2,severity=$3,report_evidence_version=COALESCE($4::bigint,CASE WHEN evidence_version=0 THEN 0 ELSE -1 END) WHERE id=$1`, id, report, req, version)
+			target = req
+		}
+		if floor != "" && SeverityRank(floor) > SeverityRank(target) {
+			target = floor
+		}
+		downgraded = SeverityRank(target) < SeverityRank(cur)
+		if SeverityRank(target) != SeverityRank(cur) {
+			res, err := tx.Exec(`UPDATE findings SET report=$2,severity=$3,report_evidence_version=COALESCE($4::bigint,CASE WHEN evidence_version=0 THEN 0 ELSE -1 END) WHERE id=$1`, id, report, target, version)
 			if err != nil {
 				return err
 			}
@@ -507,8 +547,8 @@ func (d *DB) SetFindingReportWithSeverityByNodeID(ctx context.Context, nodeID in
 				return err
 			}
 			// 保持发现 Tab（读探索节点 payload）与 findings 行一致。
-			_, _ = tx.Exec(`UPDATE exploration_nodes SET payload = jsonb_set(payload, '{severity}', to_jsonb($1::text)) WHERE id=$2`, req, nodeID)
-			effective, downgraded = req, true
+			_, _ = tx.Exec(`UPDATE exploration_nodes SET payload = jsonb_set(payload, '{severity}', to_jsonb($1::text)) WHERE id=$2`, target, nodeID)
+			effective = target
 			return nil
 		}
 		res, err := tx.Exec(`UPDATE findings SET report=$2,report_evidence_version=COALESCE($3::bigint,CASE WHEN evidence_version=0 THEN 0 ELSE -1 END) WHERE id=$1`, id, report, version)

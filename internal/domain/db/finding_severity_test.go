@@ -72,3 +72,51 @@ func TestSetFindingReportWithSeverityOnlyDowngrades(t *testing.T) {
 		t.Fatalf("equal severity: downgraded=%v effective=%q err=%v", downgraded, eff, err)
 	}
 }
+
+// TestSetFindingReportSeverityFloor 验证 reporter 不能把未授权管理员接管
+// 压到 critical 以下；服务端会拒绝保存并保留原等级。
+func TestSetFindingReportSeverityFloor(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	defer d.Close()
+
+	tk, err := d.CreateTask("定级下限测试", "目标", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.DeleteTask(tk.ID)
+	es := d.Exploration(tk.ExplorationID)
+	nodeID, err := es.AddNode(KindFinding, map[string]any{"summary": "x", "severity": SeverityHigh}, 5, "confirmed", "worker", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fid, err := d.AddFinding(tk.ID, nodeID, "认证绕过 / 未授权访问",
+		"未授权管理员注册接口导致创建 admin 账号并接管 OA",
+		SeverityHigh, "无需认证创建 role_code=admin 管理员账号并登录接管",
+		"POST /api/test/admin-register\n{\"code\":0}\nrole_code: admin", "worker", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Exec(`DELETE FROM findings WHERE id=$1`, fid)
+
+	ctx := context.Background()
+	if _, _, _, err := d.SetFindingReportWithSeverityByNodeID(ctx, nodeID, "# report", nil, SeverityMedium); err == nil ||
+		!strings.Contains(err.Error(), "低于服务端下限") {
+		t.Fatalf("medium below floor should be rejected, err=%v", err)
+	}
+	one, err := d.GetFinding(fid)
+	if err != nil || one.Severity != SeverityHigh {
+		t.Fatalf("rejected write must keep severity: %+v err=%v", one, err)
+	}
+
+	n, eff, downgraded, err := d.SetFindingReportWithSeverityByNodeID(ctx, nodeID, "# report critical", nil, SeverityCritical)
+	if err != nil || n != 1 || eff != SeverityCritical || downgraded {
+		t.Fatalf("critical accepted: n=%d eff=%q downgraded=%v err=%v", n, eff, downgraded, err)
+	}
+	one, err = d.GetFinding(fid)
+	if err != nil || one.Severity != SeverityCritical {
+		t.Fatalf("floor must raise severity: %+v err=%v", one, err)
+	}
+}

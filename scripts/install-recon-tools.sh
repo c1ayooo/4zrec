@@ -9,7 +9,6 @@ set -eu
 PREFIX="${PREFIX:-/usr/local/bin}"
 TMPDIR="${TMPDIR:-/tmp/4zrec-tools}"
 TARGETARCH="${TARGETARCH:-amd64}"
-SKIP_NUCLEI_TEMPLATES="${SKIP_NUCLEI_TEMPLATES:-0}"
 
 case "$TARGETARCH" in
   amd64) PD_ARCH=amd64; FEROX_ARCH=x86_64 ;;
@@ -17,7 +16,6 @@ case "$TARGETARCH" in
   *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;;
 esac
 
-NUCLEI_VERSION="${NUCLEI_VERSION:-3.11.1}"
 SUBFINDER_VERSION="${SUBFINDER_VERSION:-2.17.0}"
 HTTPX_VERSION="${HTTPX_VERSION:-1.12.0}"
 DNSX_VERSION="${DNSX_VERSION:-1.3.1}"
@@ -44,7 +42,6 @@ fetch_pd() {
   install -m 0755 "$bin" "$PREFIX/$name"
 }
 
-fetch_pd nuclei "$NUCLEI_VERSION"
 fetch_pd subfinder "$SUBFINDER_VERSION"
 fetch_pd httpx "$HTTPX_VERSION"
 fetch_pd dnsx "$DNSX_VERSION"
@@ -82,8 +79,3 @@ unzip -oq "$TMPDIR/shuffledns.zip" -d "$TMPDIR/shuffledns"
 bin=$(find "$TMPDIR/shuffledns" -type f -name shuffledns | head -n 1)
 [ -n "$bin" ] || { echo "missing shuffledns binary in release archive" >&2; exit 1; }
 install -m 0755 "$bin" "$PREFIX/shuffledns"
-
-# Nuclei 模板体积较大，构建时尝试更新；失败不阻塞镜像构建，运行时可再次更新。
-if [ "$SKIP_NUCLEI_TEMPLATES" != "1" ] && [ -x "$PREFIX/nuclei" ]; then
-  timeout 180 "$PREFIX/nuclei" -update-templates || true
-fi

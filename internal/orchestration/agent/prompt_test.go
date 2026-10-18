@@ -125,4 +125,19 @@ func TestRenderSystemOverrideAndFallback(t *testing.T) {
 	if strings.Contains(chatSystem("reporter", "/data", "/work"), "先走 http_probe") {
 		t.Fatal("reporter chat prompt should not carry the HTTP tool policy")
 	}
+
+	// 差分验证说明同样是代码固定尾巴：执行/研判/渗透/复测 agent 注入，
+	// 报告类 agent 不注入（它没有 differential_probe）。
+	if !strings.Contains(got, "differential_probe") || !strings.Contains(recording, "differential_probe") {
+		t.Fatal("worker/planner system prompt should carry the differential probe policy")
+	}
+	if !strings.Contains(chatSystem("pentest", "/data", "/work"), "differential_probe") {
+		t.Fatal("pentest chat prompt should carry the differential probe policy")
+	}
+	if !strings.Contains(chatSystem("retester", "/data", "/work"), "differential_probe") {
+		t.Fatal("retester chat prompt should carry the differential probe policy")
+	}
+	if strings.Contains(chatSystem("reporter", "/data", "/work"), "differential_probe") {
+		t.Fatal("reporter chat prompt should not carry the differential probe policy")
+	}
 }

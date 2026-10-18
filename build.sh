@@ -182,6 +182,9 @@ package_binary() {
     chmod +x "$package_root/start.sh"
   fi
   cp -R skills "$package_root/"
+  # js-reverse MCP 包装：db seed 按 <安装根>/scripts/ 定位，Release 包必须带上。
+  mkdir -p "$package_root/scripts"
+  cp scripts/js-reverse-mcp-4zrec.mjs "$package_root/scripts/"
   # 运行期数据资产：SaaS/CDN/成功信号规则与指纹种子、1day 漏洞库。
   cp -R configs "$package_root/"
   cp -R vulnkb "$package_root/"

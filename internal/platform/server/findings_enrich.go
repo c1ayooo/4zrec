@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/c1ayooo/4zrec/internal/domain/db"
-	"github.com/c1ayooo/4zrec/internal/platform/report"
 	"github.com/c1ayooo/4zrec/internal/domain/traffic"
+	"github.com/c1ayooo/4zrec/internal/platform/report"
 )
 
 // enrichmentDTO is the wire shape (report.Enrichment fields + status/source/severity).
@@ -109,13 +109,14 @@ func rawOrRM(r json.RawMessage, def string) json.RawMessage {
 // node_id 作为句柄,FindingID 是表内主键——状态更新用它)。
 func findingRowFromDB(f *db.DBFinding) FindingDTO {
 	d := FindingDTO{
-		VulnClass: f.VulnClass,
-		Name:      f.Name,
-		Severity:  f.Severity,
-		Summary:   f.Summary,
-		Evidence:  f.Evidence,
-		Status:    f.Status,
-		TS:        f.CreatedAt.Format(time.RFC3339),
+		VulnClass:  f.VulnClass,
+		Name:       f.Name,
+		Severity:   f.Severity,
+		Summary:    f.Summary,
+		Evidence:   f.Evidence,
+		Status:     f.Status,
+		Confidence: f.Confidence,
+		TS:         f.CreatedAt.Format(time.RFC3339),
 	}
 	// agent 未填时是 SQL NULL(空 slice)或字面 "null",都不下发。
 	if len(f.Reproduction) > 0 && string(f.Reproduction) != "null" {
@@ -292,7 +293,7 @@ func (s *Server) runEnrich(id int64, f *db.DBFinding, locale, company string) {
 			fail(fmt.Sprintf("AI 分析异常：%v", rec))
 		}
 	}()
-	in := report.FindingInput{VulnClass: f.VulnClass, Severity: f.Severity, Summary: f.Summary, PoC: f.Evidence, CreatedAt: f.CreatedAt, Reproduction: f.Reproduction}
+	in := report.FindingInput{VulnClass: f.VulnClass, Severity: f.Severity, Summary: f.Summary, PoC: f.Evidence, CreatedAt: f.CreatedAt, Reproduction: f.Reproduction, Status: f.Status}
 	// Ground the AI PROSE (description/risk/remediation) in the finding's real work
 	// transcript (the intent that yielded it), so enrichment reflects what actually
 	// happened instead of expanding the one-line summary. Enrichment is prose-only

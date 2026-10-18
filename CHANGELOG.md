@@ -4,9 +4,67 @@
 
 ## [Unreleased]
 
+### 认证与安全
+
+- **首次启动自动生成随机管理员密码**：全新数据库首次启动时生成 20 位随机密码，只打印一次在后端日志中（Docker：`docker compose logs 4zrec | grep '登录密码'`）。这关闭了初始化前任何人抢先调用 `/api/auth/init` 成为管理员的窗口；`/setup` 仅作为兼容入口保留。
+- **改密吊销旧 token**：修改密码会轮换 `jwt.key`，已签发的 JWT 立即失效；前端自动换用后端返回的新 token。
+- **JWT 加固**：`jwt.key` 每次启动强制 `0600`；校验要求 token 必须带 `exp`。
+- **登录限速**：默认不再信任 `X-Forwarded-For`；反向代理部署需显式设置 `ZREC_TRUST_PROXY_HEADERS=1` 并由代理覆盖该头，避免 Docker 端口映射下伪造头绕过限速。
+- **首次初始化竞态**：密码与用户名在同一事务内写入，输掉并发竞争的一方不能再改管理员登录名。
+
+### 代理库
+
+- **命名代理集中管理**：系统设置新增「代理库」，可保存多条 http / https / socks5 代理（支持 user:pass），提供新增、编辑、删除和连通性测试。
+- **按用途手动选择**：目标流量、网络搜索、nuclei 下载/更新、平台自更新各有一个下拉选择器，可在「内网 SOCKS / mihomo 出海 / 直连 / 自定义 URL」之间切换。选择结果写入对应的运行时设置（`global_proxy` / `web_search_proxy` / `nuclei.proxy` / `update_proxy`），并记录所选代理 ID；编辑或删除代理会同步所有正在使用它的用途。
+- **兼容原有自定义 URL**：未选择代理时仍可直接填写 URL 或留空直连；平台自更新未单独配置时沿用全局代理。新增 `GET/POST /api/proxy-profiles`、`PUT /api/proxy-profiles/selection`、`PUT/DELETE /api/proxy-profiles/{id}`、`POST /api/proxy-profiles/test`。
+
+### 安全边界
+
+- **planner/mainagent 挂上 Guard**：两者都带 Bash/Read/Write，之前不经过护栏；现在与 worker 共用同一套拦截规则、敏感文件底线和资产围栏，并补上任务上下文（Guard 靠它解析项目与审计归属）。
+- **范围扩容绑定当前项目**：`icp_expand` 的 `authorize=true` 只能写入当前任务/会话所属项目；模型传的 `project_id` 只做校验，跨项目或无项目上下文一律拒绝，堵住“agent 自批任意项目范围”。
+- **全局急停**：新增 `POST /api/tasks/control/pause-all`，无需枚举 ID 即可暂停所有非终态任务；项目级 API Key 只影响本项目。任务页工具栏增加「全部暂停」按钮（带确认弹窗）。
+- **资产围栏改为按“命令对象”判定**：不再在整段命令文本里找域名/IP，而是先剥掉 `sudo`/`env`/`timeout`/`nice`/`nohup`/`stdbuf`/`xargs`/`find -exec`/`watch`/`sh -c`/`eval` 等包装，拿到真正发起动作的命令，再按该命令的目标操作数提取对象。目标列表文件（`nmap -iL`、`wget -i`、`httpx/nuclei -l` 等）只在任务工作目录内读取，目录外或缺失一律 fail-closed；`curl -K/--config`、动态占位符、解释器脚本不可读、未知命令等无法静态确定对象的形态统一走人工审批，而不是“没提取到目标就放行”。同时补上 IPv6、`--resolve` 的实际地址和解释器代码里的 URL 对象；已识别目标仍先过全局/任务黑名单。
+- 说明：`ModeBypass` 下工具自带的 `AskUser` 仍然不会弹窗；审批统一由 Guard/Intercept 承担。围栏现在仍是静态命令分析（MCP、custom tool、任意二进制内部动态拼 URL 仍可能绕过），最终应把 HTTP(S) 出口收敛到授权代理层做对象级 allowlist；审计落库也仍待后续批次。
+
 ### 漏洞库
 
 - **合并 1day 库与情报流**：`/function/vuln-kb` 去掉两个 tab，改为单一漏洞库列表；统一搜索、来源筛选（全部 / 1day 库 / 情报流）和分页，详情按来源展示 1day 打击字段或情报富化字段。底层仍保留 `vuln_kb` 与 `vuln_intel` 两张表，不迁移、不丢数据。
+
+### JS 逆向
+
+- **内置 `js-reverse` MCP**：镜像预装 `js-reverse-mcp@4.0.5`，seed 为默认启用的 stdio MCP；`src-playbooks` 技能声明 `mcps: browser, js-reverse`，加载技能后解锁脚本搜索、XHR 断点、调用栈、暂停态求值、网络/WebSocket 分析等工具。
+- **无头容器可直接用**：新增跨平台 Node 包装 `scripts/js-reverse-mcp-4zrec.mjs`，用 Playwright 已装好的 Chromium 起临时无头实例，再通过 `--browserUrl` 让 MCP 走 CDP 接入；不需要额外安装 Google Chrome 或 Xvfb。桌面环境可设 `JS_REVERSE_MCP_DIRECT=1` 走上游有头 Chrome。
+- **Release 包同步**：`build.sh` 的 zip 带上 `scripts/js-reverse-mcp-4zrec.mjs`，本地/Release 部署启动后即可使用；`README`、`js-reverse-guide.md` 补充启用步骤与工具前缀说明。
+
+### 差分验证
+
+- **新增 `differential_probe` 工具（推理型注入验证）**：agent 提出正常基线 + 若干变体请求，工具逐包重复采样并返回状态码、响应长度、内容相似度、时延统计（min/median/max/σ）、DBMS 错误特征（MySQL/PostgreSQL/MSSQL/Oracle/SQLite）、反射标记和 `traffic_id`；每个采样自动写入证据库。工具**不生成 payload、不自动判定漏洞**，`verdict=signal` 仅表示观测到稳定差异，结论仍由 agent 结合业务语义确认。默认绑定 worker / planner / pentest / retester，并在这些 agent 的系统提示中注入差分验证硬规则（布尔对照用 role=true/false，时间盲注 repeats>=3，错误注入自动匹配特征）。
+- **SQL 注入走推理优先路线**：不把 sqlmap/扫描器封装成主路径；模型负责提出假设与构造变体，工具负责可复核的测量与证据留痕。`http_probe` 继续承担普通 HTTP 请求与会话链，`differential_probe` 承担需要对照的盲注/注入验证。
+
+### nuclei 结构化接入
+
+- **项目自带二进制与模板**：nuclei 不再预装在镜像 / 系统 PATH；二进制、模板、扫描结果和 HOME 全部落在 `<dataDir>/nuclei/` 下（`bin/`、`templates/`、`scans/`、`home/`），随数据卷迁移备份。默认版本 `3.11.1`，可用设置 `nuclei.version` 固定。
+- **自动更新**：首次 `nuclei_scan` 自动下载官方 release 并安装模板；之后每次扫描前按 `nuclei.auto_update`（默认开）和 `nuclei.update_interval_hours`（默认 24h）检查，到期先更新二进制与模板再扫描。首次成功使用后还会启动低频定时检查（每小时判断、到期才更新），长驻部署无需人工干预。也可用 `nuclei_update` 立即更新、`nuclei_status` 查看状态。更新失败但已有可用版本时不阻断扫描。
+- **结构化扫描**：`nuclei_scan` 强制要求 templates/tags/severity/type/automatic 至少一个选择器；JSONL 输出解析为模板 ID、等级、matched-at、matcher、extracted、curl 命令等结构化字段，完整结果落盘到 `scans/`。默认关闭 interactsh（避免目标流量进公共 OAST），需要时显式开启。
+- **模板检索**：`nuclei_template_search` 在项目内模板目录按关键词/等级/标签/协议类型检索，返回模板 ID 与相对路径；扫描只接受模板目录内的相对路径或已知 ID，拒绝绝对路径和 `..` 越界。
+- **RoE 与证据边界**：`nuclei_scan` 对每个目标逐条走项目授权范围校验；nuclei 命中只作为扫描器结论返回，不自动登记 finding，仍需按证据门槛复核后 `report_finding`。
+- **默认绑定**：`nuclei_scan`/`nuclei_template_search` 绑 worker、planner、recon、pentest、auto；`nuclei_update`/`nuclei_status` 绑 auto、recon、pentest、mainagent，可在工具页改绑。
+- **系统设置开关**：系统设置页新增 nuclei 卡片：总开关、自动更新、interactsh、更新间隔、引导版本、扫描上限，并展示只读状态（二进制版本 / 模板数量 / 上次更新）；新增 `GET /api/nuclei/status`。设置由 manager 每次扫描/更新重新读取，改完即时生效，无需重启。
+- **模板管理页**：「功能 → 信息收集 → nuclei 模板」新增模板页。官方模板只读，可搜索/按等级/类型/标签筛选、查看 YAML；自定义模板可新建、编辑、校验、删除，存放在 `<dataDir>/nuclei/custom-templates/`，不会被官方模板更新覆盖。扫描未显式指定 templates 时，tags/severity/type 同时作用于官方和自定义目录。新增模板列表/详情/校验/增改删与异步更新接口（`/api/nuclei/templates*`、`/api/nuclei/update`）。
+
+### 证据门禁与报告一致性
+
+- **`report_finding` 证据门槛**：必须提供 `evidence`、`reproduction`、`traffic_refs`、`evidence_hint_id` 之一，否则服务端拒绝登记；仅凭版本/指纹/CVE 推断不能上报。
+- **结构化 `confidence`**：finding 新增 `verified / partial / inferred` 证据等级；自报 `verified` 但缺少结构化复现或已绑定流量时，服务端自动降为 `partial` 并在结果中说明。前端列表/详情与 Markdown/CSV 导出均展示该等级。
+- **高影响证据定级下限**：未授权创建管理员账号/获取管理员会话并确认 admin 权限、匿名泄露完整 root DB/Redis/邮件/企微凭据，服务端设 `critical` 下限。`report_finding` 会自动提升，`update_finding_report` 会拒绝低于下限的 severity 并保留原等级；reporter/worker/pentest 的定级标尺同步补充这两类口径，避免“没拿服务器 Shell/没读业务数据”就把应用层接管或完整凭据泄露降成 high/medium。
+- **HTTP 请求强制走 `http_probe`**：worker/planner/recon/auto 的简单 `curl`/`wget` 会被 Guard 拦下，要求改用 `http_probe`，确保每次请求都有完整报文和 `traffic_id`；管道处理（`curl … | grep`）、流式/原始报文、`-K` 配置、递归抓取等例外不拦。
+- **finding 自动绑定流量证据**：`report_finding` 在模型没回填 `traffic_refs` 时，会从 evidence 里识别显式 `traffic_id`、完整 URL，或 `METHOD /path` + `Host`/关联资产 host，按 method+host+path 匹配平台最近记录并自动绑定。`traffic_refs` 同时接受对象数组和字符串数组，避免模型写成 `["ev-..."]` 时整条上报失败。
+- **目标达成后的收尾窗口**：planner 判定全部目标达成后不再立刻取消在跑 worker，而是等最多 30 秒让它把刚确认的 finding 写回；超时才硬取消。避免 SSRF/上传链在模型输出阶段被 kill 丢失。
+- **finding 去重**：同任务、同类型、同名称（空名称回退 summary）、同资产的重复上报直接返回已有记录，不再插入第二条。
+- **误报/忽略/重复不进入报告与统计**：汇总导出和 `FindingStats` 默认排除 `false_positive / ignored / duplicate`；显式按状态筛选时尊重用户选择。
+- **报告不再静默丢漏洞**：`report` 为空时回退到 `summary` + `evidence/reproduction`；完全无材料时也会在报告中显示占位提示。
+- **复测/处置状态进入报告**：SRC 合并报告与单条导出展示证据等级、处置状态、最新一次已完成复测的结论和日期；docx/PDF 的 `fix_status` 改为读取 finding 实际状态，不再固定“待修复”。
+- **存量库迁移**：启动时给旧库的 `report_finding` 补 `confidence` 参数与证据门槛文案，只修改仍为代码默认的描述，用户自定义内容保留。
 
 ## [0.4.4] - 2026-10-18
 

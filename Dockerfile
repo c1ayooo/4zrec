@@ -40,7 +40,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # 预编译 recon CLI（ProjectDiscovery / Amass / Feroxbuster / puredns / shuffledns）。
 # 版本集中在这里，升级时只改这一处；安装逻辑在 scripts/install-recon-tools.sh。
-ARG NUCLEI_VERSION=3.11.1
 ARG SUBFINDER_VERSION=2.17.0
 ARG HTTPX_VERSION=1.12.0
 ARG DNSX_VERSION=1.3.1
@@ -52,7 +51,6 @@ ARG PUREDNS_VERSION=2.1.1
 ARG SHUFFLEDNS_VERSION=1.2.1
 COPY scripts/install-recon-tools.sh /tmp/install-recon-tools.sh
 RUN TARGETARCH="$TARGETARCH" \
-    NUCLEI_VERSION="$NUCLEI_VERSION" \
     SUBFINDER_VERSION="$SUBFINDER_VERSION" \
     HTTPX_VERSION="$HTTPX_VERSION" \
     DNSX_VERSION="$DNSX_VERSION" \
@@ -66,13 +64,19 @@ RUN TARGETARCH="$TARGETARCH" \
     && rm -f /tmp/install-recon-tools.sh
 COPY --from=massdns-build /src/bin/massdns /usr/local/bin/massdns
 
-# 预装 Playwright MCP 与 CLI（全局），运行时不再 npx 联网下载。
+# 预装 Playwright MCP、CLI 与 JS 逆向 MCP（全局），运行时不再 npx 联网下载。
 # @playwright/mcp：browser MCP 直接 `npx @playwright/mcp`（已全局装好，无需 -y/@latest）。
 # @playwright/cli：提供 playwright-cli，装完顺带 --help 验证可执行。
+# js-reverse-mcp：JS 逆向 MCP；上游要求 Node >=20.19，NodeSource 的 20.x 满足。
 # 再装 playwright（提供浏览器管理），装完用 --with-deps 预置 chromium 及其系统依赖，
 # 这样容器内 MCP/CLI 首次启动即可用，不再联网下载浏览器。
+# js-reverse 的包装见 scripts/js-reverse-mcp-4zrec.mjs：容器内复用这里的 Chromium，
+# 以无头 + CDP 方式接入，不需要额外安装 Google Chrome 或 Xvfb。
+ARG JS_REVERSE_MCP_VERSION=4.0.5
 RUN npm install -g @playwright/mcp@latest @playwright/cli@latest playwright@latest \
+      js-reverse-mcp@${JS_REVERSE_MCP_VERSION} \
     && playwright-cli --help \
+    && js-reverse-mcp --help >/dev/null \
     && playwright install --with-deps chromium \
     && rm -rf /var/lib/apt/lists/*
 
@@ -88,6 +92,9 @@ COPY dist/${TARGETARCH}/4zrec /app/4zrec
 # 它同时负责把 SIGTERM 转发给 4zrec —— docker stop 只把信号发给 PID 1，
 # 不转发的话 4zrec 收不到、做不了优雅关闭，10 秒后被 SIGKILL 硬杀。
 COPY start.sh /app/start.sh
+# js-reverse MCP 启动包装（无头 Chromium + CDP）：用 node 调用，复用镜像里
+# Playwright 的 Chromium，不额外安装 Google Chrome 或 Xvfb。
+COPY scripts/js-reverse-mcp-4zrec.mjs /app/scripts/js-reverse-mcp-4zrec.mjs
 # 运行期数据资产：SaaS/CDN/成功信号规则与指纹种子、1day 漏洞库。
 COPY configs/ /app/configs/
 COPY vulnkb/ /app/vulnkb/

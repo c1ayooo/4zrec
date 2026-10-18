@@ -560,10 +560,12 @@ func (s *AssetStore) StampDiscoveredAsset(assetID, projectID int64) (authz strin
 		state = "approved"
 	}
 	// 只升不降:approved/rejected 已是终态或更高状态时保持不变。
+	// 只处理未归属或本项目的资产——不能借 stamp 改他项目的授权状态。
 	_, err = s.db.Exec(`
 UPDATE assets SET authz=$3,
   project_id = COALESCE(project_id, $2)
-WHERE id=$1 AND (authz IS NULL OR authz='pending' OR (authz='approved' AND $3='approved'))`,
+WHERE id=$1 AND (project_id IS NULL OR project_id=$2)
+  AND (authz IS NULL OR authz='pending' OR (authz='approved' AND $3='approved'))`,
 		assetID, projectID, state)
 	if err != nil {
 		return "", err

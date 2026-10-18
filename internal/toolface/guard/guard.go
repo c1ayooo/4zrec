@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c1ayooo/4zrec/internal/kernel/askernel"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
+	"github.com/c1ayooo/4zrec/internal/kernel/askernel"
 	"github.com/c1ayooo/4zrec/internal/toolface/intercept"
 )
 
@@ -85,9 +85,20 @@ func (g *Guard) preToolUse(ctx context.Context, ev askernel.Event) askernel.Resu
 		_ = json.Unmarshal(ev.Input, &in)
 		cmd = in.Text
 	}
+	// HTTP 工具优先级：简单 curl/wget 会丢掉完整报文证据，强制走 http_probe。
+	if reason := httpProbePolicyViolation(ctx, ev.ToolName, cmd); reason != "" {
+		g.record(ev.ToolName, "block", reason, cmd)
+		return g.block(ev.ToolName, systemBlockMessage(reason), "")
+	}
 	g.record(ev.ToolName, "allow", "", cmd)
 	return g.applyIntercept(ctx, ev)
 }
+
+// sensitiveHostFileRE is a hard floor that does not depend on DB rules: an
+// agent driven by prompt-injected target content must not be able to read the
+// host's signing key, DB/user config, SSH keys, MITM CA material, or process
+// environment and ship them out in a single tool call.
+var sensitiveHostFileRE = regexp.MustCompile(`(?i)(jwt\.key|datasource\.key|mitmproxy-ca|/\.ssh/|id_rsa|id_ed25519|authorized_keys|/proc/[^/\s"']+/environ|(?:^|[\s"':=\\])\.env(?:["'\s]|$)|(?:^|[\s"':=\\/])config\.json(?:["'\s]|$))`)
 
 // applyIntercept evaluates user-configured intercept rules against the tool call.
 // Both rules and the fallback judge receive the complete tool input.
@@ -99,7 +110,16 @@ func (g *Guard) applyIntercept(ctx context.Context, ev askernel.Event) askernel.
 	if res, done := g.applyFence(ctx, ev); done {
 		return res
 	}
-	if !g.interceptor.IsToolEnabled(ev.ToolName) {
+	// 宿主机敏感文件是硬底线,不受用户规则启停/工具白名单影响。
+	if sensitiveHostFileRE.Match(ev.Input) {
+		return g.block(ev.ToolName, systemBlockMessage("检测到对宿主机密钥/配置文件的访问(jwt.key / datasource.key / .ssh / config.json / .env / 进程环境),该操作被禁止"), "")
+	}
+	enabled, err := g.interceptor.IsToolEnabled(ev.ToolName)
+	if err != nil {
+		// 规则集加载失败 = 安全决策不可用:fail closed,不能当作"没有规则"放行。
+		return g.block(ev.ToolName, systemBlockMessage("拦截规则加载失败,平台安全管控已拒绝本次调用"), "")
+	}
+	if !enabled {
 		return askernel.Result{}
 	}
 	ctx = intercept.WithCall(ctx, ev.ToolName, ev.Input)

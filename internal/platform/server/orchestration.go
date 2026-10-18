@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
+	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
 
 	actool "github.com/c1ayooo/4zrec/internal/toolface/tools"
 )
@@ -52,7 +52,9 @@ func (s *Server) hostTools() ([]actool.CoreTool, map[string][]string) {
 	tools = append(tools, s.coverageTools()...)       // 项目级覆盖度缺口
 	tools = append(tools, s.oobTools()...)            // 带外验证:DNSLog/VT被动子域/AI面探测
 	tools = append(tools, s.probeTools()...)          // 结构化HTTP请求+指纹扫描
+	tools = append(tools, s.diffProbeTools()...)      // 基线/变体差分测量(推理型注入验证)
 	tools = append(tools, s.connTools()...)           // 连接台账(查询/手工登记)
+	tools = append(tools, s.nucleiTools()...)         // 项目内 nuclei 二进制/模板 + 结构化扫描
 	custom, err := s.customTools()
 	if err != nil {
 		log.Printf("[custom-tool] 加载失败: %v", err)
@@ -437,11 +439,11 @@ func (s *Server) toolGetTaskNodeDetail() actool.CoreTool {
 // task-agnostic, so this host tool needs no task_id / exploration store.
 func (s *Server) toolUpdateFindingReport() actool.CoreTool {
 	return wrTool("update_finding_report",
-		"为已登记的漏洞写入/更新【详细报告】(Markdown 全文,整段覆盖旧内容)。finding_id 传 report_finding 返回的那个 id(\"finding recorded: <id>\" 里的数字)。报告建议包含:漏洞概述、影响与危害、复现步骤、证据/PoC、修复建议。可选 severity 传报告按定级标尺判定的等级：仅允许下调（低于 finding 原登记值时写入），高于原值时忽略并提示在附录注明「建议上调为 X，需人工确认」。保存后返回实际生效的 severity，报告正文等级必须与之一致。",
+		"为已登记的漏洞写入/更新【详细报告】(Markdown 全文,整段覆盖旧内容)。finding_id 传 report_finding 返回的那个 id(\"finding recorded: <id>\" 里的数字)。报告建议包含:漏洞概述、影响与危害、复现步骤、证据/PoC、修复建议。可选 severity 传报告按定级标尺判定的等级：仅允许下调（低于 finding 原登记值时写入），高于原值时忽略并提示在附录注明「建议上调为 X，需人工确认」。**服务端对未授权管理员接管、完整 root DB/Redis/邮件/企微凭据泄露设有 critical 下限：低于下限的 severity 会被拒绝，必须按下限重写报告。** 保存后返回实际生效的 severity，报告正文等级必须与之一致。",
 		objSchema(map[string]any{
 			"finding_id":       map[string]any{"type": "integer", "description": "目标漏洞 id(report_finding 返回的 id)"},
 			"report":           strParam("详细报告全文,Markdown 格式"),
-			"severity":         map[string]any{"type": "string", "enum": []string{"critical", "high", "medium", "low"}, "description": "可选。报告按定级标尺判定的等级，仅允许下调：低于 finding 原登记值时写入；高于原值时忽略，需在报告附录注明「建议上调为 X，需人工确认」"},
+			"severity":         map[string]any{"type": "string", "enum": []string{"critical", "high", "medium", "low"}, "description": "可选。报告按定级标尺判定的等级，仅允许下调：低于 finding 原登记值时写入；高于原值时忽略，需在报告附录注明「建议上调为 X，需人工确认」。未授权管理员接管、完整 root DB/Redis/邮件/企微凭据泄露有 critical 下限，低于下限会被拒绝。"},
 			"evidence_version": map[string]any{"type": "integer", "description": "get_finding_traffic 返回的证据 version；用于防止报告覆盖新的证据变更"},
 		}, "finding_id", "report"),
 		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
@@ -468,6 +470,10 @@ func (s *Server) toolUpdateFindingReport() actool.CoreTool {
 				return actool.Errorf(fmt.Sprintf("未找到 finding_id=%d 对应的漏洞记录(先用 report_finding 登记)", nodeID)), nil
 			}
 			switch {
+			case req != "" && db.SeverityRank(req) < db.SeverityRank(effective):
+				return actool.Text(fmt.Sprintf("finding %d report updated (%d chars); severity kept at %s (requested %s — 服务端高影响证据下限；报告正文必须改为 %s)", nodeID, len(a.Report), effective, req, effective)), nil
+			case req == "" && downgraded:
+				return actool.Text(fmt.Sprintf("finding %d report updated (%d chars); severity raised to %s by server floor", nodeID, len(a.Report), effective)), nil
 			case downgraded:
 				return actool.Text(fmt.Sprintf("finding %d report updated (%d chars); severity downgraded to %s (报告正文必须与之一致)", nodeID, len(a.Report), effective)), nil
 			case req != "" && db.SeverityRank(req) > db.SeverityRank(effective):
@@ -528,6 +534,7 @@ func (s *Server) seedOrchestrationTools() {
 	s.reseedAssetSummaryPrompts()     // planner/mainagent 资产态势来源文案改原生采集(一次性)
 	s.seedReporterAgent()             // 预置「报告撰写」agent + 工具绑定 + finding 触发器(一次性)
 	s.seedReconAgent()                // 预置「信息收集」agent + 任务创建触发器(一次性)
+	s.seedNucleiTools()               // 项目内 nuclei 工具播种 + recon 等 agent 补绑(一次性)
 	s.rebindReconToolsV2()            // recon 补绑新增收集工具族(一次性)
 	s.rebindHTTPProbeAgents()         // http_probe 补绑 pentest/planner(一次性)
 	s.mergeHTTPProbeSchema()          // http_probe 新增参数合并进存量工具行(一次性)
@@ -541,6 +548,7 @@ func (s *Server) seedOrchestrationTools() {
 	s.reseedReporterPromptV7()        // reporter 提示词:未绑定时改用 traffic_search 读已存证流量(一次性)
 	s.seedFindingTrafficTools()       // 增加可选证据参数及只读证据工具，保留用户配置
 	s.seedFindingWorkflowTools()
+	s.mergeReportFindingConfidenceSchema() // report_finding 补 confidence 参数与证据门槛文案
 	// 注：pentest 的默认工具绑定无需迁移——BuiltinToolSeeds 在全新初始化时就把
 	// list_assets/insert_assets/report_finding/list_findings/list_companies 连同
 	// pentest 一起 seed 好了（项目尚无旧库，不做迁移）。

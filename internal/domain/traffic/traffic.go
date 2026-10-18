@@ -174,9 +174,12 @@ type Traffic struct {
 // Open initializes the traffic tree, blob store and SQLite index under dir.
 func Open(dir, addr string) (*Traffic, error) {
 	for _, d := range []string{dir, filepath.Join(dir, "_index"), filepath.Join(dir, "_blobs"), filepath.Join(dir, "_ca")} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
+		if err := os.MkdirAll(d, 0o700); err != nil {
 			return nil, err
 		}
+		// Existing installs were created 0755; tighten them too (captured traffic
+		// and the MITM CA private key are sensitive).
+		_ = os.Chmod(d, 0o700)
 	}
 	// busy_timeout is a per-connection setting, so it belongs in the DSN rather
 	// than in a one-off Exec: the pool opens connections on demand, and an Exec
@@ -209,6 +212,19 @@ func Open(dir, addr string) (*Traffic, error) {
 		db.Close()
 		return nil, err
 	}
+	// The CA private key lets anyone who can read it MITM captured target TLS.
+	// go-mitmproxy writes it with the process umask; tighten it explicitly.
+	_ = filepath.Walk(filepath.Join(dir, "_ca"), func(p string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if info.IsDir() {
+			_ = os.Chmod(p, 0o700)
+		} else {
+			_ = os.Chmod(p, 0o600)
+		}
+		return nil
+	})
 	// Upstream selection. By default (no global egress proxy set) targets are
 	// dialed DIRECTLY: go-mitmproxy's own default upstream uses
 	// http.ProxyFromEnvironment, so an HTTP_PROXY/HTTPS_PROXY in the environment
@@ -542,13 +558,13 @@ func (t *Traffic) spill(body []byte, contentType string) storedBody {
 	// One bucket level (256 buckets) is enough to keep any single directory small;
 	// the store only ever holds bodies above maxInlineBody, deduplicated by hash.
 	blobDir := filepath.Join(t.dir, "_blobs", "sha256", h[:2])
-	if err := os.MkdirAll(blobDir, 0o755); err != nil {
+	if err := os.MkdirAll(blobDir, 0o700); err != nil {
 		log.Printf("[traffic] 创建 blob 目录失败：%v", err)
 		return storedBody{inline: clipBytes(body, blobPreview), index: indexText()}
 	}
 	blobPath := filepath.Join(blobDir, h+".bin")
 	if _, err := os.Stat(blobPath); os.IsNotExist(err) {
-		if err := os.WriteFile(blobPath, body, 0o644); err != nil {
+		if err := os.WriteFile(blobPath, body, 0o600); err != nil {
 			log.Printf("[traffic] 写 blob %s 失败：%v", h, err)
 			return storedBody{inline: clipBytes(body, blobPreview), index: indexText()}
 		}
@@ -1448,8 +1464,14 @@ func (t *Traffic) stageDeleteHostsExact(hosts []string, archiveID, taskID int64)
 	// Exact hosts are known up front, so their directories are derived directly
 	// rather than looked up: a host whose index rows are already gone can still
 	// own an orphaned directory that this deletion should take with it.
+	// Reject names that would collide with internal directories (_index/_ca/
+	// _blobs) or escape the traffic root.
+	validHostRe := regexp.MustCompile(`^[A-Za-z0-9._:-]{1,253}$`)
 	legacy := make([]string, 0, len(unique))
 	for _, h := range unique {
+		if !validHostRe.MatchString(h) || strings.HasPrefix(h, "_") || h == "." || h == ".." {
+			return abort(fmt.Errorf("invalid traffic host %q", h))
+		}
 		legacy = append(legacy, filepath.Join(t.dir, sanitize(h)))
 	}
 

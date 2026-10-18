@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/c1ayooo/4zrec/internal/domain/db"
 	"github.com/c1ayooo/4zrec/internal/capability/recon/fingerprint"
 	"github.com/c1ayooo/4zrec/internal/capability/recon/pipeline"
+	"github.com/c1ayooo/4zrec/internal/domain/db"
 	actool "github.com/c1ayooo/4zrec/internal/toolface/tools"
 )
 

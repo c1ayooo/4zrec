@@ -78,8 +78,8 @@ func (s *Server) toolIcpExpand() actool.CoreTool {
 	return actool.Build(actool.Spec{
 		Name: "icp_expand",
 		Description: "ICP 备案反查扩资产:输入备案号(如 粤ICP备14006354号)或主办单位名,在支持的空间测绘引擎反查关联域名候选。" +
-			"两段式:先查候选(不传 authorize);人工确认后带 authorize=true + domains + project_id 把选中域名写入项目授权范围" +
-			"(写入即授权,范围内后续采集自动 approved)。",
+			"两段式:先查候选(不传 authorize);人工确认后带 authorize=true + domains 把选中域名写入**当前任务/会话所属项目**的授权范围" +
+			"(写入即授权,范围内后续采集自动 approved)。**不能跨项目扩容**:project_id 只用于校验,与当前项目不一致会被拒绝;无项目上下文时拒绝写入。",
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -91,7 +91,7 @@ func (s *Server) toolIcpExpand() actool.CoreTool {
 				"authorize": map[string]any{"type": "boolean", "description": "true=把 domains 写入项目授权范围(需人工确认)"},
 				"domains":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "authorize 时要写入的域名清单"},
 				"project_id": map[string]any{
-					"type": "integer", "description": "目标项目(authorize 必填;仅查询时可选传入以同步导入候选为待审批资产)",
+					"type": "integer", "description": "目标项目(仅查询时可选,用于同步导入候选为待审批资产);authorize 时只能等于当前任务/会话项目,不传则自动取当前项目",
 				},
 			},
 		},
@@ -106,8 +106,12 @@ func (s *Server) toolIcpExpand() actool.CoreTool {
 			if len(in.Domains) == 0 {
 				return actool.Denied("authorize=true 需要 domains 清单")
 			}
-			return actool.AskUser("【范围扩容确认】即将把以下域名写入项目授权范围(写入即授权,后续采集与测试自动放行):\n" +
-				strings.Join(in.Domains, "\n"))
+			current := s.roeProjectID(ctx, 0)
+			if current <= 0 {
+				return actool.Denied("范围扩容需要任务/会话的项目上下文；无法确定当前项目")
+			}
+			return actool.AskUser(fmt.Sprintf("【范围扩容确认】即将把以下域名写入当前项目 #%d 的授权范围(写入即授权,后续采集与测试自动放行):\n%s",
+				current, strings.Join(in.Domains, "\n")))
 		},
 		Run: func(ctx context.Context, input json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
 			var in struct {
@@ -125,9 +129,19 @@ func (s *Server) toolIcpExpand() actool.CoreTool {
 
 			// ---- 授权段:写入项目范围 ----
 			if in.Authorize {
-				if in.ProjectID <= 0 || len(in.Domains) == 0 {
-					return actool.Errorf("authorize=true 需要 domains 与 project_id"), nil
+				if len(in.Domains) == 0 {
+					return actool.Errorf("authorize=true 需要 domains 清单"), nil
 				}
+				// 范围只能扩到当前任务/会话所属项目：模型传的 project_id 只做校验，
+				// 不能用来把授权写到别的项目（旧实现允许自批任意项目范围）。
+				current := s.roeProjectID(ctx, 0)
+				if current <= 0 {
+					return actool.Errorf("范围扩容需要任务/会话的项目上下文；无法确定当前项目，拒绝写入"), nil
+				}
+				if in.ProjectID > 0 && in.ProjectID != current {
+					return actool.Errorf(fmt.Sprintf("范围扩容只能写入当前项目 #%d，拒绝写入项目 #%d", current, in.ProjectID)), nil
+				}
+				in.ProjectID = current
 				added, _, invalid, errMsgs := s.m.pg.Projects().AddProjectScope(in.ProjectID, in.Domains, "icp_expand")
 				if added == 0 {
 					return actool.Errorf(fmt.Sprintf("范围写入失败: %v", errMsgs)), nil

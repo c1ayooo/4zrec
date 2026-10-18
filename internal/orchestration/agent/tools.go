@@ -1216,10 +1216,11 @@ func (t *ToolSet) goalMet() actool.CoreTool {
 // --- worker write tools ---
 
 func (t *ToolSet) addFinding() actool.CoreTool {
-	return writeTool("report_finding", "记录确认的漏洞，用 evidence 提供命令输出、日志等可验证证据。任务上下文传当前 intent_id。返回的 finding_id 是独立漏洞记录 ID，finding_node_id 是探索节点 ID（第一行保留该节点编号）。", obj(map[string]any{
-		"vulnclass": str("漏洞类别"), "name": str("漏洞名称"), "severity": str("critical|high|medium|low。按证据深度定级（不按想象后果），取「影响范围」与「证据深度」两者中较低一档：critical=未授权 RCE/获取服务器权限，或全量口令/核心业务库明文可读且端到端验证；high=未授权批量读取全量业务数据（≥1 万条或含未公开敏感字段），或未授权写入生产数据且确认落库；medium=未授权可读部分业务数据、功能级授权缺失但数据落地未证实、隔离绕过只读到公开内容；low=版本号/租户名/枚举 oracle/配置项等不含业务数据的信息泄露。证据只到请求进入业务层（400/500/字段校验错误）而未确认数据落地的，最高 medium，且 name/summary 必须标注「（未端到端验证）」"), "summary": str("发现摘要"),
+	return writeTool("report_finding", "记录确认的漏洞。**证据门槛**：evidence、reproduction、traffic_refs、evidence_hint_id 至少提供一项，否则服务端拒绝登记；仅凭版本/指纹/CVE 推断不能上报。confidence 是服务端证据等级：verified=端到端验证（需结构化复现或流量证据）、partial=部分验证、inferred=推断；服务端会把无复现/无流量的 verified 降为 partial。任务上下文传当前 intent_id。返回的 finding_id 是独立漏洞记录 ID，finding_node_id 是探索节点 ID（第一行保留该节点编号）。", obj(map[string]any{
+		"vulnclass": str("漏洞类别"), "name": str("漏洞名称"), "severity": str("critical|high|medium|low。按证据深度定级（不按想象后果），取「影响范围」与「证据深度」两者中较低一档：critical=未授权 RCE/获取服务器权限；未授权创建管理员账号/获取管理员会话并确认 admin 权限；或完整 root 数据库/Redis/邮件/企微凭据明文可读且端到端验证；high=未授权批量读取全量业务数据（≥1 万条或含未公开敏感字段），或未授权写入生产数据且确认落库；匿名泄露完整系统/数据库凭据但尚未验证可直接连接时至少 high；medium=未授权可读部分业务数据、功能级授权缺失但数据落地未证实、隔离绕过只读到公开内容；low=版本号/租户名/枚举 oracle/配置项等不含业务数据的信息泄露。证据只到请求进入业务层（400/500/字段校验错误）而未确认数据落地的，最高 medium，且 name/summary 必须标注「（未端到端验证）」。服务端对未授权管理员接管、完整 root DB/Redis/邮件/企微凭据泄露设有 critical 下限，低于下限会被提升"), "summary": str("发现摘要"),
 		"intent_id": idp("当前任务的意图 id"), "asset_ids": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "受影响资产 id"},
-		"evidence":         str("证据/PoC。Markdown 固定规范(详情页按此渲染,必须遵守):按复现步骤组织,每步以单独一行「## N. 标题」开始(N=1,2,…);命令放 ```bash 围栏、响应/输出放 ```json(纯文本输出用无语言围栏);命令与响应不得和说明文字混写在一行,禁止用「→」连接命令与响应;结尾的对照/影响面/合规说明写成引用行,如「> **对照**: …」。复现过程同时填写 reproduction 结构化字段(权威渠道),evidence 保留同内容的步骤化呈现。\n\n数据泄露类必须附至少一条完整实体样本：从结果集中取一条记录，保留全部字段（content/正文/附件名/状态/作者/时间/金额等），脱敏后以 json 围栏贴出。实体过大时保留前 2000 字符，并在截断处写明「...（已截断，原长 N 字节）」，用于定级的字段不得省略。\n\n请求/响应过长时按「关键行保留」截断：请求保留方法、URL、全部请求头、body 前 1000 字符；响应保留状态行、Content-Type、Content-Length 与支持结论的字段片段。任何截断都必须显式标注「...（已截断，原长 N 字节）」，禁止静默省略；定级依据涉及的字段不得被截断掉。证据被截断导致无法判断数据敏感程度的，按 medium 上报并在 summary 注明「证据截断，敏感度未确认」。"),
+		"confidence":       map[string]any{"type": "string", "enum": []string{"verified", "partial", "inferred"}, "description": "证据可信度：verified=端到端验证（需 reproduction 或 traffic_refs）；partial=部分验证；inferred=推断。缺省 inferred。没有复现/流量证据时服务端会把 verified 降为 partial。"},
+		"evidence":         str("证据/PoC。**report_finding 的证据门槛：evidence、reproduction、traffic_refs、evidence_hint_id 至少一项**。Markdown 固定规范(详情页按此渲染,必须遵守):按复现步骤组织,每步以单独一行「## N. 标题」开始(N=1,2,…);命令放 ```bash 围栏、响应/输出放 ```json(纯文本输出用无语言围栏);命令与响应不得和说明文字混写在一行,禁止用「→」连接命令与响应;结尾的对照/影响面/合规说明写成引用行,如「> **对照**: …」。复现过程同时填写 reproduction 结构化字段(权威渠道),evidence 保留同内容的步骤化呈现。\n\n数据泄露类必须附至少一条完整实体样本：从结果集中取一条记录，保留全部字段（content/正文/附件名/状态/作者/时间/金额等），脱敏后以 json 围栏贴出。实体过大时保留前 2000 字符，并在截断处写明「...（已截断，原长 N 字节）」，用于定级的字段不得省略。\n\n请求/响应过长时按「关键行保留」截断：请求保留方法、URL、全部请求头、body 前 1000 字符；响应保留状态行、Content-Type、Content-Length 与支持结论的字段片段。任何截断都必须显式标注「...（已截断，原长 N 字节）」，禁止静默省略；定级依据涉及的字段不得被截断掉。证据被截断导致无法判断数据敏感程度的，按 medium 上报并在 summary 注明「证据截断，敏感度未确认」。"),
 		"evidence_hint_id": idp("可选：本任务中对应此漏洞的提示节点 ID，自动携带其结构化 traffic_refs；不能引用继承提示或其他漏洞的提示"),
 		"reproduction": map[string]any{
 			"type":        "object",
@@ -1239,12 +1240,12 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 			"items": obj(map[string]any{"traffic_id": str("traffic_search 返回的真实流量 ID"), "role": map[string]any{"type": "string", "enum": []string{"baseline", "proof", "verification", "supporting"}}, "note": str("该流量如何支持漏洞结论")}, "traffic_id")},
 	}, "vulnclass", "severity", "summary"), func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 		var a struct {
-			VulnClass, Name, Severity, Summary, Evidence string
-			IntentID                                     json.RawMessage   `json:"intent_id"`
-			AssetIDs                                     []json.RawMessage `json:"asset_ids"`
-			TrafficRefs                                  []db.TrafficRef   `json:"traffic_refs"`
-			EvidenceHintID                               json.RawMessage   `json:"evidence_hint_id"`
-			Reproduction                                 json.RawMessage   `json:"reproduction"`
+			VulnClass, Name, Severity, Summary, Evidence, Confidence string
+			IntentID                                                 json.RawMessage   `json:"intent_id"`
+			AssetIDs                                                 []json.RawMessage `json:"asset_ids"`
+			TrafficRefs                                              []db.TrafficRef   `json:"traffic_refs"`
+			EvidenceHintID                                           json.RawMessage   `json:"evidence_hint_id"`
+			Reproduction                                             json.RawMessage   `json:"reproduction"`
 		}
 		if err := json.Unmarshal(in, &a); err != nil {
 			return actool.Errorf(err.Error()), nil
@@ -1252,12 +1253,43 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 		if t.ts == nil {
 			return actool.Errorf("report_finding 需要任务上下文；平台对话请通过 add_task_hint 向对应任务交接漏洞，并在提示中携带已有的 traffic_refs，由任务 Agent 登记。已登记漏洞可用 bind_finding_traffic 补绑。"), nil
 		}
+		// 去重优先：同任务同类型同名称同资产的重复上报直接返回已有记录，
+		// 不再插入第二条。误报/忽略/重复状态的行不参与去重。
+		if dup, derr := t.ts.FindDuplicateFinding(ctx, a.VulnClass, a.Name, a.Summary, pidList(a.AssetIDs)); derr == nil && dup != nil {
+			nodeID := int64(0)
+			if dup.NodeID != nil {
+				nodeID = *dup.NodeID
+			}
+			raw, _ := json.Marshal(map[string]any{
+				"duplicate":       true,
+				"finding_id":      dup.ID,
+				"finding_node_id": nodeID,
+				"confidence":      dup.Confidence,
+				"message":         "同任务下已存在同类型、同名称、同资产的漏洞，未重复登记；请用 update_finding_report 补充报告或 bind_finding_traffic 补绑证据。",
+			})
+			return actool.Text(fmt.Sprintf("finding already recorded: %d\n%s", nodeID, raw)), nil
+		}
+		// 证据门槛：至少一种可核验材料，否则不允许登记。traffic_refs / hint
+		// 即使自动绑定关闭也算模型提供的证据线索（可在页面人工补绑）。
+		bindingOn := findingTrafficBindingEnabled()
+		hasEvidence := strings.TrimSpace(a.Evidence) != ""
+		hasRepro := reproductionPresent(a.Reproduction)
+		hasTraffic := len(a.TrafficRefs) > 0 || pid(a.EvidenceHintID) > 0
+		if !hasEvidence && !hasRepro && !hasTraffic {
+			return actool.Errorf("证据门槛：report_finding 至少需要 evidence、reproduction、traffic_refs 或 evidence_hint_id 之一；仅凭版本/指纹/CVE 推断不能登记漏洞"), nil
+		}
+		confidence := db.NormalizeFindingConfidence(a.Confidence)
+		confidenceNote := ""
+		if confidence == db.ConfidenceVerified && !hasRepro && !(hasTraffic && bindingOn) {
+			confidence = db.ConfidencePartial
+			confidenceNote = "confidence 已从 verified 降为 partial：缺少结构化复现或已绑定的流量证据"
+		}
 		// Auto-binding off: ignore the evidence params instead of rejecting the call.
 		// stripTrafficParameters already removes them from the advertised schema, but
 		// models routinely emit fields anyway — failing here would discard a confirmed
 		// finding over a stray parameter. The success path below reports evidence_status
 		// "not_bound" with the "已关闭，可在页面人工关联" note, which is what the caller needs.
-		if !findingTrafficBindingEnabled() {
+		if !bindingOn {
 			a.TrafficRefs, a.EvidenceHintID = nil, nil
 		}
 		if len(a.EvidenceHintID) > 0 && pid(a.EvidenceHintID) <= 0 {
@@ -1267,7 +1299,16 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 		if err != nil {
 			return actool.Errorf(err.Error()), nil
 		}
-		input := db.RecordFindingInput{TaskID: t.taskID, ExplorationID: t.ts.ID(), IntentID: pid(a.IntentID), VulnClass: a.VulnClass, Name: a.Name, Severity: a.Severity, Summary: a.Summary, Evidence: a.Evidence, Worker: t.worker, AssetIDs: pidList(a.AssetIDs)}
+		severity := strings.ToLower(strings.TrimSpace(a.Severity))
+		if !db.ValidSeverity(severity) {
+			return actool.Errorf("severity 只能是 critical|high|medium|low"), nil
+		}
+		severityFloorNote := ""
+		if floor := db.SeverityFloor(a.VulnClass, a.Name, a.Summary, a.Evidence); floor != "" && db.SeverityRank(severity) < db.SeverityRank(floor) {
+			severityFloorNote = fmt.Sprintf("severity 由服务端高影响证据下限提升为 %s（原始输入 %s）", floor, a.Severity)
+			severity = floor
+		}
+		input := db.RecordFindingInput{TaskID: t.taskID, ExplorationID: t.ts.ID(), IntentID: pid(a.IntentID), VulnClass: a.VulnClass, Name: a.Name, Severity: severity, Summary: a.Summary, Evidence: a.Evidence, Worker: t.worker, Confidence: confidence, AssetIDs: pidList(a.AssetIDs)}
 		var recorded *db.RecordedFinding
 		if t.findingRecorder != nil {
 			recorded, err = t.findingRecorder.Record(ctx, input, refs)
@@ -1288,8 +1329,11 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 		} else if t.notify != nil {
 			t.notify()
 		}
-		if len(a.Reproduction) > 2 { // 就地记录的结构化复现过程(报告确定性渲染的原料)
-			_ = t.ts.SetFindingReproduction(recorded.NodeID, a.Reproduction)
+		reproNote := ""
+		if hasRepro { // 就地记录的结构化复现过程(报告确定性渲染的原料)
+			if err := t.ts.SetFindingReproduction(recorded.NodeID, a.Reproduction); err != nil {
+				reproNote = "结构化复现写入失败：" + err.Error()
+			}
 		}
 		t.writes.Findings++
 		// Keep the first line's node-ID contract for existing reporter triggers.
@@ -1299,9 +1343,16 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 		}
 		result := struct {
 			*db.RecordedFinding
-			EvidenceStatus string `json:"evidence_status"`
-			EvidenceNote   string `json:"evidence_note,omitempty"`
-		}{RecordedFinding: recorded, EvidenceStatus: "bound"}
+			EvidenceStatus    string `json:"evidence_status"`
+			EvidenceNote      string `json:"evidence_note,omitempty"`
+			Confidence        string `json:"confidence"`
+			ConfidenceNote    string `json:"confidence_note,omitempty"`
+			ReproductionNote  string `json:"reproduction_note,omitempty"`
+			Severity          string `json:"severity"`
+			SeverityFloorNote string `json:"severity_floor_note,omitempty"`
+		}{RecordedFinding: recorded, EvidenceStatus: "bound", Confidence: confidence,
+			ConfidenceNote: confidenceNote, ReproductionNote: reproNote,
+			Severity: severity, SeverityFloorNote: severityFloorNote}
 		if len(recorded.Traffic.Bindings) == 0 {
 			result.EvidenceStatus = "not_bound"
 			result.EvidenceNote = "漏洞已保存，未绑定流量。TCP/无包情形可正常继续；若已有核实的 HTTP 流量，请用可用的 bind_finding_traffic 或漏洞页面补绑，再完成证据交接。不要重复创建漏洞。"
@@ -1312,6 +1363,13 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 		raw, _ := json.Marshal(result)
 		return actool.Text(fmt.Sprintf("finding recorded: %d\n%s", recorded.NodeID, raw)), nil
 	})
+}
+
+// reproductionPresent reports whether the structured reproduction payload is
+// present (non-empty and not a JSON null).
+func reproductionPresent(raw json.RawMessage) bool {
+	s := strings.TrimSpace(string(raw))
+	return len(s) > 2 && s != "null"
 }
 
 // recordFact writes a general exploration RESULT/conclusion (not a vuln, not a

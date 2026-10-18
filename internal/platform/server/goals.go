@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
+	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
 )
 
 type goalSpec struct {

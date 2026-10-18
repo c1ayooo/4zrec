@@ -12,8 +12,8 @@ import (
 
 	"github.com/c1ayooo/4zrec/internal/capability/recon/brute"
 	"github.com/c1ayooo/4zrec/internal/capability/recon/permute"
-	"github.com/c1ayooo/4zrec/internal/capability/recon/subdomain"
 	"github.com/c1ayooo/4zrec/internal/capability/recon/spacemap"
+	"github.com/c1ayooo/4zrec/internal/capability/recon/subdomain"
 	actool "github.com/c1ayooo/4zrec/internal/toolface/tools"
 )
 

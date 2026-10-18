@@ -93,6 +93,11 @@ var notifyTransport = func() *http.Transport {
 		return &http.Transport{}
 	}
 	clone := t.Clone()
+	// A proxy would make DialContext connect to the proxy, so blockInternalDial
+	// never sees the real destination and an attacker-controlled webhook could
+	// still reach metadata/loopback through the proxy. Notification targets are
+	// fixed public endpoints, so dial them directly.
+	clone.Proxy = nil
 	clone.DialContext = (&net.Dialer{Timeout: 10 * time.Second, Control: blockInternalDial}).DialContext
 	return clone
 }()

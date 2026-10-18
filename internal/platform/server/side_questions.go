@@ -15,11 +15,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
-	"github.com/c1ayooo/4zrec/internal/platform/llm/llmrec"
 	"github.com/c1ayooo/4zrec/internal/kernel/sidequestion"
 	"github.com/c1ayooo/4zrec/internal/kernel/transcript"
+	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
+	"github.com/c1ayooo/4zrec/internal/platform/llm/llmrec"
 	"github.com/cloudwego/eino/components/model"
 )
 

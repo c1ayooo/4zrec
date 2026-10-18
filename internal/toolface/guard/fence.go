@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/c1ayooo/4zrec/internal/kernel/askernel"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
+	"github.com/c1ayooo/4zrec/internal/kernel/askernel"
 	"github.com/c1ayooo/4zrec/internal/toolface/intercept"
 )
 
@@ -37,10 +37,14 @@ import (
 // 刻意不判(suspiciousIPVariant 注释);整数/八进制/十六进制变体已覆盖。
 // =====================================================================
 
-// fenceTargets 是一次提取出的字面目标集合。
+// fenceTargets 是一次提取出的目标对象集合。Opaque 表示命令会联网、但静态
+// 无法确定其实际对象（解释器脚本、未知命令、不可读的目标列表等）；此时围栏
+// 必须走审批，而不是因为「没提取到字面目标」就放行。
 type fenceTargets struct {
 	Domains []string
 	IPs     []string
+	Opaque  bool
+	Reason  string
 }
 
 func (t fenceTargets) empty() bool { return len(t.Domains) == 0 && len(t.IPs) == 0 }
@@ -463,6 +467,7 @@ type fenceDecision struct {
 	Unauthorized fenceTargets // 其中未获授权的子集(审批/展示/登记只认它)
 	Allow        bool         // true=放行(已授权或无目标/无项目)
 	HardBlock    bool         // true=命中黑名单,直接阻断
+	Opaque       bool         // true=命令联网但对象不可静态确定,必须审批
 	Reason       string       // HardBlock 或 Ask 的说明
 }
 
@@ -487,15 +492,25 @@ func (f *AssetFence) evaluate(ctx context.Context, toolName string, input []byte
 	if strings.TrimSpace(cmd) == "" {
 		return fenceDecision{Allow: true}
 	}
-	targets := ExtractFenceTargets(cmd)
-	if targets.empty() {
-		return fenceDecision{Allow: true}
-	}
 	projectID := f.resolveProject(ctx)
 	if projectID <= 0 {
 		return fenceDecision{Allow: true}
 	}
+	// 按“命令对象”解析：已知命令取其目标操作数；解释器/未知命令若无法静态
+	// 确定对象则 Opaque，交给人工审批——不能因为没提取到字面目标就放行。
+	// shell_send 是往一个已经授权的交互会话里输入内容（密码/REPL 命令），
+	// 不能把任意一行都当新命令判 Opaque；只用字面目标提取兜住显式 URL/IP。
+	var targets fenceTargets
+	if toolName == "shell_send" {
+		targets = extractFenceTargetsLegacy(cmd)
+	} else {
+		targets = ExtractFenceTargetsWithDir(cmd, intercept.ReviewWorkingDirectory(ctx))
+	}
+	if targets.empty() && !targets.Opaque {
+		return fenceDecision{Allow: true}
+	}
 	// 黑名单(全局 ∪ 任务级 block)优先:命中即硬阻断,不给审批机会。
+	// Opaque 命令里已识别出的目标也要过黑名单（例如解释器代码里的 .gov 域名）。
 	blockRules, _ := f.dbh.ListAssetInterceptRules()
 	taskIDStr, _ := intercept.TaskInfoFromContext(ctx)
 	if taskID := parseTaskID(taskIDStr); taskID > 0 {
@@ -503,10 +518,18 @@ func (f *AssetFence) evaluate(ctx context.Context, toolName string, input []byte
 			blockRules = append(blockRules, tb...)
 		}
 	}
-	if rule, val, ok := db.MatchAssetInterceptRules(blockRules, targets.Domains, targets.IPs, nil); ok {
+	if !targets.empty() {
+		if rule, val, ok := db.MatchAssetInterceptRules(blockRules, targets.Domains, targets.IPs, nil); ok {
+			return fenceDecision{
+				ProjectID: projectID, Targets: targets, HardBlock: true,
+				Reason: fmt.Sprintf("%s(命中值 %s)", rule.Reason(), val),
+			}
+		}
+	}
+	if targets.Opaque {
 		return fenceDecision{
-			ProjectID: projectID, Targets: targets, HardBlock: true,
-			Reason: fmt.Sprintf("%s(命中值 %s)", rule.Reason(), val),
+			ProjectID: projectID, Targets: targets, Opaque: true,
+			Reason: targets.Reason,
 		}
 	}
 	if f.dbh.AuthorizedTarget(projectID, targets.Domains, targets.IPs) {

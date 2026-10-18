@@ -51,6 +51,15 @@ func WithReviewWorkingDirectory(ctx context.Context, workingDir string) context.
 	return context.WithValue(ctx, reviewContextKey{}, env)
 }
 
+// ReviewWorkingDirectory returns the explicitly bound agent working directory
+// (empty when none was bound). The asset fence uses it to read target-list /
+// config files (`nmap -iL`, `curl -K`, interpreter scripts) relative to the
+// task workspace instead of the server process CWD.
+func ReviewWorkingDirectory(ctx context.Context) string {
+	env, _ := ctx.Value(reviewContextKey{}).(reviewEnvironment)
+	return env.workingDir
+}
+
 func BuildReviewInput(ctx context.Context, tool string, arguments json.RawMessage) (ReviewInput, error) {
 	if !json.Valid(arguments) {
 		return ReviewInput{}, fmt.Errorf("工具参数不是有效 JSON")

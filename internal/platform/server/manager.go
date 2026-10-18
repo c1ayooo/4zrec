@@ -14,16 +14,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
-	pgdb "github.com/c1ayooo/4zrec/internal/domain/db"
 	"github.com/c1ayooo/4zrec/internal/capability/recon/enrich"
 	vulnfp "github.com/c1ayooo/4zrec/internal/capability/recon/fingerprint"
+	"github.com/c1ayooo/4zrec/internal/capability/vuln/vulnintel"
+	pgdb "github.com/c1ayooo/4zrec/internal/domain/db"
+	"github.com/c1ayooo/4zrec/internal/domain/traffic"
+	"github.com/c1ayooo/4zrec/internal/knowledge/vulnkb"
+	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
 	"github.com/c1ayooo/4zrec/internal/toolface/guard"
 	"github.com/c1ayooo/4zrec/internal/toolface/intercept"
 	actool "github.com/c1ayooo/4zrec/internal/toolface/tools"
-	"github.com/c1ayooo/4zrec/internal/domain/traffic"
-	"github.com/c1ayooo/4zrec/internal/capability/vuln/vulnintel"
-	"github.com/c1ayooo/4zrec/internal/knowledge/vulnkb"
 )
 
 // Task is one engagement: a description + goal + its own exploration store,
@@ -659,6 +659,24 @@ func (m *Manager) SetWebSearch(on bool, backend string, braveKey, tavilyKey, pro
 	return nil
 }
 
+// SetWebSearchProxy validates and persists the network-search egress proxy.
+// Callers must rebuild agents afterwards (the search tool holds the URL at build).
+func (m *Manager) SetWebSearchProxy(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw != "" {
+		if _, err := traffic.ValidateProxyURL(raw); err != nil {
+			return err
+		}
+	}
+	if err := m.pg.SetSetting(settingWebSearchProxy, raw); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.webSearchProxy = raw
+	m.mu.Unlock()
+	return nil
+}
+
 // browserMCPName is the seeded Playwright MCP whose proxy args + CA env are kept
 // in sync with the traffic-capture toggle.
 const browserMCPName = "browser"
@@ -806,6 +824,27 @@ func (m *Manager) GlobalProxy() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.globalProxy
+}
+
+// UpdateProxy returns the egress proxy used for platform self-update. When the
+// dedicated setting is absent, fall back to the global proxy (legacy behavior);
+// an explicitly empty value means direct.
+func (m *Manager) UpdateProxy() string {
+	if v, ok, _ := m.pg.GetSetting(settingUpdateProxy); ok {
+		return strings.TrimSpace(v)
+	}
+	return m.GlobalProxy()
+}
+
+// SetUpdateProxy validates and persists the platform self-update proxy.
+func (m *Manager) SetUpdateProxy(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw != "" {
+		if _, err := traffic.ValidateProxyURL(raw); err != nil {
+			return err
+		}
+	}
+	return m.pg.SetSetting(settingUpdateProxy, raw)
 }
 
 // SetGlobalProxy validates, persists and applies the global egress proxy

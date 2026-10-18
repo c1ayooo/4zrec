@@ -323,6 +323,7 @@ export default function TasksPage() {
   const [pageSize, setPageSize] = React.useState(20);
   const [nowSec, setNowSec] = React.useState(() => Math.floor(Date.now() / 1000));
   const [batchControlling, setBatchControlling] = React.useState<"pause" | "resume" | null>(null);
+  const [pauseAllOpen, setPauseAllOpen] = React.useState(false);
   const [movingCategory, setMovingCategory] = React.useState(false);
 
   React.useEffect(() => {
@@ -755,6 +756,29 @@ export default function TasksPage() {
     [batchControlling, load],
   );
 
+  const pauseAllTasks = React.useCallback(async () => {
+    if (batchControlling) return;
+    setBatchControlling("pause");
+    try {
+      const result = await api.pauseAllTasks();
+      const failed = result.items.filter((item) => !item.ok);
+      if (result.paused > 0) {
+        toast.success(`已暂停 ${result.paused} 个任务`);
+      } else {
+        toast.info("没有需要暂停的任务");
+      }
+      if (failed.length > 0) {
+        toast.error(`${failed.length} 个任务暂停失败`);
+      }
+      lastRef.current = "";
+      load();
+    } catch (error) {
+      toast.error(`全部暂停失败：${(error as Error).message}`);
+    } finally {
+      setBatchControlling(null);
+    }
+  }, [batchControlling, load]);
+
   // 后端把整批分类写入放在一个事务里，所以失败项只可能是勾选后又被删掉的任务。
   const moveSelectedTasksCategory = React.useCallback(
     async (categoryID?: number) => {
@@ -854,6 +878,37 @@ export default function TasksPage() {
               <span className="text-muted-foreground text-xs tabular-nums">
                 {filtered.length}/{tasks.length} 条
               </span>
+              <AlertDialog open={pauseAllOpen} onOpenChange={setPauseAllOpen}>
+                <AlertDialogTrigger asChild>
+                  <Button size="sm" variant="outline" disabled={batchControlling !== null}>
+                    {batchControlling === "pause" ? (
+                      <Spinner data-icon="inline-start" />
+                    ) : (
+                      <PauseIcon data-icon="inline-start" />
+                    )}
+                    全部暂停
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>暂停全部运行中的任务？</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      所有非终态任务会立即暂停，正在执行的 planner/worker 工具调用会被取消。之后可逐个继续。
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>取消</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => {
+                        setPauseAllOpen(false);
+                        void pauseAllTasks();
+                      }}
+                    >
+                      确认暂停
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
               {selectedIds.size > 0 && (
                 <>
                   <span className="text-xs tabular-nums">已选 {selectedIds.size} 个</span>

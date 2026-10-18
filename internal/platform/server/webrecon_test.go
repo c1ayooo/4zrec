@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c1ayooo/4zrec/internal/domain/db"
 	"github.com/c1ayooo/4zrec/internal/capability/web/webrecon"
+	"github.com/c1ayooo/4zrec/internal/domain/db"
 )
 
 // TestUnauthProbeTarget 未授权探测靶标:开放端点命中 + SPA 壳不误报 + 403 bypass。

@@ -50,12 +50,15 @@ func redactLines(in []string, dataDir string) []string {
 
 // FindingInput is one confirmed finding, flattened from a graph node.
 type FindingInput struct {
-	Name       string // specific finding title (single-finding export); empty = VulnClass
-	VulnClass  string
-	Severity   string // high|medium|low|critical|info
-	Summary    string
-	PoC        string
-	Target     string
+	Name      string // specific finding title (single-finding export); empty = VulnClass
+	VulnClass string
+	Severity  string // high|medium|low|critical|info
+	Summary   string
+	PoC       string
+	Target    string
+	// Status is the findings triage state (pending/fixed/...), used to render
+	// fix_status instead of always saying "待修复".
+	Status     string
 	Transcript string // real work transcript that produced this finding (tool calls/requests/responses/analysis); grounds enrichment in what actually happened instead of expanding the one-line summary. Empty = enrich from summary/PoC only.
 	// SetupContext holds the target's REAL account-registration / login / OTP / captcha
 	// request packets pulled from recorded traffic, so the 前置条件 can spell out
@@ -242,11 +245,11 @@ func BuildDoc(ctx context.Context, pg *db.DB, in *GenInput) *reportDoc {
 			sd.Vulns = append(sd.Vulns, detail)
 			remItems = append(remItems, remedyRow{
 				Idx: len(remItems) + 1, Object: vulnObject(loc, detail.Title, detail.Target),
-				Conclusion: statusPending(loc), Remark: statusRemarkFirst(loc),
+				Conclusion: fixStatus(loc, gf.f.Status), Remark: statusRemarkFirst(loc),
 			})
 			vlist = append(vlist, vulnListRow{
 				Severity: severityName(loc, gf.f.Severity), Name: detail.Title,
-				Desc: firstLine(detail.Description), Status: statusPending(loc),
+				Desc: firstLine(detail.Description), Status: fixStatus(loc, gf.f.Status),
 			})
 		}
 		doc.SystemsDetail = append(doc.SystemsDetail, sd)
@@ -266,7 +269,7 @@ func assembleVuln(loc string, f FindingInput, enr Enrichment, secNo, dataDir str
 	d := vulnDetail{
 		SecNo: secNo, Title: title,
 		Severity: severityName(loc, f.Severity), Target: target, URL: target,
-		FoundDate: f.CreatedAt.Format("2006-01-02"), FixStatus: statusPending(loc),
+		FoundDate: f.CreatedAt.Format("2006-01-02"), FixStatus: fixStatus(loc, f.Status),
 	}
 	if len(enr.Description) > 0 {
 		d.Description = enr.Description

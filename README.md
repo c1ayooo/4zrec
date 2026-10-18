@@ -69,7 +69,17 @@ cd 4zrec
 - **① 全部 Docker**：填一个 Postgres 密码（可回车随机）→ 自动写 `.env` → `docker compose up -d`。
 - **② 本地运行**：选数据库（连已有 / 用 Docker 起一个）→ 生成 `config.json` → `go` 编译内嵌单二进制 → 启动。
 
-装好后打开 **http://localhost:8787**（首次进入 `/setup` 设置管理员密码）。
+装好后打开 **http://localhost:8787**。
+
+> **首次启动会自动生成一个随机管理员密码，并只打印一次在后端日志里**（用户名默认 `4zrec`）。它和 `POSTGRES_PASSWORD` 不是同一个密码；请用日志里的密码登录，并立即在「修改密码」中更换。忘记密码可执行 `./reset-password.sh`。日志包含初始密码，后台运行时请确保 `4zrec.log` 仅本人可读（`chmod 600 4zrec.log`）。
+
+```bash
+# Docker：从容器日志中取首次启动的管理员密码
+docker compose logs 4zrec | grep '登录密码'
+
+# 本地运行：密码在启动终端里；后台运行时在 4zrec.log
+grep '登录密码' 4zrec.log
+```
 
 ### 方式二：Docker Compose（手动）
 
@@ -81,11 +91,12 @@ docker compose up -d          # 拉取 ghcr.io/c1ayooo/4zrec 镜像 + postgres
 # → http://localhost:8787
 ```
 
-镜像内已包含：
+镜像内已包含（nuclei 除外）：
 
 - **基础/网络**：`nmap`、`masscan`、`curl`、`wget`、`git`、`jq`、`ripgrep`、`dig`、`ping`、`nc`、`telnet`、`whois`、`ssh`、`psql`、`mysql`
-- **Web/漏洞**：`sqlmap`、`whatweb`、`ffuf`、`gobuster`、`feroxbuster`、`nuclei`（含模板）、`subfinder`、`httpx`、`dnsx`、`katana`、`naabu`、`amass`、`puredns`、`shuffledns`、`massdns`
-- **浏览器/报告**：Node 20、Playwright MCP/CLI、Chromium、Python 3.12、`python-docx`、Python Playwright
+- **Web/漏洞**：`sqlmap`、`whatweb`、`ffuf`、`gobuster`、`feroxbuster`、`subfinder`、`httpx`、`dnsx`、`katana`、`naabu`、`amass`、`puredns`、`shuffledns`、`massdns`
+- **nuclei（项目自带）**：镜像不预装 nuclei；首次使用 `nuclei_scan` 时由平台下载到 `data/nuclei/`（二进制 + 模板），并按设置自动更新，不写系统目录或用户 HOME。可在「系统设置 → nuclei 模板扫描」里开关、调整更新间隔/引导版本/扫描上限，并查看安装状态；模板在「功能 → 信息收集 → nuclei 模板」查看，官方只读、自定义可编辑（存放在 `data/nuclei/custom-templates/`）。
+- **浏览器/报告**：Node 20、Playwright MCP/CLI、js-reverse-mcp、Chromium、Python 3.12、`python-docx`、Python Playwright
 - **数据资产**：`configs/`（SaaS/CDN/成功信号规则与指纹种子）与 `vulnkb/`（1day 漏洞库）
 
 `./skills` 与 `./data` 以绑定挂载持久化；`configs/` 与 `vulnkb/` 已随镜像分发，需要自定义时也可以自行挂载覆盖。
@@ -95,9 +106,15 @@ docker compose up -d          # 拉取 ghcr.io/c1ayooo/4zrec 镜像 + postgres
 `/message?sessionId=...` 接收 JSON-RPC 请求；配置时将 URL 填为 `/sse`，请求头按
 `Authorization=Bearer <token>` 填写。
 
+内置 `browser`（Playwright，默认禁用）与 `js-reverse`（JS 逆向，默认启用）两个 MCP，均可在「系统设置 → MCP」开关。
+`js-reverse` 提供脚本搜索、XHR 断点、调用栈/作用域、暂停态求值、网络与 WebSocket 分析；
+容器内由 `scripts/js-reverse-mcp-4zrec.mjs` 启动无头 Chromium 并通过 CDP 接入，无需额外安装 Chrome 或 Xvfb。
+本地运行需 `npm install -g js-reverse-mcp@4.0.5`（Node >= 20.19），并确保 `scripts/js-reverse-mcp-4zrec.mjs`
+与可执行文件在同一安装根目录；Docker 镜像与 Release 包已包含该脚本。
+
 ### 方式三：下载预编译二进制（Releases）
 
-到 [Releases](https://github.com/c1ayooo/4zrec/releases) 下载对应平台的 zip，解压后得到 `4zrec` + `start.sh`（Windows 为 `start.bat`）+ `skills/` + `configs/` + `vulnkb/` + `config.example.json`：
+到 [Releases](https://github.com/c1ayooo/4zrec/releases) 下载对应平台的 zip，解压后得到 `4zrec` + `start.sh`（Windows 为 `start.bat`）+ `scripts/` + `skills/` + `configs/` + `vulnkb/` + `config.example.json`：
 
 ```bash
 cp config.example.json config.json   # 填好 database 连接
@@ -152,7 +169,7 @@ ZREC_TARGETS=linux/amd64,windows/amd64 ./build.sh --release
 - **更新会中断正在运行的任务**——更新即重启，请在空闲时进行。
 - **开发构建不给更新**：版本号是 `dev` 或 `git describe` 带后缀时禁用，避免正式版覆盖掉本地调试的二进制。
 - **Docker 下只换程序、不换镜像**：镜像里的 playwright / nmap 等工具链不会跟着升级，且 `docker compose up -d` 重建容器后会退回镜像自带的版本。要连镜像一起升级仍请用 `docker compose pull 4zrec && docker compose up -d 4zrec`。
-- 访问 GitHub 需要代理时，在同一页面配置**全局代理**即可，更新链路会走它。更新只从 GitHub 域名下载并强制 HTTPS。
+- 访问 GitHub 需要代理时，在「系统设置 → 代理库」保存代理后，为**平台更新**（以及需要出海的 nuclei / 网络搜索）分别选择它。平台更新未单独选择时沿用**全局代理**。更新只从 GitHub 域名下载并强制 HTTPS。
 
 ### 方式二：一键更新脚本
 

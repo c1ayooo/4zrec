@@ -93,3 +93,44 @@ PUT /public/x
 		t.Fatalf("scope should be deduped:\n%s", out)
 	}
 }
+
+// TestBuildSRCMarkdownFallback 守住两个交付底线：报告为空时不能静默丢漏洞，
+// 证据等级/处置状态/复测结论要出现在正文里。
+func TestFixStatusMapping(t *testing.T) {
+	for _, tc := range []struct {
+		locale, status, want string
+	}{
+		{"zh-CN", "fixed", "已修复"},
+		{"zh-CN", "resolved", "已处理"},
+		{"zh-CN", "pending", "待修复"},
+		{"en-US", "fixed", "Fixed"},
+		{"en-US", "resolved", "Resolved"},
+	} {
+		if got := fixStatus(tc.locale, tc.status); got != tc.want {
+			t.Fatalf("fixStatus(%q,%q) = %q, want %q", tc.locale, tc.status, got, tc.want)
+		}
+	}
+}
+
+func TestBuildSRCMarkdownFallback(t *testing.T) {
+	f := &db.DBFinding{
+		ID: 3, Name: "无报告但有证据", Severity: "medium",
+		Summary: "摘要说明", Evidence: "GET /api/x 返回 200 与业务数据",
+		Confidence: "partial", Status: "fixed", RetestVerdict: "fixed",
+	}
+	out := BuildSRCMarkdown([]*db.DBFinding{f}, "报告")
+	for _, want := range []string{
+		"摘要说明", "GET /api/x 返回 200", "证据等级：部分验证",
+		"处置状态：已修复", "复测结论：已修复",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in:\n%s", want, out)
+		}
+	}
+
+	empty := &db.DBFinding{ID: 4, Name: "完全空的漏洞", Severity: "low"}
+	out = BuildSRCMarkdown([]*db.DBFinding{empty}, "报告")
+	if !strings.Contains(out, "该漏洞未附详细报告与证据") {
+		t.Fatalf("empty finding should stay visible:\n%s", out)
+	}
+}

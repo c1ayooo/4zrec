@@ -140,8 +140,10 @@ func verifyRedis(ctx context.Context, in DBProbeInput) (*DBProbeResult, error) {
 		}
 		return string(buf[:n]), nil
 	}
-	// 有密码先 AUTH(用户名空=单密码模式)。
-	authed := true
+	// 有密码先 AUTH(用户名空=单密码模式)。没有密码时 authed 必须先为 false:
+	// 目标可能启用了 requirepass,此时 PING 返回 -NOAUTH,不能当成认证成功
+	// (否则空口令会被写进连接台账并标注"验证成功")。
+	authed := false
 	if in.Password != "" {
 		var authCmd = []string{"AUTH", in.Password}
 		if in.Username != "" {
@@ -158,8 +160,11 @@ func verifyRedis(ctx context.Context, in DBProbeInput) (*DBProbeResult, error) {
 	}
 	pong, err := send("PING")
 	if err != nil || !strings.HasPrefix(pong, "+PONG") {
-		return &DBProbeResult{Alive: true, Authed: authed, Detail: "PING 异常: " + strings.TrimSpace(pong)}, nil
+		return &DBProbeResult{Alive: true, Authed: false, Detail: "PING 异常: " + strings.TrimSpace(pong)}, nil
 	}
+	// PING 成功 = 当前凭据(含"无密码")可以执行命令。无密码且能 PING 通,
+	// 说明实例是未授权开放的,由调用方决定是否登记,但不应保存空口令凭据。
+	authed = true
 	info, _ := send("INFO", "server")
 	version := ""
 	for _, line := range strings.Split(info, "\n") {

@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +19,21 @@ import (
 
 	"github.com/c1ayooo/4zrec/internal/domain/db"
 )
+
+// sameOriginRequest rejects cross-origin WebSocket handshakes. Cookies
+// authenticate but do not assert origin; browsers always send Origin for WS, so
+// an empty Origin is only seen by non-browser clients.
+func sameOriginRequest(r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Host, r.Host)
+}
 
 type wsWriter struct {
 	mu     sync.Mutex
@@ -100,7 +117,7 @@ func (s *Server) serveSSHTerminal(w http.ResponseWriter, r *http.Request, c *db.
 	}
 	upgrader := websocket.Upgrader{
 		ReadBufferSize: 4096, WriteBufferSize: 4096, HandshakeTimeout: 10 * time.Second,
-		CheckOrigin: func(req *http.Request) bool { return true }, // 同源由 requireAuth cookie 把关
+		CheckOrigin: sameOriginRequest,
 	}
 	socket, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {

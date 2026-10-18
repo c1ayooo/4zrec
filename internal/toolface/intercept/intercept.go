@@ -150,6 +150,8 @@ var defaultEnabledTools = []string{
 	"Bash", "WebFetch", "web_search",
 	"shell_open", "shell_send",
 	"Write", "Edit", "MultiEdit",
+	"Read", "http_probe", "port_scan", "fingerprint_scan", "unauth_probe",
+	"credential_verify_db", "credential_verify_ssh",
 }
 
 // New creates an Interceptor backed by d. The rule cache is lazy-loaded on
@@ -235,22 +237,25 @@ func (i *Interceptor) rules() ([]compiledRule, error) {
 
 // IsToolEnabled returns true if the named tool is in the intercept-enabled set
 // (i.e. it should enter the rule-matching path). Uses the same double-check lock
-// pattern as rules().
-func (i *Interceptor) IsToolEnabled(name string) bool {
+// pattern as rules(). An error means the rule set could not be loaded and the
+// caller must fail closed rather than silently letting the call through.
+func (i *Interceptor) IsToolEnabled(name string) (bool, error) {
 	i.mu.RLock()
 	if i.enabledTools != nil {
 		v := i.enabledTools[name]
 		i.mu.RUnlock()
-		return v
+		return v, nil
 	}
 	i.mu.RUnlock()
 
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	if i.enabledTools == nil {
-		_ = i.loadLocked()
+		if err := i.loadLocked(); err != nil {
+			return false, err
+		}
 	}
-	return i.enabledTools[name]
+	return i.enabledTools[name], nil
 }
 
 // GetEnabledTools returns the ordered list of tool names that are currently
@@ -322,7 +327,7 @@ const (
 // Judge default values.
 const (
 	defaultJudgeTimeoutSecs      = 15
-	defaultJudgeFailAction       = "allow"
+	defaultJudgeFailAction       = "deny"
 	defaultJudgeAskTimeoutSecs   = 300
 	defaultJudgeAskTimeoutAction = "deny"
 )

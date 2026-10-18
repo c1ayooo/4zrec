@@ -331,3 +331,58 @@ func TestEvidenceGCGraceAndActiveRestore(t *testing.T) {
 		t.Fatal("accepted tampered snapshot")
 	}
 }
+
+// TestAutoBindTrafficFromEvidence 验证模型只在 evidence 里贴了请求、没回填
+// traffic_refs 时，平台按 method+host+path 自动绑定 http_probe 记录。
+func TestAutoBindTrafficFromEvidence(t *testing.T) {
+	s, in, _ := evidenceFixture(t)
+	ctx := context.Background()
+	now := time.Now().Unix()
+	_, err := s.Traffic.DB().Exec(`INSERT INTO exchanges(id,ts,host,method,url_template,url,status,content_type,req_len,resp_len,path)
+VALUES('auto1',?,'127.0.0.1','POST','/api/test/admin-register','http://127.0.0.1:19090/api/test/admin-register',200,'application/json',2,10,'/api/test/admin-register')`, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.Traffic.DB().Exec(`INSERT INTO exchange_bodies(id,req_head,req_body,resp_head,resp_body,resp_blob)
+VALUES('auto1','POST /api/test/admin-register HTTP/1.1\r\nHost: 127.0.0.1:19090\r\n','{}','HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n','{"code":0}',NULL)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.Evidence = "## 1. 未授权创建管理员账号\n```bash\ncurl -X POST http://127.0.0.1:19090/api/test/admin-register -H 'Content-Type: application/json' -d '{}'\n```\n```json\n{\"code\":0}\n```"
+	r, err := s.Record(ctx, in, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Traffic.Bindings) != 1 {
+		t.Fatalf("auto-bound bindings = %d, want 1 (%+v)", len(r.Traffic.Bindings), r.Traffic)
+	}
+	if got := r.Traffic.Bindings[0].Snapshot.SourceTrafficID; got != "auto1" {
+		t.Fatalf("bound traffic id = %q, want auto1", got)
+	}
+}
+
+// TestAutoBindTrafficFromRequestLine 覆盖模型证据里只写原始请求行
+// （POST /api/x + Host 头）的形态；host 从 Host 头恢复后按 method+path 绑定。
+func TestAutoBindTrafficFromRequestLine(t *testing.T) {
+	s, in, _ := evidenceFixture(t)
+	ctx := context.Background()
+	now := time.Now().Unix()
+	_, err := s.Traffic.DB().Exec(`INSERT INTO exchanges(id,ts,host,method,url_template,url,status,content_type,req_len,resp_len,path)
+VALUES('auto2',?,'127.0.0.1','POST','/api/test/admin-register','http://127.0.0.1:19090/api/test/admin-register',200,'application/json',2,10,'')`, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.Traffic.DB().Exec(`INSERT INTO exchange_bodies(id,req_head,req_body,resp_head,resp_body,resp_blob)
+VALUES('auto2','POST /api/test/admin-register HTTP/1.1\r\nHost: 127.0.0.1:19090\r\n','{}','HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n','{"code":0}',NULL)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.Evidence = "POST /api/test/admin-register HTTP/1.1\nHost: 127.0.0.1:19090\nContent-Type: application/json\n\n{\"username\":\"x\",\"password\":\"y\"}\n\nHTTP/1.1 200 OK\n{\"code\":0}"
+	r, err := s.Record(ctx, in, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Traffic.Bindings) != 1 || r.Traffic.Bindings[0].Snapshot.SourceTrafficID != "auto2" {
+		t.Fatalf("request-line auto-bind failed: %+v", r.Traffic)
+	}
+}

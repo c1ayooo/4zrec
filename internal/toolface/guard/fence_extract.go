@@ -13,9 +13,7 @@ package guard
 
 import (
 	"net"
-	"net/url"
 	"regexp"
-	"sort"
 	"strings"
 )
 
@@ -30,6 +28,33 @@ var connectionCommands = map[string]bool{
 	"redis-cli": true, "psql": true, "mysql": true, "mongo": true, "mongosh": true,
 	"telnet": true, "ftp": true, "http": true, "httpie": true, "socat": true,
 	"openssl": true, "msfconsole": true, "searchsploit": true,
+	"katana": true, "subfinder": true, "amass": true, "dnsx": true, "naabu": true,
+	"feroxbuster": true, "whatweb": true, "wpscan": true, "joomscan": true,
+	"dirsearch": true, "wfuzz": true, "arjun": true, "gau": true, "waybackurls": true,
+	"assetfinder": true, "chaos": true, "dnsgen": true,
+}
+
+// targetValueFlags 是“该旗标的值就是目标对象”的按命令覆盖表。它们必须优先于
+// 全局 valueFlags：例如 -u 对 curl 是凭据（跳过），对 sqlmap/katana 是目标 URL。
+var targetValueFlags = map[string]map[string]bool{
+	"katana":      {"-u": true, "-list": true},
+	"httpx":       {"-u": true, "-l": true, "--list": true},
+	"nuclei":      {"-u": true, "-l": true, "--list": true},
+	"feroxbuster": {"-u": true, "--url": true},
+	"ffuf":        {"-u": true},
+	"gobuster":    {"-u": true},
+	"nikto":       {"-h": true, "-host": true},
+	"sqlmap":      {"-u": true},
+	"subfinder":   {"-d": true, "-dL": true, "--domain-list": true},
+	"amass":       {"-d": true, "-df": true},
+	"dnsx":        {"-d": true, "-l": true},
+	"naabu":       {"-host": true, "-list": true},
+	"wpscan":      {"--url": true, "-u": true},
+	"joomscan":    {"-u": true},
+	"dirsearch":   {"-u": true, "--url": true},
+	"wfuzz":       {"-u": true, "--url": true},
+	"arjun":       {"-u": true, "--url": true},
+	"chaos":       {"-d": true},
 }
 
 // valueFlags 各命令中"取一个值"的旗标:其后的 token 是值不是位置参数。
@@ -103,137 +128,37 @@ func scanOpenSSLArgs(rest []string, addHost func(string)) {
 	}
 }
 
-
 // reDevTCP /dev/tcp|udp/host/port 重定向。
 var reDevTCP = regexp.MustCompile(`(?i)/dev/(?:tcp|udp)/([^/\s]+)/([0-9]{1,5})`)
 
 // reAssign 变量赋值(VAR=value),用于 $var 代入。
 var reAssign = regexp.MustCompile(`(?:^|[\s;|&(])([A-Za-z_][A-Za-z0-9_]*)=("[^"]*"|'[^']*'|[^\s;|&)]+)`)
 
-// ExtractFenceTargets 从工具输入文本提取围栏目标(命令感知)。
-func ExtractFenceTargets(text string) fenceTargets {
-	var t fenceTargets
-	seen := map[string]bool{}
-	addDomain := func(d string) {
-		d = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(d)), ".")
-		if d != "" && !seen["d:"+d] {
-			seen["d:"+d] = true
-			t.Domains = append(t.Domains, d)
-		}
-	}
-	addIP := func(ip string) {
-		if ip == "" || publicInfraIPs[ip] {
-			return
-		}
-		if !seen["i:"+ip] {
-			seen["i:"+ip] = true
-			t.IPs = append(t.IPs, ip)
-		}
-	}
+// extractFenceTargetsLegacy 从工具输入文本提取围栏目标（命令感知的旧实现）。
+// 公开入口见 fence_object.go 的 ExtractFenceTargetsWithDir：先走命令对象解析，
+// 再合并这里的字面目标提取，保持既有误报回归用例不变。
+func extractFenceTargetsLegacy(text string) fenceTargets {
 	vars := collectVars(text)
-	subst := func(s string) string { return substituteVars(s, vars) }
-	var addHost func(string)
-	addHost = func(raw string) { // 单个 host(可含端口/凭据/方括号)归类
-		raw = strings.Trim(subst(strings.TrimSpace(raw)), `"'`)
-		if raw == "" {
-			return
-		}
-		// 变量/引号尾巴截断(http://host$p → host;残缺则丢弃)
-		if i := strings.IndexAny(raw, "$`{}"); i >= 0 {
-			raw = strings.TrimSuffix(raw[:i], "/")
-			if strings.HasSuffix(raw, ".") || raw == "" {
-				return
-			}
-		}
-		// URL 形态
-		if strings.Contains(raw, "://") || strings.HasPrefix(raw, "//") {
-			u := raw
-			if strings.HasPrefix(u, "//") {
-				u = "http:" + u
-			}
-			if parsed, err := url.Parse(u); err == nil && parsed.Hostname() != "" {
-				addHost(parsed.Hostname())
-			}
-			return
-		}
-		// 无点 token:可疑 IP 变体(整数/十六进制)→IP;单段主机名(http://jira/)→域名。
-		if !strings.Contains(raw, ".") && !strings.Contains(raw, ":") {
-			if suspiciousIPVariant(raw) {
-				addIPVariant(raw, addIP)
-			} else if len(raw) > 1 && isSimpleHostLabel(raw) && !nonTargetSingleLabelHosts[strings.ToLower(raw)] {
-				addDomain(raw)
-			}
-			return
-		}
-		// host:port / user@host(:port) / host:port:...
-		raw = strings.TrimPrefix(raw, "@")
-		if i := strings.Index(raw, "@"); i >= 0 {
-			raw = raw[i+1:]
-		}
-		if h, _, err := net.SplitHostPort(raw); err == nil {
-			raw = h
-		} else if i := strings.LastIndexByte(raw, ':'); i > 0 && allDigits(raw[i+1:]) {
-			raw = raw[:i]
-		}
-		raw = strings.Trim(raw, "[]")
-		if raw == "" {
-			return
-		}
-		if ip := net.ParseIP(raw); ip != nil {
-			if ip.To4() != nil && validFenceIPv4(ip.String()) {
-				addIP(ip.String())
-			}
-			return
-		}
-		if validFenceIPv4(raw) {
-			addIP(raw)
-			return
-		}
-		// 可疑 IP 变体(整数/八进制/十六进制)
-		if suspiciousIPVariant(raw) {
-			addIPVariant(raw, addIP)
-			return
-		}
-		// CIDR
-		if _, ipnet, err := net.ParseCIDR(raw); err == nil {
-			if ipnet.IP.To4() != nil {
-				addIP(ipnet.IP.String())
-			}
-			return
-		}
-		if validFenceDomain(raw) {
-			addDomain(raw)
-			return
-		}
-	}
-
+	c := newFenceCollector(vars)
 	stripped := stripHeredocs(text)
 	// /dev/tcp 与 /dev/udp 重定向(含变量)。
 	for _, m := range reDevTCP.FindAllStringSubmatch(stripped, -1) {
-		addHost(m[1])
+		c.addHost(m[1])
 	}
 	// $(...) 与反引号命令替换:递归解析内部子命令(深度≤2)。
 	recurseSubstitutions(stripped, 0, func(inner string) {
-		sub := ExtractFenceTargetsDepth(inner, 1)
-		for _, d := range sub.Domains {
-			addDomain(d)
-		}
-		for _, ip := range sub.IPs {
-			addIP(ip)
-		}
+		c.merge(ExtractFenceTargetsDepth(inner, 1))
 	})
 	// 纯 URL 输入(WebFetch 等工具直接给 URL,无命令前缀)。
 	trimmed := strings.TrimSpace(stripped)
 	if strings.Contains(trimmed, "://") && !strings.ContainsAny(trimmed, " \n;|&") {
-		addHost(trimmed)
+		c.addHost(trimmed)
 	}
 	// 简单命令逐段解析。
 	for _, seg := range splitCommands(stripped) {
-		scanCommandSegment(seg, addHost, addDomain, addIP, vars)
+		scanCommandSegment(seg, c)
 	}
-	sort.Strings(t.Domains)
-	sort.Strings(t.IPs)
-	return t
+	return c.result()
 }
 
 // ExtractFenceTargetsDepth 供子命令替换递归使用(深度守卫)。
@@ -241,43 +166,48 @@ func ExtractFenceTargetsDepth(text string, depth int) fenceTargets {
 	if depth > 2 {
 		return fenceTargets{}
 	}
-	return ExtractFenceTargets(text)
+	return extractFenceTargetsLegacy(text)
 }
 
-// scanCommandSegment 解析单个简单命令段。
-func scanCommandSegment(seg string, addHost func(string), addDomain func(string), addIP func(string), vars map[string]string) {
+// scanCommandSegment 解析单个简单命令段：先剥包装，再只对真正的出网命令
+// 取目标操作数。
+func scanCommandSegment(seg string, c *fenceCollector) {
 	args := tokenize(seg)
 	if len(args) == 0 {
 		return
 	}
-	// 跳过前置变量赋值与 shell 关键字(for/do/then/else/! 等)。
-	shellKeywords := map[string]bool{"do": true, "then": true, "else": true, "!": true,
-		"time": true, "sudo": true, "env": true, "command": true, "nohup": true, "nice": true, "{": true}
-	i := 0
-	for i < len(args) {
-		if strings.Contains(args[i], "=") && !strings.HasPrefix(args[i], "-") {
-			i++
-			continue
-		}
-		if shellKeywords[strings.ToLower(args[i])] {
-			i++
-			continue
-		}
-		break
-	}
-	if i >= len(args) {
+	cmd, rest, inner, opaque, _ := peelCommand(args)
+	if opaque {
 		return
 	}
-	cmd := strings.ToLower(args[i])
-	if j := strings.LastIndexByte(cmd, '/'); j >= 0 {
-		cmd = cmd[j+1:]
-	}
-	if !connectionCommands[cmd] {
+	if inner != "" {
+		c.merge(extractFenceTargetsLegacy(inner))
 		return
 	}
-	rest := args[i+1:]
+	if cmd == "" || cmd == "__shell_script__" || !connectionCommands[cmd] {
+		return
+	}
+	scanCommandTargets(cmd, rest, c)
+}
+
+// scanCommandTargets 是已知出网命令的目标操作数扫描（旧 scanCommandSegment
+// 的主体，改用 collector）。
+func scanCommandTargets(cmd string, rest []string, c *fenceCollector) {
+	if cmd == "ssh" {
+		// ssh 只有第一个非旗标参数是目标主机；后面的参数是远程命令，
+		// 不是测试目标（远程命令联网由对象解析层判 Opaque）。
+		rest = skipFlagsWithValues(rest, map[string]bool{
+			"-p": true, "-i": true, "-o": true, "-l": true, "-F": true, "-J": true,
+			"-b": true, "-c": true, "-D": true, "-E": true, "-I": true, "-L": true,
+			"-m": true, "-O": true, "-Q": true, "-R": true, "-S": true, "-W": true, "-w": true,
+		})
+		if len(rest) > 0 {
+			c.addHost(rest[0])
+		}
+		return
+	}
 	if cmd == "openssl" {
-		scanOpenSSLArgs(rest, addHost)
+		scanOpenSSLArgs(rest, c.addHost)
 		return
 	}
 	// dig/host/nslookup 的位置参数里混着查询类型与类(CNAME/TXT/IN...),
@@ -297,7 +227,16 @@ func scanCommandSegment(seg string, addHost func(string), addDomain func(string)
 			case isDNSTypeOrClass(tok):
 				// 查询类型/类
 			default:
-				addHost(tok)
+				c.addHost(tok)
+			}
+			continue
+		}
+		// 按命令覆盖：某些旗标的值就是目标 URL/域名（-u 对 sqlmap/katana 等），
+		// 必须优先于全局 valueFlags（-u 对 curl 是凭据）。
+		if flags := targetValueFlags[cmd]; flags[tok] {
+			if k+1 < len(rest) {
+				k++
+				c.addHost(rest[k])
 			}
 			continue
 		}
@@ -307,9 +246,9 @@ func scanCommandSegment(seg string, addHost func(string), addDomain func(string)
 				k++
 				spec := rest[k]
 				if j := strings.IndexByte(spec, ':'); j > 0 {
-					addHost(spec[:j])
+					c.addHost(spec[:j])
 				} else {
-					addHost(spec)
+					c.addHost(spec)
 				}
 			}
 			continue
@@ -317,7 +256,7 @@ func scanCommandSegment(seg string, addHost func(string), addDomain func(string)
 		if urlValueFlags[tok] {
 			if k+1 < len(rest) {
 				k++
-				addHost(rest[k])
+				c.addHost(rest[k])
 			}
 			continue
 		}
@@ -332,7 +271,7 @@ func scanCommandSegment(seg string, addHost func(string), addDomain func(string)
 			continue // 旗标与 dig 的 +short 等选项
 		}
 		// 位置参数:host/URL/CIDR/域名。
-		addHost(tok)
+		c.addHost(tok)
 	}
 }
 

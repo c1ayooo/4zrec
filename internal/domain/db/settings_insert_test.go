@@ -44,3 +44,42 @@ func TestInsertSettingIfAbsentDoesNotOverwrite(t *testing.T) {
 		t.Fatalf("值被覆盖成 %q，应保持 %q", got, "first")
 	}
 }
+
+// InitSettingPair 用于首次初始化:密码(primary)插入成功才写用户名(secondary)。
+// 并发/重试时输掉竞争的一方不能改写管理员登录名。
+func TestInitSettingPairDoesNotWriteSecondaryOnConflict(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v)", err)
+	}
+	defer d.Close()
+
+	primary := fmt.Sprintf("test.init_pair.primary.%d", time.Now().UnixNano())
+	secondary := fmt.Sprintf("test.init_pair.secondary.%d", time.Now().UnixNano())
+	defer func() { _, _ = d.Exec(`DELETE FROM settings WHERE key IN ($1,$2)`, primary, secondary) }()
+
+	inserted, err := d.InitSettingPair(primary, "hash-1", secondary, "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inserted {
+		t.Fatal("first init should win")
+	}
+
+	inserted, err = d.InitSettingPair(primary, "hash-2", secondary, "user-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inserted {
+		t.Fatal("second init must lose")
+	}
+
+	gotPrimary, _, err := d.GetSetting(primary)
+	if err != nil || gotPrimary != "hash-1" {
+		t.Fatalf("primary=%q err=%v, want hash-1", gotPrimary, err)
+	}
+	gotSecondary, _, err := d.GetSetting(secondary)
+	if err != nil || gotSecondary != "user-1" {
+		t.Fatalf("secondary=%q err=%v, losing init overwrote the username", gotSecondary, err)
+	}
+}

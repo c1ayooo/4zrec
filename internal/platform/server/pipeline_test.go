@@ -13,8 +13,8 @@ import (
 
 	"github.com/miekg/dns"
 
-	"github.com/c1ayooo/4zrec/internal/domain/db"
 	"github.com/c1ayooo/4zrec/internal/capability/recon/pipeline"
+	"github.com/c1ayooo/4zrec/internal/domain/db"
 )
 
 // stubSelectiveDNS 只应答 known 里的名字(其余 NXDOMAIN)——避免泛解析,

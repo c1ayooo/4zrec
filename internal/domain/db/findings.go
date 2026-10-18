@@ -32,9 +32,15 @@ type DBFinding struct {
 	Reproduction    json.RawMessage // agent 就地记录的结构化复现过程(可空);null=无(走事后富化兜底)
 	AssetIDs        []int64
 	Status          string
+	Confidence      string // verified | partial | inferred
 	Report          string // 详细报告(Markdown);仅 GetFinding 填充,列表查询不带
 	CreatedAt       time.Time
 	TaskDescription string // populated via LEFT JOIN on tasks
+
+	// 最新一次已完成复测（仅 ListFindingsForExport 填充）。
+	RetestVerdict    string
+	RetestSummary    string
+	RetestFinishedAt *time.Time
 }
 
 // Finding triage states (findings.status).
@@ -55,6 +61,36 @@ func ValidFindingStatus(s string) bool {
 	switch s {
 	case FindingPending, FindingInProgress, FindingConfirmed, FindingResolved, FindingFixed,
 		FindingFalsePositive, FindingIgnored, FindingDuplicate, FindingRiskAccepted:
+		return true
+	}
+	return false
+}
+
+// Finding confidence levels (findings.confidence). Confidence is a server-side
+// evidence-depth label, not a model self-assessment: report_finding only accepts
+// verified when a structured reproduction or bound traffic evidence is present.
+const (
+	ConfidenceVerified = "verified" // 端到端验证，有可复现证据
+	ConfidencePartial  = "partial"  // 部分验证，证据未闭环
+	ConfidenceInferred = "inferred" // 推断/嫌疑，尚无直接证据
+)
+
+// NormalizeFindingConfidence coerces an input label to a known value.
+func NormalizeFindingConfidence(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case ConfidenceVerified:
+		return ConfidenceVerified
+	case ConfidencePartial:
+		return ConfidencePartial
+	default:
+		return ConfidenceInferred
+	}
+}
+
+// ValidFindingConfidence reports whether s is a known confidence level.
+func ValidFindingConfidence(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case ConfidenceVerified, ConfidencePartial, ConfidenceInferred:
 		return true
 	}
 	return false
@@ -93,6 +129,53 @@ func SeverityRank(s string) int {
 	return 0
 }
 
+// SeverityFloor returns a deterministic minimum severity for unambiguous,
+// high-impact evidence patterns. It exists because the reporter model can be
+// overly conservative: an unauthenticated admin takeover or a complete plaintext
+// DB/Redis credential leak must not be talked down to "high/medium" just because
+// no server shell or business-data query was attached.
+//
+// The patterns are intentionally narrow; anything ambiguous returns "".
+func SeverityFloor(vulnclass, name, summary, evidence string) string {
+	text := strings.ToLower(strings.Join([]string{vulnclass, name, summary}, " "))
+	ev := strings.ToLower(evidence)
+	unauth := strings.Contains(text, "未授权") ||
+		strings.Contains(text, "unauth") ||
+		strings.Contains(text, "without auth") ||
+		strings.Contains(text, "no auth") ||
+		strings.Contains(text, "匿名")
+	adminAccount := strings.Contains(text, "管理员账号") ||
+		strings.Contains(text, "管理员会话") ||
+		strings.Contains(text, "admin账号") ||
+		strings.Contains(text, "admin 账号") ||
+		strings.Contains(text, "admin-register") ||
+		strings.Contains(text, "role_code=admin") ||
+		(strings.Contains(ev, "role_code") && strings.Contains(ev, "admin"))
+	takeover := strings.Contains(text, "创建") || strings.Contains(text, "注册") ||
+		strings.Contains(text, "接管") || strings.Contains(text, "登录") ||
+		strings.Contains(text, "token")
+	if unauth && adminAccount && takeover {
+		return SeverityCritical
+	}
+
+	// 完整明文凭据泄露：至少两类密钥 + 数据库 root 用户 + 明确的泄露语义。
+	// 只泄露单项或值被脱敏时不计入下限。
+	families := 0
+	for _, key := range []string{"mysql_password", "redis_password", "mail_password", "wechat_secret"} {
+		if strings.Contains(ev, key) {
+			families++
+		}
+	}
+	leak := strings.Contains(text, "泄露") || strings.Contains(text, "泄漏") || strings.Contains(text, "leak")
+	if leak && families >= 2 && (strings.Contains(ev, "mysql_user") || strings.Contains(ev, "root")) {
+		return SeverityCritical
+	}
+	if leak && families >= 1 {
+		return SeverityHigh
+	}
+	return ""
+}
+
 // AddFinding inserts a finding into the standalone findings table. taskID and
 // nodeID may be 0 (stored as NULL). name may be "" (frontend falls back to
 // vulnclass). Returns the new finding id.
@@ -122,7 +205,25 @@ func (d *DB) AddFinding(taskID, nodeID int64, vulnclass, name, severity, summary
 const findingSelectCols = `f.id, f.task_id, f.node_id, f.vulnclass, COALESCE(f.name, ''), f.severity, f.summary,
 	       f.evidence, f.worker, f.asset_ids, COALESCE(f.status, 'pending'), f.created_at,
 	       COALESCE(t.description, '') AS task_description, f.evidence_version, f.report_evidence_version,
- (SELECT count(*) FROM finding_traffic_bindings b WHERE b.finding_id=f.id)`
+ (SELECT count(*) FROM finding_traffic_bindings b WHERE b.finding_id=f.id),
+ COALESCE(f.confidence, 'inferred')`
+
+// scanFinding materializes one row selected via findingSelectCols.
+func scanFinding(row interface{ Scan(...any) error }) (*DBFinding, error) {
+	f := &DBFinding{}
+	var aidsJSON string
+	if err := row.Scan(&f.ID, &f.TaskID, &f.NodeID, &f.VulnClass, &f.Name, &f.Severity,
+		&f.Summary, &f.Evidence, &f.Worker, &aidsJSON, &f.Status, &f.CreatedAt,
+		&f.TaskDescription, &f.EvidenceVersion, &f.ReportEvidenceVersion, &f.TrafficCount,
+		&f.Confidence); err != nil {
+		return nil, err
+	}
+	_ = json.Unmarshal([]byte(aidsJSON), &f.AssetIDs)
+	if f.Confidence == "" {
+		f.Confidence = ConfidenceInferred
+	}
+	return f, nil
+}
 
 // scanFindings materializes rows selected via findingSelectCols.
 func scanFindings(rows interface {
@@ -132,13 +233,10 @@ func scanFindings(rows interface {
 }) ([]*DBFinding, error) {
 	var out []*DBFinding
 	for rows.Next() {
-		f := &DBFinding{}
-		var aidsJSON string
-		if err := rows.Scan(&f.ID, &f.TaskID, &f.NodeID, &f.VulnClass, &f.Name, &f.Severity,
-			&f.Summary, &f.Evidence, &f.Worker, &aidsJSON, &f.Status, &f.CreatedAt, &f.TaskDescription, &f.EvidenceVersion, &f.ReportEvidenceVersion, &f.TrafficCount); err != nil {
+		f, err := scanFinding(rows)
+		if err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal([]byte(aidsJSON), &f.AssetIDs)
 		out = append(out, f)
 	}
 	return out, rows.Err()
@@ -496,7 +594,14 @@ RETURNING id, created_at`, s.expID, audit.NodeID, utf8Clean(audit.Worker), utf8C
 // 再按时间倒序,与「导出汇总报告」的分组顺序一致。
 func (d *DB) ListFindingsForExport(f FindingFilter, ids []int64) ([]*DBFinding, error) {
 	const order = `ORDER BY CASE f.severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END DESC, f.created_at DESC`
-	cols := findingSelectCols + `, COALESCE(f.report, '')`
+	cols := findingSelectCols + `, COALESCE(f.report, ''),
+ COALESCE(r.verdict, ''), COALESCE(r.summary, ''), r.finished_at`
+	latestRetest := `
+			LEFT JOIN LATERAL (
+				SELECT verdict, summary, finished_at FROM finding_retests
+				WHERE finding_id = f.id AND status = 'completed'
+				ORDER BY id DESC LIMIT 1
+			) r ON TRUE`
 
 	var q string
 	var args []any
@@ -508,7 +613,7 @@ func (d *DB) ListFindingsForExport(f FindingFilter, ids []int64) ([]*DBFinding, 
 		}
 		q = `SELECT ` + cols + `
 			FROM findings f
-			LEFT JOIN tasks t ON f.task_id = t.id
+			LEFT JOIN tasks t ON f.task_id = t.id` + latestRetest + `
 			WHERE f.id IN (` + strings.Join(ph, ",") + `)
 			` + order
 	} else {
@@ -517,9 +622,19 @@ func (d *DB) ListFindingsForExport(f FindingFilter, ids []int64) ([]*DBFinding, 
 			return nil, err
 		}
 		where, wargs := scoped.where()
+		// 汇总导出默认不把误报/忽略/重复算进报告；显式按状态筛选(false_positive 等)
+		// 时尊重用户意图，不再二次过滤。
+		if strings.TrimSpace(f.Status) == "" {
+			cond := "COALESCE(f.status,'pending') NOT IN ('false_positive','ignored','duplicate')"
+			if where == "" {
+				where = " WHERE " + cond
+			} else {
+				where += " AND " + cond
+			}
+		}
 		q = `SELECT ` + cols + `
 			FROM findings f
-			LEFT JOIN tasks t ON f.task_id = t.id` + where + `
+			LEFT JOIN tasks t ON f.task_id = t.id` + latestRetest + where + `
 			` + order
 		args = wargs
 	}
@@ -534,12 +649,21 @@ func (d *DB) ListFindingsForExport(f FindingFilter, ids []int64) ([]*DBFinding, 
 	for rows.Next() {
 		f := &DBFinding{}
 		var aidsJSON string
+		var retestAt sql.NullTime
 		if err := rows.Scan(&f.ID, &f.TaskID, &f.NodeID, &f.VulnClass, &f.Name, &f.Severity,
 			&f.Summary, &f.Evidence, &f.Worker, &aidsJSON, &f.Status, &f.CreatedAt,
-			&f.TaskDescription, &f.EvidenceVersion, &f.ReportEvidenceVersion, &f.TrafficCount, &f.Report); err != nil {
+			&f.TaskDescription, &f.EvidenceVersion, &f.ReportEvidenceVersion, &f.TrafficCount,
+			&f.Confidence, &f.Report, &f.RetestVerdict, &f.RetestSummary, &retestAt); err != nil {
 			return nil, err
 		}
+		if retestAt.Valid {
+			t := retestAt.Time
+			f.RetestFinishedAt = &t
+		}
 		_ = json.Unmarshal([]byte(aidsJSON), &f.AssetIDs)
+		if f.Confidence == "" {
+			f.Confidence = ConfidenceInferred
+		}
 		out = append(out, f)
 	}
 	return out, rows.Err()
@@ -574,6 +698,8 @@ type FindingTaskOption struct {
 // set of distinct vuln classes.
 func (d *DB) FindingStats() (*FindingStats, error) {
 	st := &FindingStats{VulnClasses: []string{}, Tasks: []FindingTaskOption{}}
+	// 误报/忽略/重复不是有效战果：统计、漏洞类型下拉和任务下拉都不计入。
+	const countable = `COALESCE(status, 'pending') NOT IN ('false_positive','ignored','duplicate')`
 	err := d.QueryRow(`SELECT
 		COUNT(*),
 		COUNT(*) FILTER (WHERE status = 'pending'),
@@ -581,11 +707,11 @@ func (d *DB) FindingStats() (*FindingStats, error) {
 		COUNT(*) FILTER (WHERE severity = 'high'),
 		COUNT(*) FILTER (WHERE severity = 'medium'),
 		COUNT(*) FILTER (WHERE severity = 'low')
-		FROM findings`).Scan(&st.Total, &st.Pending, &st.Critical, &st.High, &st.Medium, &st.Low)
+		FROM findings WHERE `+countable).Scan(&st.Total, &st.Pending, &st.Critical, &st.High, &st.Medium, &st.Low)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := d.Query(`SELECT DISTINCT vulnclass FROM findings WHERE vulnclass <> '' ORDER BY vulnclass`)
+	rows, err := d.Query(`SELECT DISTINCT vulnclass FROM findings WHERE vulnclass <> '' AND ` + countable + ` ORDER BY vulnclass`)
 	if err != nil {
 		return nil, err
 	}
@@ -605,7 +731,7 @@ func (d *DB) FindingStats() (*FindingStats, error) {
 	trows, err := d.Query(`SELECT f.task_id, COALESCE(t.name, ''), COALESCE(t.description, ''), COUNT(*)
 		FROM findings f
 		LEFT JOIN tasks t ON f.task_id = t.id
-		WHERE f.task_id IS NOT NULL
+		WHERE f.task_id IS NOT NULL AND COALESCE(f.status, 'pending') NOT IN ('false_positive','ignored','duplicate')
 		GROUP BY f.task_id, t.name, t.description
 		ORDER BY MAX(f.created_at) DESC`)
 	if err != nil {
@@ -666,7 +792,8 @@ func (d *DB) GetFinding(id int64) (*DBFinding, error) {
 		WHERE f.id = $1`, id).Scan(
 		&f.ID, &f.TaskID, &f.NodeID, &f.VulnClass, &f.Name, &f.Severity,
 		&f.Summary, &f.Evidence, &f.Worker, &aidsJSON, &f.Status, &f.CreatedAt,
-		&f.TaskDescription, &f.EvidenceVersion, &f.ReportEvidenceVersion, &f.TrafficCount, &f.Report, &repro)
+		&f.TaskDescription, &f.EvidenceVersion, &f.ReportEvidenceVersion, &f.TrafficCount,
+		&f.Confidence, &f.Report, &repro)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -841,10 +968,10 @@ func (d *DB) GetFindingByNodeID(nodeID int64) (*DBFinding, error) {
 	var taskID, nid sql.NullInt64
 	var repro []byte
 	err := d.QueryRow(`SELECT id, task_id, node_id, vulnclass, name, severity, summary,
-	       evidence, report, worker, status, created_at, reproduction
+	       evidence, report, worker, status, COALESCE(confidence,'inferred'), created_at, reproduction
 	FROM findings WHERE node_id = $1 LIMIT 1`, nodeID,
 	).Scan(&f.ID, &taskID, &nid, &f.VulnClass, &f.Name, &f.Severity, &f.Summary,
-		&f.Evidence, &f.Report, &f.Worker, &f.Status, &f.CreatedAt, &repro)
+		&f.Evidence, &f.Report, &f.Worker, &f.Status, &f.Confidence, &f.CreatedAt, &repro)
 	if repro != nil {
 		f.Reproduction = json.RawMessage(repro)
 	}
@@ -860,6 +987,52 @@ func (d *DB) GetFindingByNodeID(nodeID int64) (*DBFinding, error) {
 		f.NodeID = &n
 	}
 	return &f, nil
+}
+
+// FindDuplicateFinding returns an existing finding in the same task with the same
+// normalized vulnclass/title and the same asset set. It is deliberately
+// conservative: only exact normalized matches dedupe; semantically similar but
+// differently named findings still create separate rows.
+func (s *ExplorationStore) FindDuplicateFinding(ctx context.Context, vulnclass, name, summary string, assetIDs []int64) (*DBFinding, error) {
+	taskID, err := s.TaskID()
+	if err != nil || taskID <= 0 {
+		return nil, err
+	}
+	title := strings.TrimSpace(name)
+	if title == "" {
+		title = strings.TrimSpace(summary)
+	}
+	vulnclass = strings.TrimSpace(vulnclass)
+	if vulnclass == "" || title == "" {
+		return nil, nil
+	}
+	ids := append([]int64(nil), assetIDs...)
+	if ids == nil {
+		ids = []int64{}
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	uniq := ids[:0]
+	for i, id := range ids {
+		if i == 0 || id != ids[i-1] {
+			uniq = append(uniq, id)
+		}
+	}
+	ids = uniq
+	raw, _ := json.Marshal(ids)
+	row := s.db.QueryRowContext(ctx, `SELECT `+findingSelectCols+`
+		FROM findings f
+		LEFT JOIN tasks t ON f.task_id = t.id
+		WHERE f.task_id = $1
+		  AND lower(btrim(f.vulnclass)) = lower(btrim($2))
+		  AND lower(btrim(COALESCE(NULLIF(f.name, ''), f.summary))) = lower(btrim($3))
+		  AND f.asset_ids = $4::jsonb
+		  AND COALESCE(f.status, 'pending') NOT IN ('false_positive','ignored','duplicate')
+		ORDER BY f.id DESC LIMIT 1`, taskID, vulnclass, title, string(raw))
+	f, err := scanFinding(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return f, err
 }
 
 // SetFindingReproduction stores the agent-captured structured reproduction recipe

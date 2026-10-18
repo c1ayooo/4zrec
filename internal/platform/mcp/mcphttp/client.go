@@ -203,6 +203,19 @@ func readSSEEndpoint(r *bufio.Reader, base string) (string, error) {
 			}
 			candidate = b.ResolveReference(u).String()
 		}
+		// The server must not redirect the authenticated JSON-RPC channel (which
+		// carries Authorization headers) to a different origin.
+		baseURL, err := url.Parse(base)
+		if err != nil {
+			return "", err
+		}
+		endpoint, err := url.Parse(candidate)
+		if err != nil {
+			return "", fmt.Errorf("mcp sse endpoint URL: %w", err)
+		}
+		if !strings.EqualFold(endpoint.Scheme, baseURL.Scheme) || !strings.EqualFold(endpoint.Host, baseURL.Host) {
+			return "", fmt.Errorf("mcp sse endpoint %q is not same-origin with %q", candidate, base)
+		}
 		return candidate, nil
 	}
 }

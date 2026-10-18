@@ -1057,7 +1057,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   // ── auth：让 demo 直接进主界面 ──
   if (path === "/auth/status") return { initialized: true };
   if (path === "/auth/login" || path === "/auth/init") return { token: "mock-demo" };
-  if (path === "/auth/change-password") return { ok: true };
+  if (path === "/auth/change-password") return { ok: true, token: "mock-demo" };
 
   // ── task cold archives ──
   if (path === "/task-archives" && m === "GET") {
@@ -2218,6 +2218,123 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   if (path === "/traffic/hosts") return { hosts: D.trafficHosts };
   if (path === "/traffic") return D.traffic;
   if (path === "/traffic/exchange") return D.trafficDetail;
+  if (path === "/nuclei/status")
+    return {
+      root: "/data/nuclei",
+      binary_path: "/data/nuclei/bin/nuclei",
+      binary_exists: true,
+      binary_version: "Nuclei Engine Version: v3.11.1",
+      templates_dir: "/data/nuclei/templates",
+      custom_templates_dir: "/data/nuclei/custom-templates",
+      templates_exists: true,
+      custom_templates_exists: true,
+      template_count: 14391,
+      custom_template_count: 1,
+      version_setting: "3.11.1",
+      auto_update: true,
+      update_interval_hours: 24,
+      last_update: new Date().toISOString(),
+      interactsh: false,
+    };
+  if (path === "/nuclei/templates" && m === "GET")
+    return {
+      items: [
+        {
+          id: "CVE-2024-0001",
+          name: "Demo Product RCE",
+          severity: "critical",
+          tags: ["demo", "rce"],
+          cve: ["CVE-2024-0001"],
+          type: "http",
+          path: "http/cve-2024-0001.yaml",
+          source: "official",
+        },
+      ],
+      total: 1,
+      page: 1,
+      size: 20,
+    };
+  if (path === "/nuclei/templates" && m === "POST")
+    return {
+      id: "custom-check",
+      name: "Custom Check",
+      severity: "info",
+      tags: ["custom"],
+      type: "http",
+      path: "custom-check.yaml",
+      source: "custom",
+    };
+  if (path === "/nuclei/templates/validate")
+    return {
+      ok: true,
+      meta: {
+        id: "custom-check",
+        name: "Custom Check",
+        severity: "info",
+        tags: ["custom"],
+        type: "http",
+        path: "custom-check.yaml",
+        source: "custom",
+      },
+    };
+  if (path.startsWith("/nuclei/templates/") && m === "GET")
+    return {
+      meta: {
+        id: seg[2] ?? "CVE-2024-0001",
+        name: "Demo Product RCE",
+        severity: "critical",
+        tags: ["demo", "rce"],
+        cve: ["CVE-2024-0001"],
+        type: "http",
+        path: "http/cve-2024-0001.yaml",
+        source: "official",
+      },
+      content:
+        'id: CVE-2024-0001\ninfo:\n  name: Demo Product RCE\n  severity: critical\nhttp:\n  - method: GET\n    path:\n      - "{{BaseURL}}/"\n',
+      editable: false,
+    };
+  if (path.startsWith("/nuclei/templates/") && m === "PUT")
+    return {
+      id: decodeURIComponent(seg[2] ?? "custom-check"),
+      name: "Custom Check",
+      severity: "info",
+      tags: ["custom"],
+      type: "http",
+      path: `${decodeURIComponent(seg[2] ?? "custom-check")}.yaml`,
+      source: "custom",
+    };
+  if (path.startsWith("/nuclei/templates/") && m === "DELETE") return { ok: true };
+  if (path === "/nuclei/update" && m === "POST")
+    return { running: true, phase: "下载 nuclei 二进制", percent: 20, started_at: new Date().toISOString() };
+  if (path === "/nuclei/update/status")
+    return {
+      running: false,
+      phase: "完成",
+      percent: 100,
+      finished_at: new Date().toISOString(),
+      result: { template_count: 14391, custom_template_count: 1 },
+    };
+  if (path === "/proxy-profiles" && m === "GET")
+    return {
+      profiles: D.settings.proxy_profiles ?? [],
+      selections: D.settings.proxy_selections ?? { global: "", web_search: "", nuclei: "", update: "" },
+      urls: D.settings.proxy_urls ?? { global: "", web_search: "", nuclei: "", update: "" },
+    };
+  if (path === "/proxy-profiles" && m === "POST")
+    return { id: "p-mock", name: String(b.name ?? ""), url: String(b.url ?? ""), note: String(b.note ?? "") };
+  if (path === "/proxy-profiles/test") return { ok: true, status: 200, elapsed_ms: 120 };
+  if (path === "/proxy-profiles/selection" && m === "PUT")
+    return {
+      profiles: D.settings.proxy_profiles ?? [],
+      selections: {
+        ...(D.settings.proxy_selections ?? { global: "", web_search: "", nuclei: "", update: "" }),
+        [String(b.slot ?? "")]: String(b.profile_id ?? ""),
+      },
+      urls: D.settings.proxy_urls ?? { global: "", web_search: "", nuclei: "", update: "" },
+    };
+  if (path.startsWith("/proxy-profiles/") && m === "PUT")
+    return { id: seg[1] ?? "p-mock", name: String(b.name ?? ""), url: String(b.url ?? ""), note: String(b.note ?? "") };
+  if (path.startsWith("/proxy-profiles/") && m === "DELETE") return { ok: true };
   if (path === "/settings" && m === "GET") return D.settings;
   if (path === "/settings" && m === "PUT") return { ...D.settings, ...b };
   if (path === "/settings/web-search/test") return { ok: true, count: 5, backend: D.settings.web_search_backend };
@@ -2383,19 +2500,73 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   if (path === "/spacemap/engines" && m === "GET")
     return {
       engines: [
-        { provider: "fofa", display: "FOFA", configured: true, key_masked: "abcd******yz", from_env: false, base_url: "", default_query: 'domain="{d}"' },
-        { provider: "zoomeye", display: "ZoomEye", configured: false, key_masked: "", from_env: false, base_url: "", default_query: 'domain="{d}"' },
-        { provider: "quake", display: "Quake", configured: false, key_masked: "", from_env: false, base_url: "", default_query: 'domain:"{d}"' },
-        { provider: "shodan", display: "Shodan", configured: false, key_masked: "", from_env: false, base_url: "", default_query: "hostname:{d}" },
-        { provider: "hunter", display: "Hunter", configured: false, key_masked: "", from_env: false, base_url: "", default_query: 'domain.suffix="{d}"' },
+        {
+          provider: "fofa",
+          display: "FOFA",
+          configured: true,
+          key_masked: "abcd******yz",
+          from_env: false,
+          base_url: "",
+          default_query: 'domain="{d}"',
+        },
+        {
+          provider: "zoomeye",
+          display: "ZoomEye",
+          configured: false,
+          key_masked: "",
+          from_env: false,
+          base_url: "",
+          default_query: 'domain="{d}"',
+        },
+        {
+          provider: "quake",
+          display: "Quake",
+          configured: false,
+          key_masked: "",
+          from_env: false,
+          base_url: "",
+          default_query: 'domain:"{d}"',
+        },
+        {
+          provider: "shodan",
+          display: "Shodan",
+          configured: false,
+          key_masked: "",
+          from_env: false,
+          base_url: "",
+          default_query: "hostname:{d}",
+        },
+        {
+          provider: "hunter",
+          display: "Hunter",
+          configured: false,
+          key_masked: "",
+          from_env: false,
+          base_url: "",
+          default_query: 'domain.suffix="{d}"',
+        },
       ],
     };
   if (path === "/spacemap/engines" && m === "POST") return { engines: [] };
   if (path === "/spacemap/intelkeys" && m === "GET")
     return {
       keys: [
-        { key: "virustotal.key", label: "VirusTotal", env: "VT_API_KEY", from_env: false, configured: false, masked: "" },
-        { key: "githubsearch.token", label: "GitHub", env: "GITHUB_TOKEN", from_env: false, configured: false, masked: "" },
+        {
+          key: "virustotal.key",
+          label: "VirusTotal",
+          env: "VT_API_KEY",
+          from_env: false,
+          configured: false,
+          masked: "",
+        },
+        {
+          key: "githubsearch.token",
+          label: "GitHub",
+          env: "GITHUB_TOKEN",
+          from_env: false,
+          configured: false,
+          masked: "",
+        },
       ],
     };
   if (path === "/spacemap/intelkeys" && m === "POST") return { keys: [] };
@@ -2405,13 +2576,28 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     return {
       runs: [
         {
-          id: 21, schedule_id: 1, domains: ["example.com"], config: null, status: "done", stage: "http",
+          id: 21,
+          schedule_id: 1,
+          domains: ["example.com"],
+          config: null,
+          status: "done",
+          stage: "http",
           stats: { candidates: 42, live: 31, new_assets: 2, open_ports: 57, http_alive: 23 },
-          error: "", created_at: "2026-10-16T12:00:00Z", finished_at: "2026-10-16T12:03:41Z",
+          error: "",
+          created_at: "2026-10-16T12:00:00Z",
+          finished_at: "2026-10-16T12:03:41Z",
         },
         {
-          id: 20, schedule_id: 1, domains: ["example.com"], config: null, status: "failed", stage: "interrupted",
-          stats: null, error: "context canceled", created_at: "2026-10-16T11:30:00Z", finished_at: "2026-10-16T11:31:02Z",
+          id: 20,
+          schedule_id: 1,
+          domains: ["example.com"],
+          config: null,
+          status: "failed",
+          stage: "interrupted",
+          stats: null,
+          error: "context canceled",
+          created_at: "2026-10-16T11:30:00Z",
+          finished_at: "2026-10-16T11:31:02Z",
         },
       ],
     };
@@ -2420,14 +2606,45 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   if (path === "/fingerprint/rules")
     return {
       rules: [
-        { id: "w1", name: "Nginx", category: "server", expression: "header:server~nginx", source: "webanalyze", enabled: true },
-        { id: "w2", name: "Spring Boot", category: "framework", expression: "body~actuator|body~Whitelabel Error", source: "dddd", enabled: true },
+        {
+          id: "w1",
+          name: "Nginx",
+          category: "server",
+          expression: "header:server~nginx",
+          source: "webanalyze",
+          enabled: true,
+        },
+        {
+          id: "w2",
+          name: "Spring Boot",
+          category: "framework",
+          expression: "body~actuator|body~Whitelabel Error",
+          source: "dddd",
+          enabled: true,
+        },
       ],
-      total: 2, page: 1, enabled: 15832,
+      total: 2,
+      page: 1,
+      enabled: 15832,
       sources: [
-        { name: "webanalyze", upstream_url: "https://raw…/technologies.json", rule_count: 6120, fetched_at: "2026-10-17T06:00:00Z" },
-        { name: "wappalyzergo", upstream_url: "https://raw…/fingerprints.json", rule_count: 5010, fetched_at: "2026-10-17T06:00:00Z" },
-        { name: "dddd", upstream_url: "https://raw…/finger.yaml", rule_count: 4700, fetched_at: "2026-10-17T06:00:00Z" },
+        {
+          name: "webanalyze",
+          upstream_url: "https://raw…/technologies.json",
+          rule_count: 6120,
+          fetched_at: "2026-10-17T06:00:00Z",
+        },
+        {
+          name: "wappalyzergo",
+          upstream_url: "https://raw…/fingerprints.json",
+          rule_count: 5010,
+          fetched_at: "2026-10-17T06:00:00Z",
+        },
+        {
+          name: "dddd",
+          upstream_url: "https://raw…/finger.yaml",
+          rule_count: 4700,
+          fetched_at: "2026-10-17T06:00:00Z",
+        },
       ],
     };
 
@@ -2438,12 +2655,38 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   if (path === "/connections" && m === "GET")
     return {
       connections: [
-        { id: 1, project_id: 3, project_name: "示例集团", kind: "ssh", host: "10.1.2.3", port: 22,
-          username: "root", secret: "P@ssw0rd", extra: null, source: "discovered", status: "alive",
-          note: "credential_verify_ssh 验证成功", created_at: "2026-10-17T08:00:00Z", updated_at: "2026-10-17T08:00:00Z" },
-        { id: 2, project_id: 3, project_name: "示例集团", kind: "redis", host: "10.1.2.9", port: 6379,
-          username: "", secret: "", extra: null, source: "discovered", status: "alive",
-          note: "未授权访问", created_at: "2026-10-17T08:05:00Z", updated_at: "2026-10-17T08:05:00Z" },
+        {
+          id: 1,
+          project_id: 3,
+          project_name: "示例集团",
+          kind: "ssh",
+          host: "10.1.2.3",
+          port: 22,
+          username: "root",
+          secret: "P@ssw0rd",
+          extra: null,
+          source: "discovered",
+          status: "alive",
+          note: "credential_verify_ssh 验证成功",
+          created_at: "2026-10-17T08:00:00Z",
+          updated_at: "2026-10-17T08:00:00Z",
+        },
+        {
+          id: 2,
+          project_id: 3,
+          project_name: "示例集团",
+          kind: "redis",
+          host: "10.1.2.9",
+          port: 6379,
+          username: "",
+          secret: "",
+          extra: null,
+          source: "discovered",
+          status: "alive",
+          note: "未授权访问",
+          created_at: "2026-10-17T08:05:00Z",
+          updated_at: "2026-10-17T08:05:00Z",
+        },
       ],
     };
   if (path === "/connections" && m === "POST") return { id: 3 };
@@ -2451,10 +2694,33 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   // ── 空间测绘搜索台（demo）──
   if (path === "/spacemap/search" && m === "POST")
     return {
-      engine: "FOFA", query: String(b.query ?? ""), total: 2, count: 2,
+      engine: "FOFA",
+      query: String(b.query ?? ""),
+      total: 2,
+      count: 2,
       rows: [
-        { host: "www.example.com", domain: "www.example.com", ip: "1.2.3.4", port: 443, title: "官网", protocol: "https", server: "nginx", country: "中国", city: "北京" },
-        { host: "api.example.com", domain: "api.example.com", ip: "1.2.3.5", port: 8443, title: "API", protocol: "https", server: "gateway", country: "中国", city: "上海" },
+        {
+          host: "www.example.com",
+          domain: "www.example.com",
+          ip: "1.2.3.4",
+          port: 443,
+          title: "官网",
+          protocol: "https",
+          server: "nginx",
+          country: "中国",
+          city: "北京",
+        },
+        {
+          host: "api.example.com",
+          domain: "api.example.com",
+          ip: "1.2.3.5",
+          port: 8443,
+          title: "API",
+          protocol: "https",
+          server: "gateway",
+          country: "中国",
+          city: "上海",
+        },
       ],
     };
 
@@ -2462,14 +2728,45 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   if (path === "/spacemap/results")
     return {
       results: [
-        { id: 1, type: "subdomain", label: "www.example.com", port: 0, title: "", source: "FOFA", authz: "approved", last_seen: "2026-10-16T12:00:00Z" },
-        { id: 2, type: "ip", label: "1.2.3.4", port: 443, title: "登录页", source: "Quake", authz: "pending", last_seen: "2026-10-16T11:30:00Z" },
-        { id: 3, type: "service", label: "https://api.example.com", port: 0, title: "API 网关", source: "Hunter", authz: null, last_seen: "2026-10-16T10:00:00Z" },
+        {
+          id: 1,
+          type: "subdomain",
+          label: "www.example.com",
+          port: 0,
+          title: "",
+          source: "FOFA",
+          authz: "approved",
+          last_seen: "2026-10-16T12:00:00Z",
+        },
+        {
+          id: 2,
+          type: "ip",
+          label: "1.2.3.4",
+          port: 443,
+          title: "登录页",
+          source: "Quake",
+          authz: "pending",
+          last_seen: "2026-10-16T11:30:00Z",
+        },
+        {
+          id: 3,
+          type: "service",
+          label: "https://api.example.com",
+          port: 0,
+          title: "API 网关",
+          source: "Hunter",
+          authz: null,
+          last_seen: "2026-10-16T10:00:00Z",
+        },
       ],
-      total: 3, page: 1, size: 50,
+      total: 3,
+      page: 1,
+      size: 50,
       engines: [
-        { provider: "fofa", display: "FOFA" }, { provider: "zoomeye", display: "ZoomEye" },
-        { provider: "quake", display: "Quake" }, { provider: "shodan", display: "Shodan" },
+        { provider: "fofa", display: "FOFA" },
+        { provider: "zoomeye", display: "ZoomEye" },
+        { provider: "quake", display: "Quake" },
+        { provider: "shodan", display: "Shodan" },
         { provider: "hunter", display: "Hunter" },
       ],
     };
@@ -2478,19 +2775,49 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   if (path === "/enterprise/jobs")
     return {
       jobs: [
-        { id: "job-1", project_id: "3", provider: "aqc", keyword: "示例集团", status: "waiting_authorization",
-          depth: 2, max_nodes: 20, nodes: 18, entities: 9, domains: 12, imported: 4, error: "", created_at: "2026-10-16T10:00:00Z" },
+        {
+          id: "job-1",
+          project_id: "3",
+          provider: "aqc",
+          keyword: "示例集团",
+          status: "waiting_authorization",
+          depth: 2,
+          max_nodes: 20,
+          nodes: 18,
+          entities: 9,
+          domains: 12,
+          imported: 4,
+          error: "",
+          created_at: "2026-10-16T10:00:00Z",
+        },
       ],
     };
   if (path === "/enterprise/candidates")
     return {
       candidates: [
-        { id: "c1", job_id: "job-1", source: "enterprise", job_name: "示例集团", value: "subs.example.cn",
-          entity_name: "示例子公司A", status: "candidate", fingerprint_status: "" },
-        { id: "c2", job_id: "job-1", source: "enterprise", job_name: "示例集团", value: "shop.example.cn",
-          entity_name: "示例电商", status: "imported", fingerprint_status: "done" },
+        {
+          id: "c1",
+          job_id: "job-1",
+          source: "enterprise",
+          job_name: "示例集团",
+          value: "subs.example.cn",
+          entity_name: "示例子公司A",
+          status: "candidate",
+          fingerprint_status: "",
+        },
+        {
+          id: "c2",
+          job_id: "job-1",
+          source: "enterprise",
+          job_name: "示例集团",
+          value: "shop.example.cn",
+          entity_name: "示例电商",
+          status: "imported",
+          fingerprint_status: "done",
+        },
       ],
-      total: 2, page: 1,
+      total: 2,
+      page: 1,
     };
   if (path === "/enterprise/import") return { imported: 1, total: 1 };
 
@@ -2499,10 +2826,18 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     return {
       schedules: [
         {
-          id: 1, name: "示例集团资产增量", kind: "engine", config: { domains: ["example.com"] },
-          interval_sec: 1800, enabled: true, next_run_at: "2026-10-16T12:30:00Z",
-          last_run_at: "2026-10-16T12:00:00Z", last_new: 3,
-          last_result: "命中 42,新资产 3(引擎遍历 5 域 1)", auth_failures: 0, created_at: "2026-10-01T08:00:00Z",
+          id: 1,
+          name: "示例集团资产增量",
+          kind: "engine",
+          config: { domains: ["example.com"] },
+          interval_sec: 1800,
+          enabled: true,
+          next_run_at: "2026-10-16T12:30:00Z",
+          last_run_at: "2026-10-16T12:00:00Z",
+          last_new: 3,
+          last_result: "命中 42,新资产 3(引擎遍历 5 域 1)",
+          auth_failures: 0,
+          created_at: "2026-10-01T08:00:00Z",
         },
       ],
     };

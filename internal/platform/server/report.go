@@ -27,6 +27,22 @@ type reportJob struct {
 	path      string    // absolute path (not serialized)
 }
 
+// reportLogoPath resolves a stored logo_path to an absolute file, but only when
+// it stays inside data/report_assets. Otherwise the report builder would open
+// any host file readable by the service user (e.g. ../../etc/passwd) and embed it.
+func (s *Server) reportLogoPath(rel string) string {
+	rel = strings.TrimSpace(rel)
+	if rel == "" || filepath.IsAbs(rel) {
+		return ""
+	}
+	root := filepath.Join(s.dataDir, "report_assets")
+	abs := filepath.Join(s.dataDir, filepath.Clean(rel))
+	if !pathWithin(root, abs) {
+		return ""
+	}
+	return abs
+}
+
 // POST /api/report/generate?task=&company=&client=&title= — start async docx build.
 func (s *Server) generateReport(w http.ResponseWriter, r *http.Request) {
 	t := s.m.ResolveTask(r.URL.Query().Get("task"))
@@ -261,7 +277,7 @@ func (s *Server) buildReportInput(t *Task, q map[string][]string) *report.GenInp
 	}
 	logoPath := ""
 	if strings.TrimSpace(logoRel) != "" {
-		logoPath = filepath.Join(s.dataDir, logoRel) // stored relative → absolute for python
+		logoPath = s.reportLogoPath(logoRel)
 	}
 	return &report.GenInput{
 		CompanyName:   defaultStrSrv(get("company"), companyName),
@@ -378,7 +394,7 @@ func (s *Server) exportFinding(w http.ResponseWriter, r *http.Request) {
 		fi := report.FindingInput{
 			Name: f.Name, VulnClass: f.VulnClass, Severity: f.Severity, Summary: f.Summary,
 			PoC: f.Evidence, CreatedAt: f.CreatedAt, Reproduction: f.Reproduction,
-			PageMarkdown: report.SanitizeForExport(f.Report),
+			Status: f.Status, PageMarkdown: report.SanitizeForExport(f.Report),
 		}
 		// Target 用第一个绑定资产的展示 label(富化里 AI 提取的目标在 Enrichment 中优先)。
 		if assets := s.resolveAssetIDs(f.AssetIDs); assets != nil && len(f.AssetIDs) > 0 {
@@ -405,7 +421,7 @@ func (s *Server) exportFinding(w http.ResponseWriter, r *http.Request) {
 		}
 		logoPath := ""
 		if strings.TrimSpace(logoRel) != "" {
-			logoPath = filepath.Join(s.dataDir, logoRel) // stored relative → absolute for python
+			logoPath = s.reportLogoPath(logoRel)
 		}
 		title := strings.TrimSpace(f.Name)
 		if title == "" {

@@ -50,6 +50,8 @@ import type {
   FindingTrafficDetail,
   Project,
   ProjectScope,
+  ProxyGallery,
+  ProxyProfile,
   IntentAsset,
   InterceptApprovalFilter,
   InterceptApprovalRow,
@@ -87,6 +89,11 @@ import type {
   NotificationDelivery,
   NotificationFilter,
   NotificationMeta,
+  NucleiStatus,
+  NucleiTemplateDetail,
+  NucleiTemplateList,
+  NucleiTemplateMeta,
+  NucleiUpdateJob,
   PromptVar,
   PromptVersion,
   SessionTokenUsage,
@@ -269,7 +276,7 @@ export const api = {
   initPassword: (password: string, username?: string) =>
     post<{ token: string }>("/auth/init", { password, username: username || undefined }),
   changePassword: (oldPassword: string, newPassword: string, newUsername?: string) =>
-    post<{ ok: boolean }>("/auth/change-password", {
+    post<{ ok: boolean; token?: string }>("/auth/change-password", {
       old_password: oldPassword,
       new_password: newPassword,
       new_username: newUsername || undefined,
@@ -277,12 +284,8 @@ export const api = {
 
   // ---- 持久 API Key(全局/项目级;仅全局凭据可管理) ----
   apiKeys: () => get<{ keys: APIKeyRecord[] }>("/api-keys").then((r) => arr(r.keys)),
-  createAPIKey: (input: {
-    name: string;
-    scope: "global" | "project";
-    project_id?: number;
-    expires_in_days?: number;
-  }) => post<{ key: APIKeyRecord; token: string }>("/api-keys", input),
+  createAPIKey: (input: { name: string; scope: "global" | "project"; project_id?: number; expires_in_days?: number }) =>
+    post<{ key: APIKeyRecord; token: string }>("/api-keys", input),
   deleteAPIKey: (id: number) => del<{ ok: boolean }>(`/api-keys/${id}`),
 
   // ---- tasks ----
@@ -360,6 +363,8 @@ export const api = {
     post<{ id: string; paused: boolean; queued: boolean; status: string }>(`/tasks/${id}/control`, { action }),
   controlTasksBatch: (taskIds: string[], action: "pause" | "resume") =>
     post<{ items: BatchControlItem[] }>("/tasks/control/batch", { task_ids: taskIds, action }),
+  // Global kill switch: pause every non-terminal task visible to the caller.
+  pauseAllTasks: () => post<{ items: BatchControlItem[]; paused: number }>("/tasks/control/pause-all"),
   taskArchives: (input?: { page?: number; size?: number; q?: string; state?: string }) => {
     const query = new URLSearchParams();
     query.set("page", String(input?.page ?? 1));
@@ -562,13 +567,13 @@ export const api = {
   // 后端 nil 切片序列化为 null(新项目无范围规则时 scope=null),这里归一成 [],
   // 消费方免做空调护。
   projects: () =>
-    get<{ projects: Project[] }>("/projects").then((r) =>
-      arr(r.projects).map((p) => ({ ...p, scope: p.scope ?? [] })),
-    ),
+    get<{ projects: Project[] }>("/projects").then((r) => arr(r.projects).map((p) => ({ ...p, scope: p.scope ?? [] }))),
   createProject: (name: string, company_id: number | null, description = "") =>
     post<Project>("/projects", { name, company_id, description }),
-  updateProject: (id: number, patch: { name: string; company_id: number | null; description: string; status?: string }) =>
-    http<Project>(`/projects/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  updateProject: (
+    id: number,
+    patch: { name: string; company_id: number | null; description: string; status?: string },
+  ) => http<Project>(`/projects/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteProject: (id: number, opts: { deleteTasks?: boolean; deleteAssets?: boolean } = {}) =>
     http<{ ok: boolean; deleted_tasks?: number; deleted_assets?: number }>(
       `/projects/${id}?delete_tasks=${opts.deleteTasks ? 1 : 0}&delete_assets=${opts.deleteAssets ? 1 : 0}`,
@@ -911,6 +916,51 @@ export const api = {
   // ---- app settings (runtime toggles) ----
   settings: () => get<Settings>(`/settings`),
   setSettings: (patch: Partial<Settings>) => put<Settings>(`/settings`, patch),
+  // 项目内 nuclei 二进制/模板状态（只读，不触发下载）。
+  nucleiStatus: () => get<NucleiStatus>(`/nuclei/status`),
+  nucleiTemplates: (
+    q: {
+      q?: string;
+      severity?: string;
+      tags?: string;
+      type?: string;
+      source?: string;
+      page?: number;
+      size?: number;
+    } = {},
+  ) => {
+    const p = new URLSearchParams();
+    if (q.q) p.set("q", q.q);
+    if (q.severity) p.set("severity", q.severity);
+    if (q.tags) p.set("tags", q.tags);
+    if (q.type) p.set("type", q.type);
+    if (q.source) p.set("source", q.source);
+    if (q.page) p.set("page", String(q.page));
+    if (q.size) p.set("size", String(q.size));
+    return get<NucleiTemplateList>(`/nuclei/templates?${p.toString()}`);
+  },
+  nucleiTemplate: (id: string) => get<NucleiTemplateDetail>(`/nuclei/templates/${encodeURIComponent(id)}`),
+  nucleiTemplateValidate: (yaml: string) =>
+    post<{ ok: boolean; meta?: NucleiTemplateMeta; error?: string }>(`/nuclei/templates/validate`, { yaml }),
+  nucleiTemplateCreate: (yaml: string) => post<NucleiTemplateMeta>(`/nuclei/templates`, { yaml }),
+  nucleiTemplateUpdate: (id: string, yaml: string) =>
+    put<NucleiTemplateMeta>(`/nuclei/templates/${encodeURIComponent(id)}`, { yaml }),
+  nucleiTemplateDelete: (id: string) => del<{ ok: boolean }>(`/nuclei/templates/${encodeURIComponent(id)}`),
+  nucleiUpdate: () => post<NucleiUpdateJob>(`/nuclei/update`, {}),
+  nucleiUpdateStatus: () => get<NucleiUpdateJob>(`/nuclei/update/status`),
+  // ---- 代理库 ----
+  proxyProfiles: () => get<ProxyGallery>(`/proxy-profiles`),
+  createProxyProfile: (p: { name: string; url: string; note?: string }) => post<ProxyProfile>(`/proxy-profiles`, p),
+  updateProxyProfile: (id: string, p: { name: string; url: string; note?: string }) =>
+    put<ProxyProfile>(`/proxy-profiles/${encodeURIComponent(id)}`, p),
+  deleteProxyProfile: (id: string) => del<{ ok: boolean }>(`/proxy-profiles/${encodeURIComponent(id)}`),
+  selectProxyProfile: (slot: string, profileId: string) =>
+    put<ProxyGallery>(`/proxy-profiles/selection`, { slot, profile_id: profileId }),
+  testProxyProfile: (url: string) =>
+    post<{ ok: boolean; status?: number; error?: string; warning?: string; elapsed_ms?: number }>(
+      `/proxy-profiles/test`,
+      { url },
+    ),
   // Run a real "test" search with the given (or saved) config to verify it works.
   testWebSearch: (patch: {
     web_search_backend?: string;
@@ -923,8 +973,7 @@ export const api = {
   // 渠道是多实例资源（同一类型可配多个机器人、各有过滤规则），因此独立成组，
   // 不塞进扁平的 settings 键值里。
   notifyMeta: () => get<NotificationMeta>(`/notify/meta`),
-  notifyChannels: () =>
-    get<{ channels: NotificationChannel[] }>(`/notify/channels`).then((r) => arr(r.channels)),
+  notifyChannels: () => get<{ channels: NotificationChannel[] }>(`/notify/channels`).then((r) => arr(r.channels)),
   notifyCreateChannel: (payload: {
     name: string;
     kind: string;
@@ -1207,8 +1256,7 @@ export const api = {
   refreshMcpServer: (id: number) => post<{ tools: MCPTool[] }>(`/mcp/${id}/refresh`, {}).then((r) => arr(r.tools)),
 
   // ---- 空间测绘引擎 key 配置 ----
-  spacemapEngines: () =>
-    get<{ engines: SpacemapEngine[] }>("/spacemap/engines").then((r) => arr(r.engines)),
+  spacemapEngines: () => get<{ engines: SpacemapEngine[] }>("/spacemap/engines").then((r) => arr(r.engines)),
   saveSpacemapEngine: (body: { provider: string; api_key?: string; base_url?: string }) =>
     post<{ engines: SpacemapEngine[] }>("/spacemap/engines", body).then((r) => arr(r.engines)),
   intelKeys: () => get<{ keys: IntelKey[] }>("/spacemap/intelkeys").then((r) => arr(r.keys)),
@@ -1217,11 +1265,21 @@ export const api = {
     if (params.query) q.set("query", params.query);
     if (params.source) q.set("source", params.source);
     q.set("page", String(params.page ?? 1));
-    return get<{ rules: FingerprintRule[]; total: number; page: number; enabled: number; sources: FingerprintSource[] }>(
-      `/fingerprint/rules?${q.toString()}`,
-    );
+    return get<{
+      rules: FingerprintRule[];
+      total: number;
+      page: number;
+      enabled: number;
+      sources: FingerprintSource[];
+    }>(`/fingerprint/rules?${q.toString()}`);
   },
-  spacemapSearch: (body: { engine: string; query: string; size?: number; project_id?: number; auto_import?: boolean }) =>
+  spacemapSearch: (body: {
+    engine: string;
+    query: string;
+    size?: number;
+    project_id?: number;
+    auto_import?: boolean;
+  }) =>
     post<{
       engine: string;
       query: string;
@@ -1237,9 +1295,13 @@ export const api = {
     if (params.projectId) q.set("project_id", String(params.projectId));
     q.set("page", String(params.page ?? 1));
     q.set("size", String(params.size ?? 50));
-    return get<{ results: SpacemapResultRow[]; total: number; page: number; size: number; engines: { provider: string; display: string }[] }>(
-      `/spacemap/results?${q.toString()}`,
-    );
+    return get<{
+      results: SpacemapResultRow[];
+      total: number;
+      page: number;
+      size: number;
+      engines: { provider: string; display: string }[];
+    }>(`/spacemap/results?${q.toString()}`);
   },
   connections: (params: { projectId?: number; kind?: string }) => {
     const q = new URLSearchParams();
@@ -1252,7 +1314,9 @@ export const api = {
   bindAssets: (projectId: number, ids: number[]) =>
     post<{ bound: number; approved: number; pending: number }>("/assets/bind", { project_id: projectId, ids }),
   connSSHExec: (id: number, command: string) =>
-    post<{ ok: boolean; output?: string; error?: string; elapsed_ms: number }>(`/connections/${id}/ssh/exec`, { command }),
+    post<{ ok: boolean; output?: string; error?: string; elapsed_ms: number }>(`/connections/${id}/ssh/exec`, {
+      command,
+    }),
   connDBQuery: (id: number, query: string) =>
     post<{
       ok: boolean;
@@ -1274,10 +1338,10 @@ export const api = {
     post<{ keys: IntelKey[] }>("/spacemap/intelkeys", body).then((r) => arr(r.keys)),
 
   // ---- 周期采集任务 ----
-  reconSchedules: () =>
-    get<{ schedules: ReconSchedule[] }>("/recon-schedules").then((r) => arr(r.schedules)),
+  reconSchedules: () => get<{ schedules: ReconSchedule[] }>("/recon-schedules").then((r) => arr(r.schedules)),
   createReconSchedule: (body: Partial<ReconSchedule>) => post<{ id: number }>("/recon-schedules", body),
-  updateReconSchedule: (id: number, body: Partial<ReconSchedule>) => put<{ ok: boolean }>(`/recon-schedules/${id}`, body),
+  updateReconSchedule: (id: number, body: Partial<ReconSchedule>) =>
+    put<{ ok: boolean }>(`/recon-schedules/${id}`, body),
   deleteReconSchedule: (id: number) => del<{ deleted: number }>(`/recon-schedules/${id}`),
   toggleReconSchedule: (id: number, enabled: boolean) =>
     post<{ ok: boolean }>(`/recon-schedules/${id}/toggle`, { enabled }),
@@ -1286,10 +1350,8 @@ export const api = {
     get<{ runs: ReconRun[] }>(`/recon-runs?schedule_id=${scheduleId}&limit=${limit}`).then((r) => arr(r.runs)),
 
   // ---- 企业数据源会话 ----
-  entProviders: () =>
-    get<{ providers: EntProvider[] }>("/enterprise/providers").then((r) => arr(r.providers)),
-  entSessions: () =>
-    get<{ sessions: unknown[] }>("/enterprise/sessions").then((r) => arr(r.sessions)),
+  entProviders: () => get<{ providers: EntProvider[] }>("/enterprise/providers").then((r) => arr(r.providers)),
+  entSessions: () => get<{ sessions: unknown[] }>("/enterprise/sessions").then((r) => arr(r.sessions)),
   saveEntSession: (body: { provider: string; config: Record<string, string> }) =>
     post<{ ok: boolean }>("/enterprise/sessions", body),
 
@@ -1369,9 +1431,9 @@ export const api = {
 
   // ---- intercept pending (ask) ----
   interceptPending: (projectId?: number) =>
-    get<{ pending: InterceptPending[] }>(
-      `/intercept/pending${projectId ? `?project_id=${projectId}` : ""}`,
-    ).then((r) => arr(r.pending)),
+    get<{ pending: InterceptPending[] }>(`/intercept/pending${projectId ? `?project_id=${projectId}` : ""}`).then((r) =>
+      arr(r.pending),
+    ),
   interceptGetOne: (id: number) => get<InterceptPending>(`/intercept/pending/${id}`),
   // targets: 围栏审批里勾选要授权的目标;省略=全部(兼容旧调用)。
   interceptDecide: (id: number, decision: "allowed" | "denied", targets?: string[]) =>
@@ -1571,6 +1633,4 @@ export const api = {
     if (!r.ok) throw new Error(body?.error || `上传失败(${r.status})`);
     return body as { logo_path: string; url: string };
   },
-
-}
-
+};

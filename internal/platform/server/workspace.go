@@ -23,15 +23,42 @@ const (
 	maxWorkspaceUpload = 512 << 20 // 512 MiB per upload request
 )
 
+// wsDeniedPaths are runtime-secret/internal trees under the data dir that the
+// browsable file manager must never expose (the JWT key was already moved out;
+// these are the datasource vault key and the MITM CA/index internals).
+var wsDeniedPaths = []string{
+	"datasource.key", "jwt.key",
+	"traffic/_ca", "traffic/_index", "traffic/_blobs",
+	"archives", ".delete-staging",
+}
+
+func wsDeniedRel(rel string) bool {
+	rel = strings.Trim(strings.ToLower(filepath.ToSlash(rel)), "/")
+	for _, denied := range wsDeniedPaths {
+		if rel == denied || strings.HasPrefix(rel, denied+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // wsResolve maps a user-supplied relative path to an absolute path INSIDE the work
 // dir. It returns ok=false if the path would escape the root. filepath.Clean on a
-// rooted copy collapses any ".." so nothing can climb above the root.
+// rooted copy collapses any ".." so nothing can climb above the root; symlinks are
+// resolved as well so a pre-existing link cannot point outside.
 func (s *Server) wsResolve(rel string) (string, bool) {
 	base := filepath.Clean(s.m.dir)
 	rel = strings.TrimPrefix(strings.TrimSpace(rel), "/")
 	clean := filepath.Clean("/" + rel) // e.g. "/a/../../etc" → "/etc" (still rooted at "/")
+	if wsDeniedRel(clean) {
+		return "", false
+	}
 	abs := filepath.Clean(filepath.Join(base, clean))
 	if abs != base && !strings.HasPrefix(abs, base+string(os.PathSeparator)) {
+		return "", false
+	}
+	abs = resolveExisting(abs)
+	if !pathWithin(base, abs) {
 		return "", false
 	}
 	return abs, true
@@ -39,7 +66,8 @@ func (s *Server) wsResolve(rel string) (string, bool) {
 
 // wsRel renders an absolute path back as a workspace-relative path (forward slashes).
 func (s *Server) wsRel(abs string) string {
-	base := filepath.Clean(s.m.dir)
+	base := resolveExisting(filepath.Clean(s.m.dir))
+	abs = resolveExisting(abs)
 	rel, err := filepath.Rel(base, abs)
 	if err != nil || rel == "." {
 		return ""
@@ -78,6 +106,10 @@ func (s *Server) wsList(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]wsEntry, 0, len(ents))
 	for _, e := range ents {
+		entryRel := s.wsRel(filepath.Join(abs, e.Name()))
+		if wsDeniedRel(entryRel) {
+			continue
+		}
 		info, err := e.Info()
 		if err != nil {
 			continue

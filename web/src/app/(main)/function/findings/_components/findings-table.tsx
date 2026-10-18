@@ -197,6 +197,11 @@ export function FindingsTable({
                 </TableCell>
                 <TableCell>
                   <StatusBadge domain="severity" value={f.severity} dot />
+                  {f.confidence && (
+                    <Badge variant="outline" className="ml-1 align-middle text-[10px]" title="服务端证据等级">
+                      {f.confidence === "verified" ? "已验证" : f.confidence === "partial" ? "部分验证" : "推断"}
+                    </Badge>
+                  )}
                 </TableCell>
                 <TableCell className="max-w-md">
                   <div className="flex min-w-0 flex-col gap-0.5">

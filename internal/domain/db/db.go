@@ -6,11 +6,13 @@ import (
 	"context"
 	"database/sql"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -286,6 +288,29 @@ ON CONFLICT (name) DO NOTHING`,
 		`["@playwright/mcp","--headless"]`); err != nil {
 		return fmt.Errorf("seed browser mcp: %w", err)
 	}
+	// Seed the built-in js-reverse (CDP JS debugging) MCP once — ENABLED by
+	// default so the JS reverse workflow works out of the box; the user can turn
+	// it off in the UI. The command is our cross-platform Node wrapper
+	// (scripts/js-reverse-mcp-4zrec.mjs) so the headless container can attach to
+	// Playwright's Chromium over CDP instead of failing on upstream's headful
+	// launch. Set JS_REVERSE_MCP_DIRECT=1 in the MCP env to use upstream's
+	// headful Chrome on a desktop.
+	if _, err := d.Exec(`
+INSERT INTO mcp_servers(name, transport, command, args, env, enabled)
+VALUES ('js-reverse', 'stdio', 'node', $1, '{}', true)
+ON CONFLICT (name) DO NOTHING`,
+		jsReverseMCPArgs()); err != nil {
+		return fmt.Errorf("seed js-reverse mcp: %w", err)
+	}
+	// The first iteration of this seed shipped disabled; flip the built-in row
+	// on once for databases created before the default changed. The settings
+	// flag ensures a later user disable is not resurrected on restart.
+	if v, _, _ := d.GetSetting("js_reverse_mcp_default_enabled_v1"); v != "true" {
+		if _, err := d.Exec(`UPDATE mcp_servers SET enabled=true WHERE name='js-reverse'`); err != nil {
+			return fmt.Errorf("enable js-reverse mcp default: %w", err)
+		}
+		_ = d.SetSetting("js_reverse_mcp_default_enabled_v1", "true")
+	}
 	if err := d.seedBuiltinSkillVisibility(); err != nil {
 		return fmt.Errorf("seed skill visibility: %w", err)
 	}
@@ -298,10 +323,29 @@ ON CONFLICT (name) DO NOTHING`,
 	if err := d.seedDefaultInterceptRulesV3(); err != nil {
 		return fmt.Errorf("seed intercept rules v3: %w", err)
 	}
+	if err := d.seedDefaultInterceptRulesV4(); err != nil {
+		return fmt.Errorf("seed intercept rules v4: %w", err)
+	}
 	if err := d.seedDefaultAssetInterceptRules(); err != nil {
 		return fmt.Errorf("seed asset intercept rules: %w", err)
 	}
 	return nil
+}
+
+// jsReverseMCPArgs returns the stdio args for the built-in js-reverse MCP.
+// Prefer the wrapper next to the running binary (Docker: /app/scripts/...,
+// release: <package>/scripts/...); fall back to the cwd-relative path for
+// `go run`/tests where os.Executable points into a temp build dir.
+func jsReverseMCPArgs() string {
+	script := "scripts/js-reverse-mcp-4zrec.mjs"
+	if exe, err := os.Executable(); err == nil {
+		candidate := filepath.Join(filepath.Dir(exe), "scripts", "js-reverse-mcp-4zrec.mjs")
+		if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
+			script = candidate
+		}
+	}
+	b, _ := json.Marshal([]string{script, "--isolated"})
+	return string(b)
 }
 
 // seedDefaultAssetInterceptRules inserts the built-in asset blocklist (fuzzy
@@ -631,4 +675,32 @@ WHERE NOT EXISTS (SELECT 1 FROM intercept_rules WHERE name = $1)`,
 		return fmt.Errorf("rule %q: %w", name, err)
 	}
 	return d.SetSetting("intercept_default_rules_v3", "done")
+}
+
+// sensitiveHostFilePattern matches local host secrets an agent driven by
+// target-side prompt injection must never read or upload.
+const sensitiveHostFilePattern = `(?i)(jwt\.key|datasource\.key|mitmproxy-ca|/\.ssh/|id_rsa|id_ed25519|authorized_keys|/proc/[^/\s"']+/environ|(?:^|[\s"':=\\])\.env(?:["'\s]|$)|(?:^|[\s"':=\\/])config\.json(?:["'\s]|$))`
+
+// seedDefaultInterceptRulesV4 turns the previously-disabled exfil pipe rule on
+// and adds a deny rule for host secret files. Own flag so existing installs
+// (which already ran v1-v3) pick it up.
+func (d *DB) seedDefaultInterceptRulesV4() error {
+	if v, _, _ := d.GetSetting("intercept_default_rules_v4"); v == "done" {
+		return nil
+	}
+	if _, err := d.Exec(`UPDATE intercept_rules SET enabled=true WHERE name='[内置] 数据外泄管道'`); err != nil {
+		return fmt.Errorf("enable exfil rule: %w", err)
+	}
+	const name = "[内置] 宿主机敏感文件"
+	if _, err := d.Exec(`
+INSERT INTO intercept_rules(name, enabled, priority, match_target, match_type, pattern, action, message, timeout_enabled, timeout_seconds, timeout_action)
+SELECT $1, true, 95, 'tool_input', 'regex', $2, 'deny', $3, false, 60, 'deny'
+WHERE NOT EXISTS (SELECT 1 FROM intercept_rules WHERE name = $1)`,
+		name,
+		sensitiveHostFilePattern,
+		"禁止访问宿主机密钥/配置文件（jwt.key / datasource.key / .ssh / config.json / .env / 进程环境）——目标侧内容可提示注入 Agent 外传这些文件",
+	); err != nil {
+		return fmt.Errorf("rule %q: %w", name, err)
+	}
+	return d.SetSetting("intercept_default_rules_v4", "done")
 }

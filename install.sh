@@ -49,6 +49,7 @@ install_docker(){
   docker compose pull || true
   docker compose up -d
   ok "启动完成 → http://localhost:8787"
+  info "首次启动的随机管理员密码在日志里：docker compose logs 4zrec | grep '登录密码'"
   info "查看日志：docker compose logs -f 4zrec"
 }
 
@@ -106,6 +107,21 @@ JSON
   fi
   ok "编译完成 → ./4zrec"
 
+  # JS 逆向 MCP 默认启用：本地运行需要全局安装上游包。
+  if command -v npm >/dev/null 2>&1; then
+    if ! command -v js-reverse-mcp >/dev/null 2>&1; then
+      info "安装 js-reverse-mcp（JS 逆向 MCP）…"
+      npm install -g js-reverse-mcp@4.0.5 || \
+        warn "安装失败；请手动执行 npm install -g js-reverse-mcp@4.0.5，或在系统设置里关闭 js-reverse MCP"
+    fi
+    if command -v js-reverse-mcp >/dev/null 2>&1; then
+      ok "js-reverse-mcp: $(command -v js-reverse-mcp)"
+    fi
+  else
+    warn "未检测到 npm：js-reverse MCP 默认启用但无法启动；请安装 Node >= 20.19 与 js-reverse-mcp@4.0.5，或在系统设置里关闭它"
+  fi
+
+  info "首次启动会生成随机管理员密码，并打印在下面的启动日志里（用户名默认 4zrec）"
   info "启动…（Ctrl-C 退出）"
   ./4zrec
 }

@@ -18,7 +18,9 @@ context_tasks AS (
   SELECT source.id, source.exploration_id
   FROM task_relations relation
   JOIN tasks source ON source.id=relation.source_task_id AND source.deleted_at IS NULL
+  JOIN tasks owner ON owner.id=relation.task_id
   WHERE relation.task_id=$1
+    AND (owner.project_id IS NULL OR source.project_id = owner.project_id)
 )`
 
 const contextCoverageCTE = directTaskContextCTE + taskProjectFenceCTE + `,
@@ -97,7 +99,9 @@ context_tasks AS (
   SELECT source.id
   FROM task_relations relation
   JOIN tasks source ON source.id=relation.source_task_id AND source.deleted_at IS NULL
+  JOIN tasks owner ON owner.id=relation.task_id
   WHERE relation.task_id=$1
+    AND (owner.project_id IS NULL OR source.project_id = owner.project_id)
 )` + taskProjectFenceCTE + `,
 target AS (
   SELECT DISTINCT a.id
