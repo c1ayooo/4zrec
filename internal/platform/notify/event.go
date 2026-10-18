@@ -1,5 +1,7 @@
 package notify
 
+import "strings"
+
 // Snapshot 是 notification_events.snapshot 这一 JSONB 列的契约。写方是 db 层/
 // server 层的事件生产者，读方是投递引擎与过滤匹配。定义放在本包是因为它是
 // 「通知领域」的载荷：db 只负责序列化，不理解字段含义。
@@ -101,10 +103,11 @@ func (i Item) DisplayTitle() string {
 	if i.IsFinding() {
 		return i.Title()
 	}
-	if label := i.KindLabel(); label != "" {
-		return label + " · " + i.Title()
+	label := i.KindLabel()
+	if label == "" || strings.HasPrefix(i.Title(), label) {
+		return i.Title()
 	}
-	return i.Title()
+	return label + " · " + i.Title()
 }
 
 // Message 是一次渠道发送的完整内容。
