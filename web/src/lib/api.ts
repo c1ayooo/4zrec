@@ -12,12 +12,12 @@ import type {
   Agent,
   AgentDetail,
   AgentTrigger,
+  APIKeyRecord,
   ArchiveBatchItem,
   Asset,
   AssetInterceptRule,
   AssetInterceptRuleInput,
   AssetProbeResult,
-  APIKeyRecord,
   Audit,
   BatchCategoryItem,
   BatchControlItem,
@@ -26,6 +26,7 @@ import type {
   Company,
   CompanyScopeMutation,
   CompanyScopeRule,
+  Connection,
   Conversation,
   ConvTokenSummary,
   CoverageAssetRefs,
@@ -34,9 +35,15 @@ import type {
   DeleteTaskOptions,
   DeleteTaskResult,
   Edge,
+  EntCandidate,
+  EntJob,
+  EntProvider,
   EvidenceBodyPreview,
   ExplorationNodePage,
   ExplorationNodeQuery,
+  FeatureCall,
+  FeatureCallFeature,
+  FeatureCallStats,
   Finding,
   FindingAssetTree,
   FindingDeepenResponse,
@@ -48,10 +55,11 @@ import type {
   FindingsPage,
   FindingTraffic,
   FindingTrafficDetail,
-  Project,
-  ProjectScope,
-  ProxyGallery,
-  ProxyProfile,
+  FingerprintRule,
+  FingerprintSource,
+  FingerprintStatus,
+  FingerprintSyncJob,
+  IntelKey,
   IntentAsset,
   InterceptApprovalFilter,
   InterceptApprovalRow,
@@ -70,20 +78,6 @@ import type {
   LLMRetryPolicy,
   LLMTask,
   MCPServer,
-  EntProvider,
-  Connection,
-  EntCandidate,
-  EntJob,
-  FingerprintRule,
-  FingerprintSource,
-  FingerprintStatus,
-  FingerprintSyncJob,
-  IntelKey,
-  SpacemapResultRow,
-  SpacemapSearchRow,
-  ReconRun,
-  ReconSchedule,
-  SpacemapEngine,
   MCPTool,
   MissingSkill,
   ModelTokenStat,
@@ -96,13 +90,26 @@ import type {
   NucleiTemplateList,
   NucleiTemplateMeta,
   NucleiUpdateJob,
+  Project,
+  ProjectScope,
   PromptVar,
   PromptVersion,
+  ProxyGallery,
+  ProxyProfile,
+  ReconRun,
+  ReconSchedule,
+  ReportJob,
+  ReportRecord,
+  ReportSettings,
+  ReportTemplate,
   SessionTokenUsage,
   Settings,
   Severity,
   SkillCall,
   SkillItem,
+  SpacemapEngine,
+  SpacemapResultRow,
+  SpacemapSearchRow,
   Stats,
   Task,
   TaskArchive,
@@ -128,10 +135,6 @@ import type {
   UpdateCheck,
   UsageStats,
   VulnIntelEntry,
-  ReportJob,
-  ReportRecord,
-  ReportSettings,
-  ReportTemplate,
   VulnIntelStatus,
   VulnKBEntry,
   VulnKBStats,
@@ -1560,6 +1563,39 @@ export const api = {
   },
   vulnKbEntry: (id: number) => get<{ entry: VulnKBEntry }>(`/vulnkb/${id}`),
   vulnKbStats: () => get<{ stats: VulnKBStats }>("/vulnkb/stats"),
+
+  // ---- 功能调用历史(漏洞库 / nuclei 模板 / 指纹规则库) ----
+  featureCalls: (params: {
+    feature: FeatureCallFeature;
+    action?: string;
+    source?: string;
+    status?: string;
+    q?: string;
+    from?: string;
+    to?: string;
+    page?: number;
+    size?: number;
+  }) => {
+    const sp = new URLSearchParams();
+    sp.set("feature", params.feature);
+    if (params.action) sp.set("action", params.action);
+    if (params.source) sp.set("source", params.source);
+    if (params.status) sp.set("status", params.status);
+    if (params.q) sp.set("q", params.q);
+    if (params.from) sp.set("from", params.from);
+    if (params.to) sp.set("to", params.to);
+    sp.set("page", String(params.page ?? 1));
+    sp.set("size", String(params.size ?? 50));
+    return get<{ items: FeatureCall[]; total: number; page: number; size: number }>(`/feature-calls?${sp.toString()}`);
+  },
+  featureCallStats: (params: { feature: FeatureCallFeature; from?: string; to?: string }) => {
+    const sp = new URLSearchParams();
+    sp.set("feature", params.feature);
+    if (params.from) sp.set("from", params.from);
+    if (params.to) sp.set("to", params.to);
+    return get<{ stats: FeatureCallStats }>(`/feature-calls/stats?${sp.toString()}`);
+  },
+  featureCall: (id: number) => get<{ call: FeatureCall }>(`/feature-calls/${id}`),
 
   // ---- 统一漏洞库(1day 库 + 情报流;source 为空表示全部) ----
   vulnLibrary: (params?: { q?: string; source?: string; page?: number; size?: number }) => {

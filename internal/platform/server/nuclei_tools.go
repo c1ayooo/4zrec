@@ -43,6 +43,7 @@ func (s *Server) nucleiManager() *nuclei.Manager {
 func (s *Server) nucleiTools() []actool.CoreTool {
 	return []actool.CoreTool{
 		s.toolNucleiScan(),
+		s.toolFingerprintVerify(),
 		s.toolNucleiTemplateSearch(),
 		s.toolNucleiUpdate(),
 		s.toolNucleiStatus(),
@@ -53,9 +54,12 @@ func (s *Server) toolNucleiScan() actool.CoreTool {
 	return actool.Build(actool.Spec{
 		Name: "nuclei_scan",
 		Description: "用项目内 nuclei 跑模板扫描（外部二进制，不依赖系统 PATH）。" +
+			"硬门禁：目标必须在资产库中有 technologies 证据；同时必须提供 based_on_product 或 based_on_cve，" +
+			"且模板必须与该识别结果相关。禁用 automatic 和纯 tags/severity 宽范围扫描，防止无差别漏扫。" +
+			"请先调用 fingerprint_scan（或 enrich）完成识别。" +
 			"二进制与模板位于数据目录的 nuclei/ 下；首次使用会自动下载固定版本并更新模板，之后按间隔自动更新。" +
-			"必须指定 templates / tags / severity / type / automatic 至少一个选择器，避免全量扫描。" +
-			"未指定 templates 时，tags/severity/type 会同时作用于官方模板和自定义模板目录。" +
+			"显式 templates 时只接受 nuclei_template_search 返回的模板 ID；未指定 templates 时按 based_on_product/based_on_cve 自动选模板，" +
+			"tags/severity/type 仅作为附加过滤。自动选模板上限 20 个，显式模板上限 50 个，目标上限 200 个。" +
 			"输出按 JSONL 解析为结构化命中（模板、等级、matched-at、matcher、extracted、curl 命令），" +
 			"完整 JSONL 落盘并返回路径。默认关闭 interactsh（避免目标流量进公共 OAST）；需要带外验证时显式开启。" +
 			"挂项目上下文时 targets 必须全部命中项目授权范围（逐目标 RoE 校验）。" +
@@ -63,19 +67,27 @@ func (s *Server) toolNucleiScan() actool.CoreTool {
 		Schema: objSchema(map[string]any{
 			"targets": map[string]any{
 				"type": "array", "items": map[string]any{"type": "string"},
-				"description": "目标 URL / host:port / IP（http(s) 优先；单次最多 500 个）",
+				"description": "目标 URL / host:port / IP（http(s) 优先；单次最多 200 个，且每个目标必须已完成指纹识别）",
+			},
+			"based_on_product": map[string]any{
+				"type":        "string",
+				"description": "已识别的产品/技术名（fingerprint_scan 结果或资产 technologies）；模板必须与之相关",
+			},
+			"based_on_cve": map[string]any{
+				"type":        "string",
+				"description": "已识别的 CVE 编号；模板必须包含该 CVE",
 			},
 			"templates": map[string]any{
 				"type": "array", "items": map[string]any{"type": "string"},
-				"description": "模板 ID 或模板目录内的相对路径（先用 nuclei_template_search 检索）",
+				"description": "nuclei_template_search 返回的模板 ID（不要传路径）；显式传入时仍会校验与 based_on_product/based_on_cve 的相关性",
 			},
 			"tags": map[string]any{
 				"type": "array", "items": map[string]any{"type": "string"},
-				"description": "按模板标签筛选（如 cve,rce,exposure）",
+				"description": "自动选模板时的附加标签过滤（如 cve,rce,exposure）",
 			},
 			"severity": map[string]any{
 				"type": "array", "items": map[string]any{"type": "string", "enum": []string{"critical", "high", "medium", "low", "info", "unknown"}},
-				"description": "按严重等级筛选",
+				"description": "自动选模板时的附加等级过滤",
 			},
 			"exclude_tags": map[string]any{
 				"type": "array", "items": map[string]any{"type": "string"},
@@ -84,11 +96,7 @@ func (s *Server) toolNucleiScan() actool.CoreTool {
 			"type": map[string]any{
 				"type":        "string",
 				"enum":        []string{"http", "dns", "tcp", "file", "headless", "code", "javascript", "ssl", "websocket", "whois", "workflow"},
-				"description": "只跑某一协议类型的模板",
-			},
-			"automatic": map[string]any{
-				"type":        "boolean",
-				"description": "nuclei -as 自动扫描（仍建议同时给 tags/severity 收敛范围）",
+				"description": "自动选模板时的协议类型过滤",
 			},
 			"headers": map[string]any{
 				"type":        "object",
@@ -106,16 +114,19 @@ func (s *Server) toolNucleiScan() actool.CoreTool {
 		}, "targets"),
 		Permissions: func(_ context.Context, input json.RawMessage, _ actool.Context) actool.Decision {
 			var in struct {
-				Targets []string `json:"targets"`
-				Tags    []string `json:"tags"`
+				Targets        []string `json:"targets"`
+				BasedOnProduct string   `json:"based_on_product"`
+				BasedOnCVE     string   `json:"based_on_cve"`
 			}
 			_ = json.Unmarshal(input, &in)
-			return actool.AskUser(fmt.Sprintf("nuclei 模板扫描：%d 个目标，标签 %s",
-				len(in.Targets), strings.Join(in.Tags, ",")))
+			return actool.AskUser(fmt.Sprintf("nuclei 定向验证：%d 个目标，product=%s cve=%s",
+				len(in.Targets), in.BasedOnProduct, in.BasedOnCVE))
 		},
 		Run: func(ctx context.Context, input json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
 			var in struct {
 				Targets        []string          `json:"targets"`
+				BasedOnProduct string            `json:"based_on_product"`
+				BasedOnCVE     string            `json:"based_on_cve"`
 				Templates      []string          `json:"templates"`
 				Tags           []string          `json:"tags"`
 				Severity       []string          `json:"severity"`
@@ -140,6 +151,7 @@ func (s *Server) toolNucleiScan() actool.CoreTool {
 				return actool.Errorf("targets 不能为空"), nil
 			}
 			// RoE 先全部校验完再启动扫描，避免打到一半才发现越界。
+			targetURLs := make([]string, 0, len(in.Targets))
 			for _, target := range in.Targets {
 				u, err := nucleiTargetURL(target)
 				if err != nil {
@@ -148,6 +160,21 @@ func (s *Server) toolNucleiScan() actool.CoreTool {
 				if msg := s.webreconRoE(ctx, in.ProjectID, u); msg != "" {
 					return actool.Errorf(strings.TrimSpace(msg)), nil
 				}
+				targetURLs = append(targetURLs, u)
+			}
+			// 硬门禁：没有真实指纹证据的目标禁止扫描，避免退化成无差别漏扫。
+			evidence, err := s.requireTargetFingerprints(targetURLs)
+			if err != nil {
+				return actool.Errorf(err.Error()), nil
+			}
+			technologies := fingerprintTechnologies(evidence)
+			basedOnProduct := strings.TrimSpace(in.BasedOnProduct)
+			basedOnCVE := strings.TrimSpace(in.BasedOnCVE)
+			if err := validateFingerprintScanInput(basedOnProduct, basedOnCVE, technologies, in.Automatic, len(targetURLs), len(in.Templates)); err != nil {
+				return actool.Errorf(err.Error()), nil
+			}
+			if err := validateProductOnTargets(evidence, basedOnProduct); err != nil {
+				return actool.Errorf(err.Error()), nil
 			}
 
 			mgr := s.nucleiManager()
@@ -155,6 +182,21 @@ func (s *Server) toolNucleiScan() actool.CoreTool {
 			if err != nil {
 				return actool.Errorf("nuclei 未就绪: " + err.Error()), nil
 			}
+			maxTemplates := maxAutoFingerprintTemplates
+			if len(in.Templates) > 0 {
+				maxTemplates = maxFingerprintScanTemplates
+			}
+			selected, err := selectFingerprintTemplates(mgr.Index(), in.Templates, basedOnProduct, basedOnCVE, technologies,
+				nuclei.Filters{Severity: in.Severity, Tags: in.Tags, Type: in.Type}, in.ExcludeTags, maxTemplates)
+			if err != nil {
+				return actool.Errorf("无法确定验证模板: " + err.Error()), nil
+			}
+			selectedIDs := make([]string, 0, len(selected))
+			for _, meta := range selected {
+				selectedIDs = append(selectedIDs, meta.ID)
+			}
+			plan := fingerprintPlanLine(basedOnProduct, basedOnCVE, technologies, selectedIDs)
+
 			maxDur := time.Duration(in.TimeoutSeconds) * time.Second
 			if in.TimeoutSeconds <= 0 {
 				maxDur = 0
@@ -163,12 +205,8 @@ func (s *Server) toolNucleiScan() actool.CoreTool {
 			}
 			res, err := mgr.Run(ctx, nuclei.RunOptions{
 				Targets:        in.Targets,
-				Templates:      in.Templates,
-				Tags:           in.Tags,
-				Severity:       in.Severity,
+				Templates:      selectedIDs,
 				ExcludeTags:    in.ExcludeTags,
-				TemplateType:   in.Type,
-				Automatic:      in.Automatic,
 				Headers:        in.Headers,
 				Proxy:          in.Proxy,
 				RateLimit:      in.RateLimit,
@@ -182,7 +220,7 @@ func (s *Server) toolNucleiScan() actool.CoreTool {
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
 			}
-			return actool.Text(formatNucleiRun(res, ensure)), nil
+			return actool.Text(plan + "\n" + formatNucleiRun(res, ensure)), nil
 		},
 	})
 }
@@ -248,40 +286,56 @@ func (s *Server) toolNucleiTemplateSearch() actool.CoreTool {
 	return actool.Build(actool.Spec{
 		Name: "nuclei_template_search",
 		Description: "检索项目内 nuclei 模板（官方 + 自定义）。" +
-			"按关键词（模板 ID/名称/标签/CVE/描述）、severity、tags、协议类型、来源过滤，" +
-			"返回模板 ID、名称、等级、标签、CVE、类型、来源和相对路径。扫描前先用它选模板，避免无选择器全量扫描。",
+			"必须先有真实指纹证据：传入 fingerprint_scan 识别出的 product，或已识别的 targets，" +
+			"否则拒绝检索，防止无识别乱搜模板。按关键词（模板 ID/名称/标签/CVE/描述）、severity、tags、" +
+			"协议类型、来源过滤，返回模板 ID、名称、等级、标签、CVE、类型、来源和相对路径。",
 		Schema: objSchema(map[string]any{
-			"q":        map[string]any{"type": "string", "description": "关键词（可空格分隔多个词，全部命中）"},
-			"severity": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "按等级过滤"},
-			"tags":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "按标签过滤（任一命中）"},
-			"type":     map[string]any{"type": "string", "description": "协议类型（http/dns/tcp/...）"},
-			"source":   map[string]any{"type": "string", "enum": []string{"official", "custom"}, "description": "来源：official=官方只读，custom=自定义"},
-			"limit":    map[string]any{"type": "integer", "description": "返回上限（默认 20，最大 200）"},
+			"q":          map[string]any{"type": "string", "description": "关键词（可空格分隔多个词，全部命中）"},
+			"product":    map[string]any{"type": "string", "description": "指纹识别出的产品/技术名（从 fingerprint_scan 结果或资产 technologies 取）"},
+			"targets":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "已识别的目标 URL；从资产库读取 technologies 作为证据"},
+			"project_id": map[string]any{"type": "integer", "description": "项目上下文（可选；用于读取项目级指纹证据）"},
+			"severity":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "按等级过滤"},
+			"tags":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "按标签过滤（任一命中）"},
+			"type":       map[string]any{"type": "string", "description": "协议类型（http/dns/tcp/...）"},
+			"source":     map[string]any{"type": "string", "enum": []string{"official", "custom"}, "description": "来源：official=官方只读，custom=自定义"},
+			"limit":      map[string]any{"type": "integer", "description": "返回上限（默认 20，最大 200）"},
 		}),
 		ReadOnly:   func(json.RawMessage) bool { return true },
 		Concurrent: func(json.RawMessage) bool { return true },
 		Permissions: func(context.Context, json.RawMessage, actool.Context) actool.Decision {
 			return actool.Allowed()
 		},
-		Run: func(_ context.Context, input json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
+		Run: func(ctx context.Context, input json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
 			var in struct {
-				Q        string   `json:"q"`
-				Severity []string `json:"severity"`
-				Tags     []string `json:"tags"`
-				Type     string   `json:"type"`
-				Source   string   `json:"source"`
-				Limit    int      `json:"limit"`
+				Q         string   `json:"q"`
+				Product   string   `json:"product"`
+				Targets   []string `json:"targets"`
+				ProjectID int64    `json:"project_id"`
+				Severity  []string `json:"severity"`
+				Tags      []string `json:"tags"`
+				Type      string   `json:"type"`
+				Source    string   `json:"source"`
+				Limit     int      `json:"limit"`
 			}
 			if err := json.Unmarshal(input, &in); err != nil {
 				return actool.Errorf("参数解析失败: " + err.Error()), nil
 			}
-			items, total, err := s.nucleiManager().Index().Search(in.Q, nuclei.Filters{
+			techs, err := s.requireSearchFingerprint(ctx, in.ProjectID, in.Targets, in.Product, in.Q)
+			if err != nil {
+				return actool.Errorf(err.Error()), nil
+			}
+			query := strings.TrimSpace(in.Q)
+			if query == "" {
+				query = strings.TrimSpace(in.Product)
+			}
+			items, total, err := s.nucleiManager().Index().Search(query, nuclei.Filters{
 				Severity: in.Severity, Tags: in.Tags, Type: in.Type, Source: in.Source,
 			}, in.Limit)
 			if err != nil {
-				return actool.Errorf("模板检索失败（模板未安装或索引失败；可调用 nuclei_scan 触发自动安装，或让有 nuclei_update 绑定的 agent 更新）: " + err.Error()), nil
+				return actool.Errorf("模板检索失败（模板未安装或索引失败；可调用 nuclei_update 更新模板）: " + err.Error()), nil
 			}
 			var b strings.Builder
+			fmt.Fprintf(&b, "基于指纹证据: %s\n", strings.Join(techs, ", "))
 			fmt.Fprintf(&b, "命中 %d 条，展示 %d 条：\n", total, len(items))
 			for _, t := range items {
 				fmt.Fprintf(&b, "\n- %s | %s [%s/%s/%s]\n", t.ID, t.Name, t.Severity, t.Type, t.Source)
@@ -295,6 +349,20 @@ func (s *Server) toolNucleiTemplateSearch() actool.CoreTool {
 			}
 			if len(items) == 0 {
 				b.WriteString("\n（无命中：换关键词/标签，或先运行 nuclei_update 更新模板）\n")
+			} else {
+				if strings.Contains(strings.ToUpper(in.Q), "CVE-") {
+					fmt.Fprintf(&b, "\n下一步: nuclei_scan(targets=[已识别目标], based_on_cve=%q, templates=[上述模板 ID])\n", strings.TrimSpace(in.Q))
+				} else {
+					criterion := strings.TrimSpace(in.Product)
+					if criterion == "" {
+						criterion = strings.TrimSpace(in.Q)
+					}
+					if criterion == "" && len(techs) > 0 {
+						criterion = techs[0]
+					}
+					fmt.Fprintf(&b, "\n下一步: nuclei_scan(targets=[已识别目标], based_on_product=%q, templates=[上述模板 ID])\n", criterion)
+				}
+				b.WriteString("禁止 automatic 或纯 tags/severity 扫描；目标必须已完成指纹识别。\n")
 			}
 			return actool.Text(b.String()), nil
 		},
@@ -415,6 +483,7 @@ func (s *Server) seedNucleiTools() {
 	}
 	bindings := map[string][]string{
 		"nuclei_scan":            {"worker", "planner", "recon", "pentest", "auto"},
+		"fingerprint_verify":     {"worker", "planner", "recon", "pentest", "auto"},
 		"nuclei_template_search": {"worker", "planner", "recon", "pentest", "auto"},
 		"nuclei_update":          {"auto", "recon", "pentest", "mainagent"},
 		"nuclei_status":          {"auto", "recon", "pentest", "mainagent"},
@@ -426,6 +495,9 @@ func (s *Server) seedNucleiTools() {
 			log.Printf("[nuclei] seed tool %s: %v", t.Name(), err)
 		}
 	}
+	s.refreshFingerprintToolSchemas()
+	s.bindFingerprintVerifyTool(bindings["fingerprint_verify"])
+	s.bindSearchVulnKB()
 	const flag = "nuclei_tools_bind_v1"
 	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
 		return

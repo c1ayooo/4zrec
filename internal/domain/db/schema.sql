@@ -1030,6 +1030,41 @@ CREATE TABLE IF NOT EXISTS tool_usage (
 CREATE INDEX IF NOT EXISTS idx_tool_usage_tool ON tool_usage(tool_key, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_tool_usage_task ON tool_usage(task_id);
 
+-- 功能调用历史账本（漏洞库 / nuclei 模板 / 指纹规则库）。一次有语义的操作一行：
+-- 页面搜索、详情查看、Agent 工具调用、规则同步、模板更新等。与 tool_usage 分开：
+-- 这里保留参数与结果摘要，tool_usage 继续只做目录累计计数。按需求不做脱敏，
+-- 只对超长文本做截断，避免单行过大。
+CREATE TABLE IF NOT EXISTS feature_call_log (
+    id             BIGSERIAL PRIMARY KEY,
+    ts             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    feature        TEXT NOT NULL,               -- vulnkb | nuclei | fingerprint
+    action         TEXT NOT NULL,               -- search | view | scan | sync | refresh | create | update | delete | validate
+    source         TEXT NOT NULL DEFAULT 'web', -- web | agent | schedule | system
+    status         TEXT NOT NULL DEFAULT 'ok',  -- ok | error | denied
+    actor          TEXT,
+    task_id        BIGINT,
+    exploration_id BIGINT,
+    intent_id      BIGINT,
+    session_id     TEXT,
+    project_id     BIGINT,
+    ref_type       TEXT,                        -- vuln_kb | vuln_intel | nuclei_template | fingerprint_rule
+    ref_id         TEXT,
+    query          TEXT,
+    summary        TEXT NOT NULL DEFAULT '',
+    request        JSONB NOT NULL DEFAULT '{}',
+    result         JSONB NOT NULL DEFAULT '{}',
+    error          TEXT NOT NULL DEFAULT '',
+    duration_ms    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_feature_call_feature_ts
+    ON feature_call_log(feature, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_feature_call_action_ts
+    ON feature_call_log(feature, action, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_feature_call_task
+    ON feature_call_log(task_id) WHERE task_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_feature_call_ref
+    ON feature_call_log(feature, ref_type, ref_id);
+
 -- =====================================================================
 -- H. 内置工具目录
 -- =====================================================================

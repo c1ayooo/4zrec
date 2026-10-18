@@ -23,6 +23,7 @@ import (
 	"github.com/c1ayooo/4zrec/internal/capability/web/httpprobe"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
 	"github.com/c1ayooo/4zrec/internal/domain/traffic"
+	"github.com/c1ayooo/4zrec/internal/orchestration/agent"
 	actool "github.com/c1ayooo/4zrec/internal/toolface/tools"
 )
 
@@ -529,6 +530,7 @@ func (s *Server) toolFingerprintScan() actool.CoreTool {
 			if len(in.Targets) > 50 {
 				in.Targets = in.Targets[:50]
 			}
+			ri := agent.RunInfoFrom(ctx)
 			// RoE:逐目标过项目范围。
 			for _, tgt := range in.Targets {
 				if msg := s.webreconRoE(ctx, in.ProjectID, tgt); msg != "" {
@@ -553,15 +555,16 @@ func (s *Server) toolFingerprintScan() actool.CoreTool {
 				scanned++
 				techs := s.fingerprintMatch(obs)
 				matched += len(techs)
+				observedURL := observedHTTPURL(obs, tgt)
 				if len(techs) > 0 {
-					fmt.Fprintf(&b, "- %s [%d] 组件: %s\n", tgt, obs.Status, strings.Join(techs, ", "))
+					fmt.Fprintf(&b, "- %s [%d] 组件: %s（落点 %s）\n", tgt, obs.Status, strings.Join(techs, ", "), observedURL)
 				} else {
-					fmt.Fprintf(&b, "- %s [%d] %s(无规则命中)\n", tgt, obs.Status, obs.Title)
+					fmt.Fprintf(&b, "- %s [%d] %s(无规则命中，落点 %s)\n", tgt, obs.Status, obs.Title, observedURL)
 				}
 				// 回写 http 服务资产(存在则合并 technologies)。
 				if id, err := as.UpsertHTTPService(db.UpsertHTTPServiceReq{
-					URL: strings.TrimSpace(tgt), StatusCode: &obs.Status, PageTitle: obs.Title,
-					FaviconMMH3: obs.IconHash, Technologies: techs,
+					URL: observedURL, StatusCode: &obs.Status, PageTitle: obs.Title,
+					FaviconMMH3: obs.IconHash, Technologies: techs, TaskID: ri.TaskID,
 				}); err == nil {
 					projectID := s.roeProjectID(ctx, in.ProjectID)
 					if projectID > 0 {
@@ -572,10 +575,35 @@ func (s *Server) toolFingerprintScan() actool.CoreTool {
 			if scanned == 0 {
 				return actool.Text("全部目标探测失败"), nil
 			}
-			fmt.Fprintf(&b, "\n扫描 %d 目标,规则命中 %d 条;组件结论已回写服务资产,可 search_vuln_kb 查已知漏洞。", scanned, matched)
+			if matched > 0 {
+				fmt.Fprintf(&b, "\n扫描 %d 目标,规则命中 %d 条;组件结论已回写服务资产,可基于识别结果调用 search_vuln_kb / nuclei_template_search。", scanned, matched)
+			} else {
+				fmt.Fprintf(&b, "\n扫描 %d 目标,但没有命中任何指纹规则;不要继续做无识别的模板/漏洞库检索。", scanned)
+			}
 			return actool.Text(b.String()), nil
 		},
 	})
+}
+
+// observedHTTPURL builds the final URL (scheme/host/port) from the probe
+// observation so the asset is stored with a normalised, matchable URL.
+func observedHTTPURL(obs fingerprint.Observation, fallback string) string {
+	if obs.Host == "" {
+		return strings.TrimSpace(fallback)
+	}
+	scheme := strings.ToLower(obs.Protocol)
+	if scheme == "" {
+		scheme = "http"
+	}
+	host := obs.Host
+	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+		host = "[" + host + "]"
+	}
+	defaultPort := (scheme == "http" && obs.Port == 80) || (scheme == "https" && obs.Port == 443)
+	if obs.Port > 0 && !defaultPort {
+		return fmt.Sprintf("%s://%s:%d", scheme, host, obs.Port)
+	}
+	return fmt.Sprintf("%s://%s", scheme, host)
 }
 
 // fingerprintMatch 规则匹配薄封装(规则库按需加载)。

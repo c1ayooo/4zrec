@@ -2,12 +2,14 @@ package nuclei
 
 import (
 	"fmt"
+	"hash/fnv"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -54,15 +56,21 @@ type ListOptions struct {
 }
 
 // Index 是模板目录的内存索引。首次检索时构建，更新/写入后由 Manager 失效重建。
+// 自定义模板目录还会在每次检索前做一次轻量变更检测，外部直接放文件也无需重启。
 type Index struct {
 	dirs []IndexDir
 
-	mu       sync.RWMutex
-	built    bool
-	items    []TemplateMeta
-	byID     map[string]int
-	buildErr error
+	mu        sync.RWMutex
+	built     bool
+	items     []TemplateMeta
+	byID      map[string]int
+	buildErr  error
+	lastCheck time.Time
+	customSig string
 }
+
+// indexRefreshInterval 限制自定义目录变更检测的频率，避免每个请求都走文件系统。
+var indexRefreshInterval = 2 * time.Second
 
 // NewIndex 创建单目录索引（兼容旧调用，来源标记为 official）。
 func NewIndex(dir string) *Index {
@@ -109,15 +117,19 @@ func (i *Index) Dir() string {
 
 // Refresh 强制重建索引。
 func (i *Index) Refresh() error {
+	sig := indexDirSignature(i.dirs)
 	items, byID, err := buildIndexDirs(i.dirs)
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	i.items, i.byID, i.buildErr = items, byID, err
 	i.built = err == nil
+	i.customSig = sig
+	i.lastCheck = time.Now()
 	return err
 }
 
 func (i *Index) ensure() error {
+	i.refreshCustomIfChanged()
 	i.mu.RLock()
 	built, err := i.built, i.buildErr
 	i.mu.RUnlock()
@@ -131,6 +143,76 @@ func (i *Index) ensure() error {
 		i.mu.Unlock()
 	}
 	return i.Refresh()
+}
+
+// refreshCustomIfChanged 检测自定义模板目录的变化（新增/删除/改名/内容修改），
+// 有变化时重建索引。官方目录由 Manager 的更新流程显式刷新，不在这里扫描。
+func (i *Index) refreshCustomIfChanged() {
+	if i == nil {
+		return
+	}
+	i.mu.RLock()
+	last := i.lastCheck
+	i.mu.RUnlock()
+	if time.Since(last) < indexRefreshInterval {
+		return
+	}
+	sig := indexDirSignature(i.dirs)
+	i.mu.Lock()
+	changed := sig != i.customSig
+	i.lastCheck = time.Now()
+	i.mu.Unlock()
+	if changed {
+		_ = i.Refresh()
+	}
+}
+
+// indexDirSignature 为自定义模板目录生成轻量签名：文件路径 + 大小 + mtime。
+// 官方目录不参与，因为官方模板只会通过 Manager.Update 变更并显式刷新。
+func indexDirSignature(dirs []IndexDir) string {
+	h := fnv.New64a()
+	for _, d := range dirs {
+		if d.Source != SourceCustom {
+			continue
+		}
+		root, err := filepath.Abs(d.Path)
+		if err != nil {
+			fmt.Fprintf(h, "%s|abs-error\n", d.Path)
+			continue
+		}
+		st, err := os.Stat(root)
+		if err != nil || !st.IsDir() {
+			fmt.Fprintf(h, "%s|missing\n", root)
+			continue
+		}
+		type fileSig struct {
+			path string
+			size int64
+			mod  int64
+		}
+		files := []fileSig{}
+		_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil || entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+				return nil
+			}
+			ext := strings.ToLower(filepath.Ext(entry.Name()))
+			if ext != ".yaml" && ext != ".yml" {
+				return nil
+			}
+			info, err := entry.Info()
+			if err != nil || !info.Mode().IsRegular() {
+				return nil
+			}
+			files = append(files, fileSig{path: path, size: info.Size(), mod: info.ModTime().UnixNano()})
+			return nil
+		})
+		sort.Slice(files, func(a, b int) bool { return files[a].path < files[b].path })
+		fmt.Fprintf(h, "dir:%s\n", root)
+		for _, f := range files {
+			fmt.Fprintf(h, "%s|%d|%d\n", f.path, f.size, f.mod)
+		}
+	}
+	return fmt.Sprintf("%x", h.Sum64())
 }
 
 // Search 返回过滤后的模板元数据（最多 limit 条）和过滤前总数。

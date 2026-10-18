@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/c1ayooo/4zrec/internal/capability/vuln/nuclei"
+	"github.com/c1ayooo/4zrec/internal/domain/db"
 	"github.com/c1ayooo/4zrec/internal/platform/notify"
 )
 
@@ -26,16 +28,22 @@ type nucleiUpdateState struct {
 
 // GET /api/nuclei/templates?q=&severity=&tags=&type=&source=&page=&size=
 func (s *Server) getNucleiTemplates(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	q := r.URL.Query()
 	page := nucleiQueryInt(q.Get("page"), 1)
 	size := nucleiQueryInt(q.Get("size"), 20)
+	search := strings.TrimSpace(q.Get("q"))
+	severity := queryCSV(q, "severity")
+	tags := queryCSV(q, "tags")
+	tmplType := strings.TrimSpace(q.Get("type"))
+	source := strings.TrimSpace(q.Get("source"))
 	items, total, err := s.nucleiManager().Index().List(nuclei.ListOptions{
-		Query: q.Get("q"),
+		Query: search,
 		Filters: nuclei.Filters{
-			Severity: queryCSV(q, "severity"),
-			Tags:     queryCSV(q, "tags"),
-			Type:     strings.TrimSpace(q.Get("type")),
-			Source:   strings.TrimSpace(q.Get("source")),
+			Severity: severity,
+			Tags:     tags,
+			Type:     tmplType,
+			Source:   source,
 		},
 		Page: page,
 		Size: size,
@@ -47,17 +55,51 @@ func (s *Server) getNucleiTemplates(w http.ResponseWriter, r *http.Request) {
 		resp["total"] = 0
 		resp["warning"] = err.Error()
 	}
+	if search != "" || len(severity) > 0 || len(tags) > 0 || tmplType != "" || err != nil {
+		status := "ok"
+		summary := fmt.Sprintf("模板检索命中 %d 条", total)
+		if search != "" {
+			summary = fmt.Sprintf("检索模板「%s」命中 %d 条", search, total)
+		}
+		errText := ""
+		if err != nil {
+			status = "error"
+			errText = err.Error()
+			summary = "模板检索失败：" + err.Error()
+		}
+		s.recordFeatureCall(r.Context(), db.FeatureCall{
+			Feature: FeatureNuclei, Action: "search", Source: "web", Status: status,
+			Query: search, Summary: summary, Error: errText,
+			Result: featureJSON(map[string]any{
+				"total": total, "severity": severity, "tags": tags,
+				"type": tmplType, "source": source,
+			}),
+			DurationMS: int(time.Since(start).Milliseconds()),
+		})
+	}
 	writeJSON(w, 200, resp)
 }
 
 // GET /api/nuclei/templates/{id}
 func (s *Server) getNucleiTemplate(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	id := strings.TrimSpace(r.PathValue("id"))
 	meta, content, err := s.nucleiManager().Index().Read(id)
 	if err != nil {
+		s.recordFeatureCall(r.Context(), db.FeatureCall{
+			Feature: FeatureNuclei, Action: "view", Source: "web", Status: "error",
+			RefType: "nuclei_template", RefID: id, Error: err.Error(),
+			DurationMS: int(time.Since(start).Milliseconds()),
+		})
 		writeErr(w, 404, err.Error())
 		return
 	}
+	s.recordFeatureCall(r.Context(), db.FeatureCall{
+		Feature: FeatureNuclei, Action: "view", Source: "web",
+		RefType: "nuclei_template", RefID: id,
+		Summary:    fmt.Sprintf("查看模板「%s」", meta.Name),
+		DurationMS: int(time.Since(start).Milliseconds()),
+	})
 	writeJSON(w, 200, map[string]any{
 		"meta": meta, "content": content, "editable": meta.Source == nuclei.SourceCustom,
 	})
@@ -65,6 +107,7 @@ func (s *Server) getNucleiTemplate(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/nuclei/templates/validate {yaml}
 func (s *Server) validateNucleiTemplate(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	var body struct {
 		YAML string `json:"yaml"`
 	}
@@ -74,14 +117,26 @@ func (s *Server) validateNucleiTemplate(w http.ResponseWriter, r *http.Request) 
 	}
 	meta, err := s.nucleiManager().ValidateCustomTemplate(body.YAML)
 	if err != nil {
+		s.recordFeatureCall(r.Context(), db.FeatureCall{
+			Feature: FeatureNuclei, Action: "validate", Source: "web", Status: "error",
+			Error: err.Error(), Summary: "模板校验失败：" + err.Error(),
+			DurationMS: int(time.Since(start).Milliseconds()),
+		})
 		writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
+	s.recordFeatureCall(r.Context(), db.FeatureCall{
+		Feature: FeatureNuclei, Action: "validate", Source: "web",
+		RefType: "nuclei_template", RefID: meta.ID,
+		Summary:    fmt.Sprintf("模板校验通过「%s」", meta.ID),
+		DurationMS: int(time.Since(start).Milliseconds()),
+	})
 	writeJSON(w, 200, map[string]any{"ok": true, "meta": meta})
 }
 
 // POST /api/nuclei/templates {yaml}
 func (s *Server) createNucleiTemplate(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	var body struct {
 		YAML string `json:"yaml"`
 	}
@@ -91,14 +146,26 @@ func (s *Server) createNucleiTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 	meta, err := s.nucleiManager().SaveCustomTemplate(body.YAML, false)
 	if err != nil {
+		s.recordFeatureCall(r.Context(), db.FeatureCall{
+			Feature: FeatureNuclei, Action: "create", Source: "web", Status: "error",
+			Error: err.Error(), Summary: "新建自定义模板失败：" + err.Error(),
+			DurationMS: int(time.Since(start).Milliseconds()),
+		})
 		writeErr(w, 400, err.Error())
 		return
 	}
+	s.recordFeatureCall(r.Context(), db.FeatureCall{
+		Feature: FeatureNuclei, Action: "create", Source: "web",
+		RefType: "nuclei_template", RefID: meta.ID,
+		Summary:    fmt.Sprintf("新建自定义模板「%s」", meta.ID),
+		DurationMS: int(time.Since(start).Milliseconds()),
+	})
 	writeJSON(w, 201, meta)
 }
 
 // PUT /api/nuclei/templates/{id} {yaml}
 func (s *Server) updateNucleiTemplate(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	id := strings.TrimSpace(r.PathValue("id"))
 	var body struct {
 		YAML string `json:"yaml"`
@@ -109,28 +176,59 @@ func (s *Server) updateNucleiTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 	meta, err := s.nucleiManager().UpdateCustomTemplate(id, body.YAML)
 	if err != nil {
+		s.recordFeatureCall(r.Context(), db.FeatureCall{
+			Feature: FeatureNuclei, Action: "update", Source: "web", Status: "error",
+			RefType: "nuclei_template", RefID: id, Error: err.Error(),
+			Summary:    "更新自定义模板失败：" + err.Error(),
+			DurationMS: int(time.Since(start).Milliseconds()),
+		})
 		writeErr(w, 400, err.Error())
 		return
 	}
+	s.recordFeatureCall(r.Context(), db.FeatureCall{
+		Feature: FeatureNuclei, Action: "update", Source: "web",
+		RefType: "nuclei_template", RefID: id,
+		Summary:    fmt.Sprintf("更新自定义模板「%s」", id),
+		DurationMS: int(time.Since(start).Milliseconds()),
+	})
 	writeJSON(w, 200, meta)
 }
 
 // DELETE /api/nuclei/templates/{id}
 func (s *Server) deleteNucleiTemplate(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	id := strings.TrimSpace(r.PathValue("id"))
 	if err := s.nucleiManager().DeleteCustomTemplate(id); err != nil {
+		s.recordFeatureCall(r.Context(), db.FeatureCall{
+			Feature: FeatureNuclei, Action: "delete", Source: "web", Status: "error",
+			RefType: "nuclei_template", RefID: id, Error: err.Error(),
+			Summary:    "删除自定义模板失败：" + err.Error(),
+			DurationMS: int(time.Since(start).Milliseconds()),
+		})
 		writeErr(w, 400, err.Error())
 		return
 	}
+	s.recordFeatureCall(r.Context(), db.FeatureCall{
+		Feature: FeatureNuclei, Action: "delete", Source: "web",
+		RefType: "nuclei_template", RefID: id,
+		Summary:    fmt.Sprintf("删除自定义模板「%s」", id),
+		DurationMS: int(time.Since(start).Milliseconds()),
+	})
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
 // POST /api/nuclei/update — 异步更新二进制与官方模板。
 func (s *Server) startNucleiUpdate(w http.ResponseWriter, r *http.Request) {
+	updateStart := time.Now()
 	s.nucleiUpdateMu.Lock()
 	if s.nucleiUpdate != nil && s.nucleiUpdate.Running {
 		snap := *s.nucleiUpdate
 		s.nucleiUpdateMu.Unlock()
+		s.recordFeatureCall(r.Context(), db.FeatureCall{
+			Feature: FeatureNuclei, Action: "update", Source: "web", Status: "denied",
+			Summary:    "已有 nuclei 更新任务进行中",
+			DurationMS: int(time.Since(updateStart).Milliseconds()),
+		})
 		writeJSON(w, 409, snap)
 		return
 	}
@@ -181,6 +279,26 @@ func (s *Server) startNucleiUpdate(w http.ResponseWriter, r *http.Request) {
 			Kind: kind, Title: title, Category: "规则库", Severity: severity,
 			Summary: summary, ActionURL: "/function/nuclei-templates",
 		})
+
+		call := db.FeatureCall{
+			Feature: FeatureNuclei, Action: "update", Source: "web",
+			Summary:    summary,
+			DurationMS: int(time.Since(updateStart).Milliseconds()),
+		}
+		if err != nil {
+			call.Status = "error"
+			call.Error = err.Error()
+		} else if res != nil {
+			call.Result = featureJSON(map[string]any{
+				"template_count":        res.TemplateCount,
+				"custom_template_count": res.CustomTemplateCount,
+				"warnings":              res.Warnings,
+			})
+			if call.Summary == "" {
+				call.Summary = fmt.Sprintf("官方模板更新完成，共 %d 个模板", res.TemplateCount)
+			}
+		}
+		s.recordFeatureCall(context.Background(), call)
 	}()
 
 	writeJSON(w, 202, map[string]any{"running": true, "phase": "准备中", "percent": 0, "started_at": started})

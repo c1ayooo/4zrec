@@ -6,6 +6,7 @@ func TestNucleiToolNames(t *testing.T) {
 	s := &Server{}
 	want := map[string]bool{
 		"nuclei_scan":            true,
+		"fingerprint_verify":     true,
 		"nuclei_template_search": true,
 		"nuclei_update":          true,
 		"nuclei_status":          true,

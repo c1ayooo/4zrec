@@ -3,6 +3,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -10,10 +11,12 @@ import (
 	"time"
 
 	"github.com/c1ayooo/4zrec/internal/capability/recon/fingerprint"
+	"github.com/c1ayooo/4zrec/internal/domain/db"
 	"github.com/c1ayooo/4zrec/internal/platform/notify"
 )
 
 func (s *Server) fingerprintRulesList(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	pg := s.pg(w)
 	if pg == nil {
 		return
@@ -28,15 +31,37 @@ func (s *Server) fingerprintRulesList(w http.ResponseWriter, r *http.Request) {
 	if page < 1 {
 		page = 1
 	}
-	rows, total, err := store.ListRulesPage(r.Context(),
-		strings.TrimSpace(q.Get("query")), strings.TrimSpace(q.Get("source")), 50, (page-1)*50)
+	query := strings.TrimSpace(q.Get("query"))
+	source := strings.TrimSpace(q.Get("source"))
+	rows, total, err := store.ListRulesPage(r.Context(), query, source, 50, (page-1)*50)
 	if err != nil {
+		s.recordFeatureCall(r.Context(), db.FeatureCall{
+			Feature: FeatureFingerprint, Action: "search", Source: "web", Status: "error",
+			Query: query, Error: err.Error(),
+			DurationMS: int(time.Since(start).Milliseconds()),
+		})
 		writeErr(w, 500, "db: "+err.Error())
 		return
 	}
 	sources, _ := store.ListSources(r.Context())
 	var enabled int
 	_ = pg.QueryRow(`SELECT count(*) FROM fingerprint_rules WHERE enabled`).Scan(&enabled)
+	if query != "" || source != "" {
+		action := "list"
+		summary := fmt.Sprintf("指纹规则列出 %d 条", total)
+		if query != "" {
+			action = "search"
+			summary = fmt.Sprintf("指纹规则搜索「%s」命中 %d 条", query, total)
+		}
+		s.recordFeatureCall(r.Context(), db.FeatureCall{
+			Feature: FeatureFingerprint, Action: action, Source: "web",
+			Query: query, Summary: summary,
+			Result: featureJSON(map[string]any{
+				"total": total, "enabled": enabled, "source": source,
+			}),
+			DurationMS: int(time.Since(start).Milliseconds()),
+		})
+	}
 	writeJSON(w, 200, map[string]any{
 		"rules": rows, "total": total, "page": page, "enabled": enabled,
 		"sources": sources,
@@ -81,7 +106,13 @@ func (s *Server) fingerprintStatus(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/fingerprint/sync — 异步手动更新指纹规则库。
 func (s *Server) startFingerprintSync(w http.ResponseWriter, r *http.Request) {
+	syncStart := time.Now()
 	if s.m.FingerprintSyncing() {
+		s.recordFeatureCall(r.Context(), db.FeatureCall{
+			Feature: FeatureFingerprint, Action: "sync", Source: "web", Status: "denied",
+			Summary:    "指纹库自动同步进行中",
+			DurationMS: int(time.Since(syncStart).Milliseconds()),
+		})
 		writeErr(w, 409, "指纹库自动同步进行中，请稍后再试")
 		return
 	}
@@ -89,6 +120,11 @@ func (s *Server) startFingerprintSync(w http.ResponseWriter, r *http.Request) {
 	if s.fingerprintSync != nil && s.fingerprintSync.Running {
 		snap := *s.fingerprintSync
 		s.fingerprintSyncMu.Unlock()
+		s.recordFeatureCall(r.Context(), db.FeatureCall{
+			Feature: FeatureFingerprint, Action: "sync", Source: "web", Status: "denied",
+			Summary:    "已有指纹库同步任务进行中",
+			DurationMS: int(time.Since(syncStart).Milliseconds()),
+		})
 		writeJSON(w, 409, snap)
 		return
 	}
@@ -127,6 +163,7 @@ func (s *Server) startFingerprintSync(w http.ResponseWriter, r *http.Request) {
 				job.Percent = 100
 			}
 		}
+		jobError := job.Error
 		s.fingerprintSyncMu.Unlock()
 
 		imported, failed := 0, 0
@@ -145,6 +182,20 @@ func (s *Server) startFingerprintSync(w http.ResponseWriter, r *http.Request) {
 			Summary:   fmt.Sprintf("导入 %d 条；失败来源 %d/%d", imported, failed, len(outcomes)),
 			ActionURL: "/system/fingerprint",
 		})
+
+		call := db.FeatureCall{
+			Feature: FeatureFingerprint, Action: "sync", Source: "web",
+			Summary: fmt.Sprintf("指纹库同步完成：导入 %d 条，失败来源 %d/%d", imported, failed, len(outcomes)),
+			Result: featureJSON(map[string]any{
+				"imported": imported, "failed": failed, "sources": len(outcomes),
+			}),
+			DurationMS: int(time.Since(syncStart).Milliseconds()),
+		}
+		if len(outcomes) == 0 || failed == len(outcomes) {
+			call.Status = "error"
+			call.Error = jobError
+		}
+		s.recordFeatureCall(context.Background(), call)
 	}()
 
 	writeJSON(w, 202, map[string]any{"running": true, "phase": "准备中", "percent": 0, "started_at": started})

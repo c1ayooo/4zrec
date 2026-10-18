@@ -51,6 +51,52 @@ const mockConversations = structuredClone(D.conversations);
 const mockRetests: FindingRetest[] = [];
 const mockRetestMessages: Record<number, Activity[]> = {};
 
+// 三个功能页的“调用历史”演示数据。时间按模块加载时刻生成，保证展示相对新鲜。
+const mockFeatureCalls = [
+  {
+    id: 3,
+    ts: new Date(Date.now() - 2 * 60_000).toISOString(),
+    feature: "vulnkb",
+    action: "search",
+    source: "web",
+    status: "ok",
+    actor: "admin",
+    query: "泛微 OA",
+    summary: "漏洞库搜索「泛微 OA」命中 3 条",
+    duration_ms: 42,
+    request: { q: "泛微 OA" },
+    result: { total: 3 },
+  },
+  {
+    id: 2,
+    ts: new Date(Date.now() - 11 * 60_000).toISOString(),
+    feature: "nuclei",
+    action: "scan",
+    source: "agent",
+    status: "ok",
+    actor: "worker",
+    task_id: 42,
+    query: "https://demo.example.com",
+    summary: "扫描 1 个目标，命中 2 条（18 模板，耗时 4.2s）",
+    duration_ms: 4210,
+    request: { targets: ["https://demo.example.com"], tags: ["exposure"] },
+    result: { output: "[high] CVE-2024-0001 | Demo Product RCE\n  命中: https://demo.example.com/x" },
+  },
+  {
+    id: 1,
+    ts: new Date(Date.now() - 45 * 60_000).toISOString(),
+    feature: "fingerprint",
+    action: "sync",
+    source: "schedule",
+    status: "ok",
+    actor: "system",
+    summary: "指纹库同步完成：导入 120 条，失败来源 0/3",
+    duration_ms: 1830,
+    request: {},
+    result: { imported: 120, failed: 0, sources: 3 },
+  },
+];
+
 // ── 关联流量证据(finding traffic) ─────────────────────────────────────────────
 // 后端把请求/响应快照独立存到 evidence 表,前端详情页用 FindingTrafficPanel 展示。
 // demo 里为部分漏洞预置绑定,快照直接引用 mock 抓包(data.traffic.exchanges),
@@ -2218,6 +2264,33 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   if (path === "/traffic/hosts") return { hosts: D.trafficHosts };
   if (path === "/traffic") return D.traffic;
   if (path === "/traffic/exchange") return D.trafficDetail;
+  if (path === "/feature-calls/stats") {
+    const feature = q.get("feature") ?? "";
+    const rows = feature ? mockFeatureCalls.filter((c) => c.feature === feature) : mockFeatureCalls;
+    const ok = rows.filter((c) => c.status === "ok").length;
+    const error = rows.filter((c) => c.status === "error").length;
+    const denied = rows.filter((c) => c.status === "denied").length;
+    const avg = rows.length ? Math.round(rows.reduce((n, c) => n + c.duration_ms, 0) / rows.length) : 0;
+    return {
+      stats: {
+        total: rows.length,
+        ok,
+        error,
+        denied,
+        avg_duration_ms: avg,
+        last_at: rows[0]?.ts,
+      },
+    };
+  }
+  if (path === "/feature-calls" && m === "GET") {
+    const feature = q.get("feature") ?? "";
+    const rows = feature ? mockFeatureCalls.filter((c) => c.feature === feature) : mockFeatureCalls;
+    return { items: rows, total: rows.length, page: 1, size: 50 };
+  }
+  if (path.startsWith("/feature-calls/") && m === "GET") {
+    const id = Number(seg[1]);
+    return { call: mockFeatureCalls.find((c) => c.id === id) ?? mockFeatureCalls[0] };
+  }
   if (path === "/nuclei/status")
     return {
       root: "/data/nuclei",

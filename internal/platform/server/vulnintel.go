@@ -1,26 +1,45 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/c1ayooo/4zrec/internal/domain/db"
 )
 
 // pgListVulnIntel 分页列出情报流。severity 精确,q 模糊匹配标题/CVE/来源。
 func (s *Server) pgListVulnIntel(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	q := r.URL.Query()
 	page := atoiDefault(q.Get("page"), 0)
 	size := atoiDefault(q.Get("size"), 50)
 	entries, total, err := s.m.PG().ListVulnIntel(q.Get("q"), q.Get("severity"), page, size)
 	if err != nil {
+		s.recordFeatureCall(r.Context(), db.FeatureCall{
+			Feature: FeatureVulnKB, Action: "search", Source: "web", Status: "error",
+			Query: q.Get("q"), Error: err.Error(),
+			DurationMS: int(time.Since(start).Milliseconds()),
+		})
 		writeErr(w, 500, err.Error())
 		return
+	}
+	if q.Get("q") != "" || q.Get("severity") != "" {
+		s.recordFeatureCall(r.Context(), db.FeatureCall{
+			Feature: FeatureVulnKB, Action: "search", Source: "web",
+			Query:      q.Get("q"),
+			Summary:    fmt.Sprintf("情报流搜索命中 %d 条", total),
+			Result:     featureJSON(map[string]any{"total": total, "severity": q.Get("severity")}),
+			DurationMS: int(time.Since(start).Milliseconds()),
+		})
 	}
 	writeJSON(w, 200, map[string]any{"entries": entries, "total": total})
 }
 
 // pgGetVulnIntel 返回单条完整情报（统一漏洞库详情用）。
 func (s *Server) pgGetVulnIntel(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		writeErr(w, 400, "invalid id")
@@ -28,15 +47,32 @@ func (s *Server) pgGetVulnIntel(w http.ResponseWriter, r *http.Request) {
 	}
 	entry, err := s.m.PG().GetVulnIntel(id)
 	if err != nil {
+		s.recordFeatureCall(r.Context(), db.FeatureCall{
+			Feature: FeatureVulnKB, Action: "view", Source: "web", Status: "error",
+			RefType: "vuln_intel", RefID: strconv.FormatInt(id, 10), Error: err.Error(),
+			DurationMS: int(time.Since(start).Milliseconds()),
+		})
 		writeErr(w, 404, "not found")
 		return
 	}
+	s.recordFeatureCall(r.Context(), db.FeatureCall{
+		Feature: FeatureVulnKB, Action: "view", Source: "web",
+		RefType: "vuln_intel", RefID: strconv.FormatInt(id, 10),
+		Summary:    fmt.Sprintf("查看漏洞情报「%s」", entry.Title),
+		DurationMS: int(time.Since(start).Milliseconds()),
+	})
 	writeJSON(w, 200, map[string]any{"entry": entry})
 }
 
 // pgVulnIntelRefresh 触发一次立即轮询(非阻塞,后台执行)。
-func (s *Server) pgVulnIntelRefresh(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) pgVulnIntelRefresh(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	s.m.vulnIntel.Refresh()
+	s.recordFeatureCall(r.Context(), db.FeatureCall{
+		Feature: FeatureVulnKB, Action: "refresh", Source: "web",
+		Summary:    "触发漏洞情报刷新（后台执行）",
+		DurationMS: int(time.Since(start).Milliseconds()),
+	})
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 

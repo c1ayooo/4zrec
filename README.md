@@ -95,7 +95,7 @@ docker compose up -d          # 拉取 ghcr.io/c1ayooo/4zrec 镜像 + postgres
 
 - **基础/网络**：`nmap`、`masscan`、`curl`、`wget`、`git`、`jq`、`ripgrep`、`dig`、`ping`、`nc`、`telnet`、`whois`、`ssh`、`psql`、`mysql`
 - **Web/漏洞**：`sqlmap`、`whatweb`、`ffuf`、`gobuster`、`feroxbuster`、`subfinder`、`httpx`、`dnsx`、`katana`、`naabu`、`amass`、`puredns`、`shuffledns`、`massdns`
-- **nuclei（项目自带）**：镜像不预装 nuclei；首次使用 `nuclei_scan` 时由平台下载到 `data/nuclei/`（二进制 + 模板），并按设置自动更新，不写系统目录或用户 HOME。可在「系统设置 → nuclei 模板扫描」里开关、调整更新间隔/引导版本/扫描上限，并查看安装状态；模板在「功能 → 信息收集 → nuclei 模板」查看，官方只读、自定义可编辑（存放在 `data/nuclei/custom-templates/`，必须带 `info.author`）。模板页可直接选择代理库中的更新代理。
+- **nuclei（项目自带）**：镜像不预装 nuclei；首次使用 `nuclei_scan` 时由平台下载到 `data/nuclei/`（二进制 + 模板），并按设置自动更新，不写系统目录或用户 HOME。可在「系统设置 → nuclei 模板扫描」里开关、调整更新间隔/引导版本/扫描上限，并查看安装状态；模板在「功能 → 信息收集 → nuclei 模板」查看，官方只读、自定义可编辑（存放在 `data/nuclei/custom-templates/`，必须带 `info.author`）。自定义模板属于运行时资产，**不进入 git**；目录有新增/删除/修改时索引会自动热加载（约 2 秒内），不需要重启平台。模板页带「调用历史」tab，可查看检索、查看、新建/编辑/删除、扫描和更新记录。模板页可直接选择代理库中的更新代理。
 - **指纹规则库**：24h 自动同步 + 页面手动更新；手动更新带进度条和逐来源结果，并可在页面选择同步代理（代理库中的 mihomo / 内网 SOCKS / 直连）。
 - **浏览器/报告**：Node 20、Playwright MCP/CLI、js-reverse-mcp、Chromium、Python 3.12、`python-docx`、Python Playwright
 - **数据资产**：`configs/`（SaaS/CDN/成功信号规则与指纹种子）与 `vulnkb/`（1day 漏洞库）
@@ -143,7 +143,7 @@ CGO_ENABLED=0 go build -tags embedui -o 4zrec ./cmd/4zrec
 
 ```bash
 ./build.sh --release
-# 产物：dist/4zrec-0.3.3-*.zip
+# 产物：dist/4zrec-0.5.0-*.zip
 ```
 
 UPX 自解压二进制可能与部分 Linux 内核、虚拟化环境或安全策略不兼容，因此默认不启用。可用 `ZREC_TARGETS` 自定义目标；确认目标运行环境兼容时，可显式传入 `--upx` 进一步缩小二进制：
@@ -475,9 +475,11 @@ flowchart TB
 
 ### 新增子系统
 
-- **1day 漏洞知识库**：5,233 篇实战漏洞库（指纹表达式 / 请求 / Payload）解析入库，「漏洞库」页四字段检索；agent 新增 `search_vuln_kb` 工具——识别出产品直接拿现成利用，替代凭模型记忆构造。
+- **1day 漏洞知识库**：5,233 篇实战漏洞库（指纹表达式 / 请求 / Payload）解析入库，「漏洞库」页四字段检索；agent 新增 `search_vuln_kb` 工具——识别出产品直接拿现成利用，替代凭模型记忆构造。`search_vuln_kb` 同时检索情报流，返回 GitHub POC / `source_url` / 参考链接；漏洞库页带「调用历史」tab。
 - **漏洞情报自动采集与富化**：9 个公开情报源（阿里云 AVD / 长亭 / 奇安信 TI / OSCS / 微步 / Seebug / CISA KEV / Apache / 启明星辰）定时轮询入库；对带 CVE 条目自动富化 GitHub PoC（五档体检：恶意隔离 / 实验室标记）、GHSA+NVD 的 CVSS/CWE/受影响包、EPSS/KEV。
-- **原生指纹引擎**：三上游自动同步（wappalyzergo / webanalyze / dddd，15,000+ 规则，24h 周期 + 快照兜底），接入资产自动补全管线——HTTP 探测自动识别技术栈落 `technologies`，资产页徽章可点击直达漏洞库检索。
+- **原生指纹引擎**：三上游自动同步（wappalyzergo / webanalyze / dddd，15,000+ 规则，24h 周期 + 快照兜底），接入资产自动补全管线——HTTP 探测自动识别技术栈落 `technologies`，资产页徽章可点击直达漏洞库检索。指纹库页带「调用历史」tab。
+- **指纹驱动定向验证**：`fingerprint_scan`（或 enrich）写入 `technologies` 后，`search_vuln_kb`、`nuclei_template_search`、`nuclei_scan` 都必须有真实指纹证据。`nuclei_scan` 还要求 `based_on_product` / `based_on_cve`，只跑与识别结果相关的模板，禁用 `automatic` 和纯 tags/severity 宽范围扫描，并排除上传/DoS/爆破/默认口令类模板；自动选模板上限 20 个、显式模板上限 50 个、目标上限 200 个。新增 `fingerprint_verify` 工具一次生成“漏洞库 + 情报 POC + 模板”计划，默认只出计划，`execute=true` 才按产品分组执行。
+- **功能调用历史**：漏洞库 / nuclei 模板 / 指纹规则库三个页面统一新增「调用历史」tab；后端 `feature_call_log` 记录搜索、查看、Agent 工具调用、扫描、同步、模板 CRUD 等操作，支持时间/动作/来源/状态/关键词筛选和详情查看，默认保留 90 天。
 - **AI 渗透测试报告（移植自 AntiFox 并改造）**：AI 只写散文、测试过程由 agent 就地记录的结构化复现步骤（`reproduction`）确定性渲染——防编造；python-docx 渲染器内嵌，交付级 .docx（封面 / 目录域 / CVSS 指标表）；报告出具方 / Logo / 人员组织级设置。
 
 ### 品牌与其他

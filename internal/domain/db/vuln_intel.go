@@ -61,7 +61,8 @@ func (d *DB) ListVulnIntel(q, severity string, page, size int) ([]EnrichedVulnIn
 	var args []any
 	if q != "" {
 		args = append(args, "%"+q+"%")
-		where += ` AND (v.title ILIKE $1 OR v.cve ILIKE $1 OR v.source ILIKE $1)`
+		where += ` AND (v.title ILIKE $1 OR v.cve ILIKE $1 OR v.source ILIKE $1
+		             OR v.description ILIKE $1 OR v.affected ILIKE $1 OR v.tags ILIKE $1)`
 	}
 	if severity != "" {
 		args = append(args, severity)

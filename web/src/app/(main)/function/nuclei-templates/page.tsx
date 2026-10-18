@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { FeatureCallHistory } from "@/components/feature-call-history";
+import { ProxySlotSelect } from "@/components/proxy-slot-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -32,7 +34,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { ProxySlotSelect } from "@/components/proxy-slot-select";
 import { api } from "@/lib/api";
 import type { NucleiStatus, NucleiTemplateMeta, NucleiUpdateJob } from "@/lib/types";
 
@@ -54,7 +55,7 @@ http:
           - 200
 `;
 
-type Source = "official" | "custom";
+type Source = "official" | "custom" | "history";
 type EditorMode = "view" | "edit" | "create";
 
 interface EditorState {
@@ -92,6 +93,7 @@ export default function NucleiTemplatesPage() {
   }, []);
 
   const load = React.useCallback(async () => {
+    if (source === "history") return;
     setLoading(true);
     try {
       const res = await api.nucleiTemplates({
@@ -290,182 +292,189 @@ export default function NucleiTemplatesPage() {
           <TabsList>
             <TabsTrigger value="official">官方模板</TabsTrigger>
             <TabsTrigger value="custom">自定义模板</TabsTrigger>
+            <TabsTrigger value="history">调用历史</TabsTrigger>
           </TabsList>
         </Tabs>
-        <Button onClick={openCreate}>
-          <PlusIcon className="size-4" /> 新建自定义模板
-        </Button>
+        {source !== "history" && (
+          <Button onClick={openCreate}>
+            <PlusIcon className="size-4" /> 新建自定义模板
+          </Button>
+        )}
       </div>
 
-      <Card>
-        <CardContent className="space-y-3 px-4 pb-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative min-w-56 flex-1">
-              <SearchIcon className="text-muted-foreground absolute top-2.5 left-2.5 size-4" />
+      {source === "history" ? (
+        <FeatureCallHistory feature="nuclei" />
+      ) : (
+        <Card>
+          <CardContent className="space-y-3 px-4 pb-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative min-w-56 flex-1">
+                <SearchIcon className="text-muted-foreground absolute top-2.5 left-2.5 size-4" />
+                <Input
+                  className="pl-8"
+                  placeholder="搜 ID / 名称 / 标签 / CVE"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") applySearch();
+                  }}
+                />
+              </div>
+              <Select
+                value={severity}
+                onValueChange={(v) => {
+                  setSeverity(v);
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="w-36">
+                  <SelectValue placeholder="等级" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部等级</SelectItem>
+                  <SelectItem value="critical">critical</SelectItem>
+                  <SelectItem value="high">high</SelectItem>
+                  <SelectItem value="medium">medium</SelectItem>
+                  <SelectItem value="low">low</SelectItem>
+                  <SelectItem value="info">info</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select
+                value={type}
+                onValueChange={(v) => {
+                  setType(v);
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="w-32">
+                  <SelectValue placeholder="类型" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部类型</SelectItem>
+                  <SelectItem value="http">http</SelectItem>
+                  <SelectItem value="dns">dns</SelectItem>
+                  <SelectItem value="tcp">tcp</SelectItem>
+                  <SelectItem value="file">file</SelectItem>
+                  <SelectItem value="headless">headless</SelectItem>
+                  <SelectItem value="ssl">ssl</SelectItem>
+                  <SelectItem value="websocket">websocket</SelectItem>
+                  <SelectItem value="whois">whois</SelectItem>
+                  <SelectItem value="workflow">workflow</SelectItem>
+                </SelectContent>
+              </Select>
               <Input
-                className="pl-8"
-                placeholder="搜 ID / 名称 / 标签 / CVE"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                className="w-44"
+                placeholder="标签，逗号分隔"
+                value={tags}
+                onChange={(e) => {
+                  setTags(e.target.value);
+                  setPage(1);
+                }}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") applySearch();
+                  if (e.key === "Enter") setPage(1);
                 }}
               />
+              <Button onClick={applySearch}>
+                <SearchIcon className="size-4" /> 搜索
+              </Button>
             </div>
-            <Select
-              value={severity}
-              onValueChange={(v) => {
-                setSeverity(v);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="w-36">
-                <SelectValue placeholder="等级" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部等级</SelectItem>
-                <SelectItem value="critical">critical</SelectItem>
-                <SelectItem value="high">high</SelectItem>
-                <SelectItem value="medium">medium</SelectItem>
-                <SelectItem value="low">low</SelectItem>
-                <SelectItem value="info">info</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select
-              value={type}
-              onValueChange={(v) => {
-                setType(v);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="w-32">
-                <SelectValue placeholder="类型" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部类型</SelectItem>
-                <SelectItem value="http">http</SelectItem>
-                <SelectItem value="dns">dns</SelectItem>
-                <SelectItem value="tcp">tcp</SelectItem>
-                <SelectItem value="file">file</SelectItem>
-                <SelectItem value="headless">headless</SelectItem>
-                <SelectItem value="ssl">ssl</SelectItem>
-                <SelectItem value="websocket">websocket</SelectItem>
-                <SelectItem value="whois">whois</SelectItem>
-                <SelectItem value="workflow">workflow</SelectItem>
-              </SelectContent>
-            </Select>
-            <Input
-              className="w-44"
-              placeholder="标签，逗号分隔"
-              value={tags}
-              onChange={(e) => {
-                setTags(e.target.value);
-                setPage(1);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") setPage(1);
-              }}
-            />
-            <Button onClick={applySearch}>
-              <SearchIcon className="size-4" /> 搜索
-            </Button>
-          </div>
-          {warning && <p className="text-xs text-amber-500">{warning}</p>}
+            {warning && <p className="text-xs text-amber-500">{warning}</p>}
 
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>ID</TableHead>
-                  <TableHead>名称</TableHead>
-                  <TableHead>等级</TableHead>
-                  <TableHead>类型</TableHead>
-                  <TableHead>标签</TableHead>
-                  <TableHead>来源</TableHead>
-                  <TableHead className="text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loading && (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
                   <TableRow>
-                    <TableCell colSpan={7} className="text-muted-foreground py-8 text-center">
-                      <Loader2Icon className="mx-auto mb-2 size-5 animate-spin" />
-                      加载中…
-                    </TableCell>
+                    <TableHead>ID</TableHead>
+                    <TableHead>名称</TableHead>
+                    <TableHead>等级</TableHead>
+                    <TableHead>类型</TableHead>
+                    <TableHead>标签</TableHead>
+                    <TableHead>来源</TableHead>
+                    <TableHead className="text-right">操作</TableHead>
                   </TableRow>
-                )}
-                {!loading && items.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-muted-foreground py-8 text-center">
-                      暂无模板。
-                      {source === "official" ? "可点右上角「更新官方模板」下载。" : "点「新建自定义模板」添加。"}
-                    </TableCell>
-                  </TableRow>
-                )}
-                {!loading &&
-                  items.map((t) => (
-                    <TableRow
-                      key={`${t.source}:${t.id}`}
-                      className="cursor-pointer"
-                      onClick={() => void openTemplate(t)}
-                    >
-                      <TableCell className="font-mono text-xs">{t.id}</TableCell>
-                      <TableCell>{t.name}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{t.severity}</Badge>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-xs">{t.type}</TableCell>
-                      <TableCell className="text-muted-foreground max-w-56 truncate text-xs">
-                        {(t.tags ?? []).join(", ")}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={t.source === "custom" ? "default" : "secondary"}>
-                          {t.source === "custom" ? "自定义" : "官方"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void openTemplate(t);
-                          }}
-                        >
-                          查看
-                        </Button>
+                </TableHeader>
+                <TableBody>
+                  {loading && (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-muted-foreground py-8 text-center">
+                        <Loader2Icon className="mx-auto mb-2 size-5 animate-spin" />
+                        加载中…
                       </TableCell>
                     </TableRow>
-                  ))}
-              </TableBody>
-            </Table>
-          </div>
-
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-muted-foreground text-xs">
-              共 {total} 条 · 第 {page} / {totalPages} 页
-            </p>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page <= 1 || loading}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-              >
-                上一页
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page >= totalPages || loading}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                下一页
-              </Button>
+                  )}
+                  {!loading && items.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-muted-foreground py-8 text-center">
+                        暂无模板。
+                        {source === "official" ? "可点右上角「更新官方模板」下载。" : "点「新建自定义模板」添加。"}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {!loading &&
+                    items.map((t) => (
+                      <TableRow
+                        key={`${t.source}:${t.id}`}
+                        className="cursor-pointer"
+                        onClick={() => void openTemplate(t)}
+                      >
+                        <TableCell className="font-mono text-xs">{t.id}</TableCell>
+                        <TableCell>{t.name}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{t.severity}</Badge>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground text-xs">{t.type}</TableCell>
+                        <TableCell className="text-muted-foreground max-w-56 truncate text-xs">
+                          {(t.tags ?? []).join(", ")}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={t.source === "custom" ? "default" : "secondary"}>
+                            {t.source === "custom" ? "自定义" : "官方"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void openTemplate(t);
+                            }}
+                          >
+                            查看
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                </TableBody>
+              </Table>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-muted-foreground text-xs">
+                共 {total} 条 · 第 {page} / {totalPages} 页
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page <= 1 || loading}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  上一页
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page >= totalPages || loading}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  下一页
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Dialog
         open={editor !== null}

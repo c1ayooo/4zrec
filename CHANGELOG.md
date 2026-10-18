@@ -2,7 +2,21 @@
 
 本项目的重要变更记录在此文件中，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
-## [Unreleased]
+## [0.5.0] - 2026-10-18
+
+### 指纹驱动定向验证
+
+- **目标级门禁**：`fingerprint_scan`（或 enrich）把真实命中的 `technologies` 写入资产；`search_vuln_kb`、`nuclei_template_search`、`nuclei_scan` 没有指纹证据时直接拒绝，避免对未识别目标做无差别漏扫。
+- **模板级门禁**：`nuclei_scan` 必须提供 `based_on_product` 或 `based_on_cve`，显式模板也要校验与识别结果相关；禁用 `automatic` 和纯 tags/severity 宽范围扫描；自动选模板上限 20 个、显式模板上限 50 个、目标上限 200 个；多目标按产品逐目标校验；自动排除上传/DoS/爆破/默认口令/webshell/后门类模板。
+- **`fingerprint_verify` 计划工具**：一次调用读取目标指纹，汇总 1day 漏洞库、情报流 POC 和 nuclei 模板，只返回与识别结果相关的候选；默认只出计划，`execute=true` 时按产品分组调用 `nuclei_scan`（仍走模板级门禁）。
+- **链路提示**：`search_vuln_kb` / `nuclei_template_search` 输出直接给出下一步 `nuclei_scan` 参数建议；`search_vuln_kb` 扩绑到 recon/worker/pentest/auto，识别后无需转手 planner。
+
+### 功能调用历史
+
+- **统一账本**：新增 `feature_call_log` 表与 `GET /api/feature-calls`、`/stats`、`/{id}` 接口，记录漏洞库、nuclei 模板、指纹规则库的搜索、查看、Agent 工具调用、扫描、同步、模板 CRUD 等操作。
+- **三个页面新增「调用历史」tab**：漏洞库、nuclei 模板、指纹规则库共用一套历史组件，支持时间范围、动作、来源、状态、关键词筛选，以及请求/结果/错误详情和任务/会话归属。
+- **记录范围**：`search_vuln_kb`、`nuclei_scan`、`nuclei_template_search`、`nuclei_update`、`fingerprint_scan` 等 Agent 调用由统一 metering 写入；页面搜索/详情/同步/模板 CRUD 由 handler 写入。按需求不做脱敏，仅对超长字段截断；默认保留 90 天。
+- **工具 schema 刷新**：旧库的 `nuclei_scan`/`nuclei_template_search`/`search_vuln_kb` 工具行会自动刷成新参数（`based_on_*` / `product` / `targets` / `target`），一次性 flag 守卫。
 
 ### 认证与安全
 
@@ -43,6 +57,8 @@
 ### 漏洞库
 
 - **合并 1day 库与情报流**：`/function/vuln-kb` 去掉两个 tab，改为单一漏洞库列表；统一搜索、来源筛选（全部 / 1day 库 / 情报流）和分页，详情按来源展示 1day 打击字段或情报富化字段。底层仍保留 `vuln_kb` 与 `vuln_intel` 两张表，不迁移、不丢数据。
+- **Agent 检索覆盖情报流 POC**：`search_vuln_kb` 同时查 `vuln_kb` 和 `vuln_intel`，返回 GitHub POC 仓库 URL、`source_url`、参考链接、CVSS/CWE 等富化字段；情报检索扩展到 description / affected / tags，不再只匹配标题/CVE/来源。
+- **调用历史**：漏洞库页新增「调用历史」tab，记录搜索、详情查看、情报刷新和 Agent 查库。
 
 ### JS 逆向
 
@@ -66,6 +82,8 @@
 - **系统设置开关**：系统设置页新增 nuclei 卡片：总开关、自动更新、interactsh、更新间隔、引导版本、扫描上限，并展示只读状态（二进制版本 / 模板数量 / 上次更新）；新增 `GET /api/nuclei/status`。设置由 manager 每次扫描/更新重新读取，改完即时生效，无需重启。
 - **模板管理页**：「功能 → 信息收集 → nuclei 模板」新增模板页。官方模板只读，可搜索/按等级/类型/标签筛选、查看 YAML；自定义模板可新建、编辑、校验、删除，存放在 `<dataDir>/nuclei/custom-templates/`，不会被官方模板更新覆盖。扫描未显式指定 templates 时，tags/severity/type 同时作用于官方和自定义目录。新增模板列表/详情/校验/增改删与异步更新接口（`/api/nuclei/templates*`、`/api/nuclei/update`）。
 - **自定义模板必填 author**：nuclei 要求 `info.author`，保存/校验时缺少会直接拒绝；新建模板的默认骨架已带 `author: 4zrec`。模板详情也会展示作者。
+- **模板热加载**：自定义模板目录（`data/nuclei/custom-templates/`）变化后，索引最多每 2 秒检测一次并自动重建；新增/删除/修改模板不需要重启平台。自定义模板属于运行时资产，不进入 git。
+- **调用历史**：nuclei 模板页新增「调用历史」tab，记录模板检索、查看、校验、新建/编辑/删除、官方模板更新和 Agent 扫描。
 
 ### 证据门禁与报告一致性
 
@@ -1196,7 +1214,8 @@
 - [@Autumn-27](https://github.com/Autumn-27)
 - [@neouks](https://github.com/neouks)
 
-[Unreleased]: https://github.com/c1ayooo/4zrec/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/c1ayooo/4zrec/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/c1ayooo/4zrec/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/c1ayooo/4zrec/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/c1ayooo/4zrec/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/c1ayooo/4zrec/compare/v0.4.1...v0.4.2

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeFile(t *testing.T, path, body string) {
@@ -14,6 +15,77 @@ func writeFile(t *testing.T, path, body string) {
 	}
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestTemplateIndexPicksUpCustomChanges(t *testing.T) {
+	officialDir := t.TempDir()
+	customDir := t.TempDir()
+	writeFile(t, filepath.Join(officialDir, "http", "official.yaml"), `
+id: official-demo
+info:
+  name: Official Demo
+  severity: high
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+`)
+
+	idx := NewMultiIndex([]IndexDir{
+		{Path: officialDir, Source: SourceOfficial},
+		{Path: customDir, Source: SourceCustom},
+	})
+	if _, total, err := idx.List(ListOptions{Page: 1, Size: 10}); err != nil || total != 1 {
+		t.Fatalf("initial total=%d err=%v, want 1", total, err)
+	}
+
+	// External file drop: no Manager CRUD call, just a file appearing on disk.
+	writeFile(t, filepath.Join(customDir, "custom-new.yaml"), `
+id: custom-new
+info:
+  name: Custom New
+  severity: medium
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+`)
+	idx.mu.Lock()
+	idx.lastCheck = time.Time{}
+	idx.mu.Unlock()
+	if _, total, err := idx.List(ListOptions{Page: 1, Size: 10}); err != nil || total != 2 {
+		t.Fatalf("after add total=%d err=%v, want 2", total, err)
+	}
+
+	// Same path, changed severity: mtime/size must trigger a rebuild too.
+	writeFile(t, filepath.Join(customDir, "custom-new.yaml"), `
+id: custom-new
+info:
+  name: Custom New
+  severity: critical
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+`)
+	idx.mu.Lock()
+	idx.lastCheck = time.Time{}
+	idx.mu.Unlock()
+	meta, ok := idx.Get("custom-new")
+	if !ok || meta.Severity != "critical" {
+		t.Fatalf("after edit meta=%+v ok=%v, want critical", meta, ok)
+	}
+
+	// Deletion also refreshes.
+	if err := os.Remove(filepath.Join(customDir, "custom-new.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	idx.mu.Lock()
+	idx.lastCheck = time.Time{}
+	idx.mu.Unlock()
+	if _, total, err := idx.List(ListOptions{Page: 1, Size: 10}); err != nil || total != 1 {
+		t.Fatalf("after remove total=%d err=%v, want 1", total, err)
 	}
 }
 

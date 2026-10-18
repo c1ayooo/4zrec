@@ -187,6 +187,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	}
 	s.reconcileProxySelections()
 	s.initSideQuestions()
+	s.startFeatureCallPruner()
 	// 熔断阈值/冷却是失败路径上的热参数，启动时把全局重试策略推给 Registry 一次；
 	// 之后每次保存策略再推一次（saveLLMRetryPolicy）。
 	s.applyRetryPolicy()
@@ -855,6 +856,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/traffic/blob", s.getTrafficBlob)
 	mux.HandleFunc("GET /api/commands", s.pgListCommands)
 	mux.HandleFunc("GET /api/commands/stats", s.pgToolStats) // 按工具聚合调用次数
+	mux.HandleFunc("GET /api/feature-calls", s.getFeatureCalls)
+	mux.HandleFunc("GET /api/feature-calls/stats", s.getFeatureCallStats)
+	mux.HandleFunc("GET /api/feature-calls/{id}", s.getFeatureCall)
 	mux.HandleFunc("GET /api/vulnkb", s.pgListVulnKB)        // 漏洞知识库(1day 库)
 	mux.HandleFunc("GET /api/vulnkb/stats", s.pgVulnKBStats)
 	mux.HandleFunc("GET /api/vulnkb/{id}", s.pgGetVulnKB)

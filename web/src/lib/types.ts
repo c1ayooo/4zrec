@@ -1656,6 +1656,43 @@ export interface Tool {
   calls?: number; // persistent runtime invocation count (older APIs may omit it)
 }
 
+// ---- 功能调用历史（漏洞库 / nuclei 模板 / 指纹规则库）----
+export type FeatureCallFeature = "vulnkb" | "nuclei" | "fingerprint";
+export type FeatureCallSource = "web" | "agent" | "schedule" | "system";
+export type FeatureCallStatus = "ok" | "error" | "denied";
+
+export interface FeatureCall {
+  id: number;
+  ts: string;
+  feature: FeatureCallFeature;
+  action: string;
+  source: FeatureCallSource;
+  status: FeatureCallStatus;
+  actor?: string;
+  task_id?: number;
+  exploration_id?: number;
+  intent_id?: number;
+  session_id?: string;
+  project_id?: number;
+  ref_type?: string;
+  ref_id?: string;
+  query?: string;
+  summary: string;
+  request?: unknown;
+  result?: unknown;
+  error?: string;
+  duration_ms: number;
+}
+
+export interface FeatureCallStats {
+  total: number;
+  ok: number;
+  error: number;
+  denied: number;
+  avg_duration_ms: number;
+  last_at?: string;
+}
+
 // ---- Stats ----
 export interface Stats {
   assets: number;

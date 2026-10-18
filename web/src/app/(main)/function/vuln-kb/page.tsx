@@ -12,6 +12,7 @@ import {
   SearchIcon,
 } from "lucide-react";
 
+import { FeatureCallHistory } from "@/components/feature-call-history";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -19,14 +20,9 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import type {
-  VulnIntelEntry,
-  VulnIntelPOC,
-  VulnIntelStatus,
-  VulnKBEntry,
-  VulnLibraryEntry,
-} from "@/lib/types";
+import type { VulnIntelEntry, VulnIntelPOC, VulnIntelStatus, VulnKBEntry, VulnLibraryEntry } from "@/lib/types";
 
 const PAGE_SIZES = [25, 50, 100];
 const FP_MAX_LEN = 48;
@@ -36,15 +32,17 @@ function typeTone(v: string): string {
   if (/rce|命令|代码执行/i.test(v)) return "border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400";
   if (/注入|sql|inject|上传|deserial|反序列/i.test(v))
     return "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400";
-  if (/绕过|未授权|泄露|信息泄露/i.test(v))
-    return "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400";
+  if (/绕过|未授权|泄露|信息泄露/i.test(v)) return "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400";
   return "";
 }
 
 function intelTone(v: string): string {
-  if (v.includes("严重") || v.includes("critical")) return "border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400";
-  if (v.includes("高危") || v.includes("high")) return "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400";
-  if (v.includes("中危") || v.includes("medium")) return "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400";
+  if (v.includes("严重") || v.includes("critical"))
+    return "border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400";
+  if (v.includes("高危") || v.includes("high"))
+    return "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400";
+  if (v.includes("中危") || v.includes("medium"))
+    return "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400";
   return "";
 }
 
@@ -113,7 +111,18 @@ export default function VulnKbPage() {
         <BookOpenTextIcon className="size-5 text-muted-foreground" />
         <h1 className="text-lg font-semibold">漏洞库</h1>
       </div>
-      <LibraryTab />
+      <Tabs defaultValue="library" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="library">漏洞列表</TabsTrigger>
+          <TabsTrigger value="history">调用历史</TabsTrigger>
+        </TabsList>
+        <TabsContent value="library">
+          <LibraryTab />
+        </TabsContent>
+        <TabsContent value="history">
+          <FeatureCallHistory feature="vulnkb" />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
@@ -232,8 +241,16 @@ function LibraryTab() {
 
   const isIntel = selected?.source === "intel";
   const detailBits = isIntel
-    ? [intelDetail?.severity ?? selected?.severity, intelDetail?.cve ?? selected?.cve, intelDetail?.source ?? selected?.source_name]
-    : [kbDetail?.product ?? selected?.product, kbDetail?.vuln_type ?? selected?.vuln_type, kbDetail?.cve ?? selected?.cve];
+    ? [
+        intelDetail?.severity ?? selected?.severity,
+        intelDetail?.cve ?? selected?.cve,
+        intelDetail?.source ?? selected?.source_name,
+      ]
+    : [
+        kbDetail?.product ?? selected?.product,
+        kbDetail?.vuln_type ?? selected?.vuln_type,
+        kbDetail?.cve ?? selected?.cve,
+      ];
 
   return (
     <div className="space-y-4">
@@ -245,7 +262,11 @@ function LibraryTab() {
             : "9 个公开情报源自动轮询"}
         </p>
         <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing}>
-          {refreshing ? <Loader2Icon className="mr-1 size-4 animate-spin" /> : <RefreshCwIcon className="mr-1 size-4" />}
+          {refreshing ? (
+            <Loader2Icon className="mr-1 size-4 animate-spin" />
+          ) : (
+            <RefreshCwIcon className="mr-1 size-4" />
+          )}
           立即抓取情报
         </Button>
       </div>
@@ -344,11 +365,7 @@ function LibraryTab() {
                       className="max-w-0 truncate font-mono text-xs text-muted-foreground"
                       title={intel ? e.disclosure : e.fingerprint}
                     >
-                      {intel
-                        ? e.disclosure || "—"
-                        : e.fingerprint
-                          ? truncate(e.fingerprint, FP_MAX_LEN)
-                          : "—"}
+                      {intel ? e.disclosure || "—" : e.fingerprint ? truncate(e.fingerprint, FP_MAX_LEN) : "—"}
                     </TableCell>
                   </TableRow>
                 );
@@ -381,7 +398,13 @@ function LibraryTab() {
               ))}
             </SelectContent>
           </Select>
-          <Button variant="outline" size="icon" className="size-8" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
+          <Button
+            variant="outline"
+            size="icon"
+            className="size-8"
+            disabled={page === 0}
+            onClick={() => setPage((p) => p - 1)}
+          >
             <ChevronLeftIcon className="size-4" />
           </Button>
           <Button
@@ -516,7 +539,12 @@ function IntelDetail({ entry }: { entry: VulnIntelEntry }) {
           <ul className="space-y-1">
             {parseJSONArr(entry.refs).map((r, i) => (
               <li key={i} className="break-all text-xs">
-                <a href={r} target="_blank" rel="noreferrer" className="text-primary underline-offset-4 hover:underline">
+                <a
+                  href={r}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-primary underline-offset-4 hover:underline"
+                >
                   {r}
                 </a>
               </li>

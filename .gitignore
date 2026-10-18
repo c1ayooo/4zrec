@@ -1,4 +1,6 @@
 # backend
+# 运行时数据：业务库、nuclei 官方/自定义模板、上传与扫描结果等。
+# 其中 nuclei 模板不进 git；自定义模板放 data/nuclei/custom-templates/，由服务热加载。
 /data/
 *.db
 *.db-wal
