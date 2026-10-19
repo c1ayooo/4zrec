@@ -236,13 +236,27 @@
 - **漏洞 → 落地 → 接管（M2-4 闭环）**：`webshell_deploy` 已接投递通道。宿主在 `cmdi_probe` 确认 / `cmdi_execute` 成功时把注入点（URL、参数、位置、已验证模板）记进进程内注册表；投递时按目标 URL 找到该点，复用 `cmdi_execute` 走同一套门禁把 base64 载荷写入 `dir/filename`，返回落点 URL 与 `rm -f` 清理命令。载荷与口令不出现在命令、日志或证据里。
 - **真实靶机实测**（PHP 8.2 + Apache，`127.0.0.1:18080`）：`cmdi_probe` 确认 → `cmdi_execute` 拿到 `uid=33(www-data)` → `webshell_deploy` 落地 → `session_open(kind=webshell)` → `session_exec` 再拿到 `uid=33(www-data)` → 执行返回的清理命令后落点 404，webroot 仅剩原始三个文件。测试为 opt-in（`CAPKIT_LAB_URL`/`CAPKIT_LAB_WEBROOT`），CI 不依赖 Docker。
 - **依赖**：`require github.com/c1ayooo/capkit v0.4.12`。capkit 是私有仓库，构建与 CI 需 `GOPRIVATE=github.com/c1ayooo/*`（否则 GOPROXY 取不到）。
-- **会话控制台（Web）**：新增 `/function/sessions` 页面与 `GET /api/capkit/sessions`、`POST /api/capkit/sessions/open`、`/{id}/exec`、`/{id}/close` 四个接口。页面列出活动 foothold，按会话执行一次性命令并追加 stdout/stderr/exit，支持一键关闭；打开对话框覆盖 webshell/ssh/winrm/smb/cli，webshell 可指定 `shell_type`/`cmd_param`/`method`。Web 调用与 agent 走同一个桥接、同一条门禁链，项目级 API Key 只能看见和驱动本项目打开的会话。侧边栏「流量与执行」下新增「终端」入口。命令是 `session_exec` 的单次 exec 语义，不是 PTY（capkit 契约没有交互式 stdin），页面不伪造 shell 提示符。
+- **会话控制台（Web）**：新增 `/function/sessions` 页面与 `GET /api/capkit/sessions`、`POST /api/capkit/sessions/open`、`/{id}/exec`、`/{id}/close` 四个接口。页面列出活动 foothold，按会话执行一次性命令并追加 stdout/stderr/exit，支持一键关闭；打开对话框按类型分类（WebShell / 远程 Shell / Windows / 文件共享 / 数据库 / 本地），表单字段由后端返回的类型目录决定。Web 调用与 agent 走同一个桥接、同一条门禁链，项目级 API Key 只能看见和驱动本项目打开的会话。侧边栏「流量与执行」下新增「终端」入口。命令是 `session_exec` 的单次 exec 语义，不是 PTY（capkit 契约没有交互式 stdin），页面不伪造 shell 提示符。
+- **真实会话传输**：桥接现在注册 capkit 的 SSH（`sessionkit.SSHOwner`）、WinRM（`WinRMOpener`，走 gate-aware httpx）与 SMB（`SMBOpener`，走 gate-aware `ProcessRunner`）传输，WebShell 仍由宿主执行器驱动。`GET /api/capkit/sessions` 返回 `kinds` 目录，其 `available` 由「实际注册了哪些传输」决定，UI 只对可用类型放开提交——不会再出现能选中却打不开的类型。
+- **不提供的类型及其原因（显式列出而非留空白）**：`cli`（本地 Shell）跑在平台主机上，而平台主机不是项目授权目标，过不了 scope 围栏，本地命令请用带护栏的 Bash 工具；`db`（数据库）不属于 capkit 的会话传输，数据库连通与取数是独立能力，宿主尚未接入。
+- **靶场脚本**：新增 `scripts/capkit-labs.sh`，一条命令拉起 SSH（alpine + openssh）与 SMB（dperson/samba）靶机，并打印各类型的测试环境变量。配套 opt-in 测试：`TestLabSSHSession` / `TestLabSMBSession`（桥接层）与 `TestSessionAPISSHLab`（HTTP 接口层）。
+
+#### 实测结果（逐类型，2026-10-20）
+
+| 类型 | 靶机 | 结果 |
+|---|---|---|
+| WebShell | capkit-lab（php:8.2-apache @127.0.0.1:18080） | 通过：cmdi_probe 确认 → cmdi_execute `uid=33(www-data)` → webshell_deploy 落地 → session_open → session_exec `uid=33(www-data)` → 清理后落点 404 |
+| SSH | capkit-ssh-lab（alpine + openssh @127.0.0.1:12222） | 通过：桥接层与 HTTP 接口层各跑一轮 open→exec(`id`)→close，均为 `uid=` 输出 |
+| SMB | dperson/samba | **未验证**：本机 445 端口被 Windows 宿主占用，Docker 无法绑定；测试已就绪，在 445 空闲的 Linux 主机上可直接复跑 |
+| WinRM | 无 | **未验证**：需要 Windows 目标，Linux 的 Docker 起不了真实 WinRM；传输已注册，只有单元级覆盖 |
+| 本地 CLI | 不提供 | 见上：平台主机不是项目目标，scope 围栏无法为它授权 |
 
 #### 已知限制
 
 - **`webshell_deploy` 只认已确认的注入点**：它不会盲写。目标 URL 没有对应的 `cmdi_probe`/`cmdi_execute` 记录时直接报错并提示先确认；文件 URL 按“注入脚本所在目录 == 落盘目录”推导，目录不一致时 `session_open` 会明确失败。上传接口型投递通道尚未实现。
 - **capkit 工具的流量不入平台证据库**：它们的 HTTP 走 capkit 的 httpx，不经过 4zrec 的录制代理，因此「流量」页看不到这些请求。需要证据留存的工具应把 HTTPDoer 换成走录制代理的实现。
 - **plain 模板不支持文件操作**：`session_upload` / `session_download` 对这类 payload 返回明确的“不支持文件操作”，不是静默成功；要文件能力需换成带文件操作的 payload 协议（behinder/godzilla）。控制台目前也只提供命令执行，没有上传/下载入口。
+- **SMB 无法指定端口**：capkit 的 `SMBOpener` 没有把 `spec.Port` 传给 smbclient（只用于 scope 目标），smbclient 因此固定连 445。本机 445 被占用时 SMB 靶场无法启动，需要 445 空闲的环境，或上游补 `-p` 支持。
 - **identity 工具尚无站点注册**：`AuthFlowRegistry` 为空时 `identity_login` 报“该 kind 未注册”，不会伪登录；站点级登录脚本需宿主按项目装配。
 
 ### 资产同步（4zrecon，原 ScopeSentry）

@@ -45,11 +45,102 @@ type capkitOpenInput struct {
 	Labels  []string          `json:"labels"`
 }
 
+// capkitKindDTO is one entry of the session-type catalogue the UI builds its
+// form from. Availability is decided by the bridge (which transports are
+// actually registered), not by this list: a kind declared here but not
+// registered is reported unavailable instead of failing at open time.
+type capkitKindDTO struct {
+	ID        string   `json:"id"`
+	Label     string   `json:"label"`
+	Category  string   `json:"category"`
+	Available bool     `json:"available"`
+	Hint      string   `json:"hint,omitempty"`
+	Fields    []string `json:"fields"`
+}
+
+// capkitKindCatalog is the UI's session-type taxonomy. Fields name the inputs
+// the open form should show for that kind; the dialog renders only these, so a
+// kind never shows a field its transport ignores. Whether a kind can actually
+// be opened is decided at runtime by capkitKinds, not declared here.
+var capkitKindCatalog = []capkitKindDTO{
+	{
+		ID: "webshell", Label: "WebShell", Category: "webshell",
+		Fields: []string{"url", "password", "shell_type", "cmd_param", "method"},
+		Hint:   "填已落地 shell 的完整 URL；口令与命令参数名需与 payload 一致",
+	},
+	{
+		ID: "ssh", Label: "SSH", Category: "remote",
+		Fields: []string{"host", "port", "user", "secret"},
+		Hint:   "口令或 PEM 私钥；支持 exec/上传/下载/端口转发",
+	},
+	{
+		ID: "winrm", Label: "WinRM", Category: "windows",
+		Fields: []string{"host", "port", "user", "secret", "domain"},
+		Hint:   "默认走 http/5985；NTLM/Kerberos 需宿主在 HTTPDoer 侧终止认证",
+	},
+	{
+		ID: "smb", Label: "SMB 共享", Category: "share",
+		Fields: []string{"host", "port", "user", "secret", "share", "domain"},
+		Hint:   "无远程 shell，exec 执行的是 smbclient 子命令（ls/get/put/del）",
+	},
+	{
+		ID: "db", Label: "数据库", Category: "database",
+		Fields: []string{"host", "port", "user", "secret"},
+	},
+	{
+		ID: "cli", Label: "本地 Shell", Category: "local",
+		Fields: []string{"shell"},
+	},
+}
+
+// capkitUnsupported marks kinds the platform deliberately does not offer, with
+// the reason shown in the UI. Listing them beats leaving an unexplained gap:
+// "数据库" is the one users ask for first, and the answer is that capkit's
+// session transports do not cover it. "本地 Shell" is the second: the platform
+// host is not a project target, so a local session cannot pass the scope fence.
+var capkitUnsupported = map[string]string{
+	"db":  "capkit 的会话传输只有 webshell/ssh/winrm/smb，不含数据库；数据库连通与取数属于独立能力，宿主尚未接入。",
+	"cli": "本地 Shell 运行在平台主机上，而平台主机不是项目授权目标，过不了 scope 围栏；本地命令请用带护栏的 Bash 工具。",
+}
+
+// capkitKinds resolves the catalogue against the transports the bridge really
+// registered.
+func capkitKinds(bridge *capkitbridge.Bridge) []capkitKindDTO {
+	live := map[string]bool{}
+	if bridge != nil {
+		for _, k := range bridge.AvailableKinds() {
+			live[k] = true
+		}
+	}
+	out := make([]capkitKindDTO, 0, len(capkitKindCatalog))
+	for _, k := range capkitKindCatalog {
+		if reason, unsupported := capkitUnsupported[k.ID]; unsupported {
+			k.Available, k.Hint = false, reason
+		} else {
+			k.Available = live[k.ID]
+		}
+		out = append(out, k)
+	}
+	return out
+}
+
+// capkitKindAvailable reports whether a kind can be opened right now. Unknown
+// kinds are unavailable, so a typo is rejected with the same message as a
+// transport that is switched off.
+func capkitKindAvailable(bridge *capkitbridge.Bridge, kind string) bool {
+	for _, k := range capkitKinds(bridge) {
+		if k.ID == kind {
+			return k.Available
+		}
+	}
+	return false
+}
+
 // GET /api/capkit/sessions
 func (s *Server) capkitSessionList(w http.ResponseWriter, r *http.Request) {
 	bridge := s.capkitBridgeOrNil()
 	if bridge == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"sessions": []capkitSessionDTO{}, "enabled": false})
+		writeJSON(w, http.StatusOK, map[string]any{"sessions": []capkitSessionDTO{}, "enabled": false, "kinds": capkitKinds(nil)})
 		return
 	}
 	list := bridge.LiveSessions(scopedProjectID(r.Context()))
@@ -61,7 +152,9 @@ func (s *Server) capkitSessionList(w http.ResponseWriter, r *http.Request) {
 			Labels: info.Labels, Meta: info.Meta, ProjectID: info.ProjectID,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"sessions": out, "enabled": true})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"sessions": out, "enabled": true, "kinds": capkitKinds(bridge),
+	})
 }
 
 // POST /api/capkit/sessions/open
@@ -78,6 +171,10 @@ func (s *Server) capkitSessionOpen(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Kind == "" || in.Host == "" {
 		writeErr(w, http.StatusBadRequest, "kind 与 host 必填")
+		return
+	}
+	if !capkitKindAvailable(bridge, in.Kind) {
+		writeErr(w, http.StatusBadRequest, "不支持的会话类型: "+in.Kind)
 		return
 	}
 	cc := capkit.CallContext{ProjectID: scopedProjectID(r.Context()), Actor: capkitActor(r)}

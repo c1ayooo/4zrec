@@ -2198,9 +2198,21 @@ export interface CapkitSession {
   project_id?: number;
 }
 
+// 会话类型目录：后端按“实际注册了哪些传输”给出可用性，前端据此决定表单字段。
+export interface CapkitKind {
+  id: string;
+  label: string;
+  category: string;
+  available: boolean;
+  hint?: string;
+  /** 该类型需要哪些输入：url/host/port/user/secret/domain/share/shell_type/cmd_param/method/password */
+  fields: string[];
+}
+
 export interface CapkitSessionList {
   sessions: CapkitSession[];
   enabled: boolean;
+  kinds?: CapkitKind[];
 }
 
 export interface CapkitExecResult {

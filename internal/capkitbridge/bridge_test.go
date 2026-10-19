@@ -87,6 +87,30 @@ func TestBridgeExposesSessionAndIdentityTools(t *testing.T) {
 	}
 }
 
+func TestAvailableKindsMatchRegisteredTransports(t *testing.T) {
+	b := newTestBridge(t, &fakeExecutor{})
+	got := strings.Join(b.AvailableKinds(), ",")
+	// HTTP and Executor are supplied by the helper, Process is not: smb must
+	// not be advertised as openable. cli is never advertised — the platform
+	// host is not a project target, so a local session cannot be scoped.
+	if got != "webshell,ssh,winrm" {
+		t.Fatalf("AvailableKinds = %q, want webshell,ssh,winrm", got)
+	}
+	// A bridge without a WebShell executor must not advertise webshell.
+	bare, err := New(Options{
+		Scope: gates.StaticScope("127.0.0.1"),
+		HTTP:  httpx.New(gates.StaticScope("127.0.0.1"), gates.NewLimiter(), nopAudit{}),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	for _, kind := range bare.AvailableKinds() {
+		if kind == "webshell" {
+			t.Fatalf("未注入 Executor 却声明 webshell 可用")
+		}
+	}
+}
+
 func TestSessionRoundTripReachesExecutor(t *testing.T) {
 	exec := &fakeExecutor{}
 	b := newTestBridge(t, exec)

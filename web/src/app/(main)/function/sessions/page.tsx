@@ -16,10 +16,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
-import type { CapkitSession } from "@/lib/types";
+import type { CapkitKind, CapkitSession } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface LogEntry {
@@ -32,11 +40,24 @@ interface LogEntry {
   at: string;
 }
 
-const KINDS = ["webshell", "ssh", "winrm", "smb", "cli"];
+// 分类是给人看的导航层，真正的可用性由后端按“注册了哪些传输”返回。
+const CATEGORY_LABELS: Record<string, string> = {
+  webshell: "WebShell",
+  remote: "远程 Shell",
+  windows: "Windows",
+  share: "文件共享",
+  database: "数据库",
+  local: "本地",
+};
+
+const CATEGORY_ORDER = ["webshell", "remote", "windows", "share", "database", "local"];
+
+const PORT_DEFAULTS: Record<string, string> = { ssh: "22", winrm: "5985", smb: "445" };
 
 export default function SessionsPage() {
   const [sessions, setSessions] = React.useState<CapkitSession[]>([]);
   const [enabled, setEnabled] = React.useState(true);
+  const [kinds, setKinds] = React.useState<CapkitKind[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [selected, setSelected] = React.useState<string>("");
   const [logs, setLogs] = React.useState<Record<string, LogEntry[]>>({});
@@ -52,6 +73,7 @@ export default function SessionsPage() {
       const r = await api.capkitSessions();
       setSessions(r.sessions ?? []);
       setEnabled(r.enabled);
+      setKinds(r.kinds ?? []);
       setSelected((cur) => (r.sessions?.some((s) => s.id === cur) ? cur : (r.sessions?.[0]?.id ?? "")));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "加载会话失败");
@@ -106,6 +128,11 @@ export default function SessionsPage() {
   };
 
   const submitOpen = async (form: OpenForm) => {
+    const kind = kinds.find((k) => k.id === form.kind);
+    if (!kind || !kind.available) {
+      toast.error(kind?.hint || "该会话类型当前不可用");
+      return;
+    }
     setOpening(true);
     try {
       const options: Record<string, string> = {};
@@ -114,15 +141,20 @@ export default function SessionsPage() {
         options.cmd_param = form.cmdParam || "cmd";
         options.method = form.method;
       }
+      if (form.kind === "smb") {
+        options.share = form.share.trim() || "public";
+      }
       const created = await api.openCapkitSession({
         kind: form.kind,
-        host: form.host.trim(),
+        // cli 一类的本地会话没有地址，后端 schema 仍要求 host，填占位值。
+        host: form.host.trim() || "local",
         port: Number(form.port) || undefined,
         user: form.user.trim() || undefined,
         secret: form.secret || undefined,
+        domain: form.domain.trim() || undefined,
         options: Object.keys(options).length ? options : undefined,
       });
-      toast.success(`已打开 ${created.kind} 会话 ${created.id}`);
+      toast.success(`已打开 ${kind.label} 会话 ${created.id}`);
       setDialogOpen(false);
       setSelected(created.id);
       await load();
@@ -148,7 +180,7 @@ export default function SessionsPage() {
           </Button>
           <Button size="sm" onClick={() => setDialogOpen(true)}>
             <PlusIcon className="h-4 w-4" />
-            打开会话
+            新建终端
           </Button>
         </div>
       </div>
@@ -203,9 +235,10 @@ export default function SessionsPage() {
                       {s.project_id ? <div className="text-xs text-muted-foreground">项目 #{s.project_id}</div> : null}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" className="font-mono text-[11px]">
-                        {s.kind}
+                      <Badge variant="outline" className="text-[11px]">
+                        {kinds.find((k) => k.id === s.kind)?.label ?? s.kind}
                       </Badge>
+                      <div className="font-mono text-[11px] text-muted-foreground">{s.kind}</div>
                     </TableCell>
                     <TableCell className="text-right">
                       <Button
@@ -282,6 +315,7 @@ export default function SessionsPage() {
       <OpenSessionDialog
         open={dialogOpen}
         busy={opening}
+        kinds={kinds}
         onOpenChange={setDialogOpen}
         onSubmit={(form) => void submitOpen(form)}
       />
@@ -295,105 +329,198 @@ interface OpenForm {
   port: string;
   user: string;
   secret: string;
+  domain: string;
+  share: string;
   shellType: string;
   cmdParam: string;
   method: string;
+  shell: string;
 }
 
-const emptyForm: OpenForm = {
-  kind: "webshell",
-  host: "",
-  port: "",
-  user: "",
-  secret: "",
-  shellType: "php",
-  cmdParam: "cmd",
-  method: "POST",
-};
+function emptyForm(kind: string): OpenForm {
+  return {
+    kind,
+    host: "",
+    port: PORT_DEFAULTS[kind] ?? "",
+    user: "",
+    secret: "",
+    domain: "",
+    share: "public",
+    shellType: "php",
+    cmdParam: "cmd",
+    method: "POST",
+    shell: "",
+  };
+}
 
 function OpenSessionDialog({
   open,
   busy,
+  kinds,
   onOpenChange,
   onSubmit,
 }: {
   open: boolean;
   busy: boolean;
+  kinds: CapkitKind[];
   onOpenChange: (open: boolean) => void;
   onSubmit: (form: OpenForm) => void;
 }) {
-  const [form, setForm] = React.useState<OpenForm>(emptyForm);
+  const firstKind = kinds.find((k) => k.available)?.id ?? kinds[0]?.id ?? "webshell";
+  const [form, setForm] = React.useState<OpenForm>(() => emptyForm(firstKind));
   React.useEffect(() => {
-    if (open) setForm(emptyForm);
-  }, [open]);
+    if (open) setForm(emptyForm(firstKind));
+  }, [open, firstKind]);
 
   const set = <K extends keyof OpenForm>(key: K, value: OpenForm[K]) => setForm((prev) => ({ ...prev, [key]: value }));
+
+  const pickKind = (id: string) => setForm((prev) => ({ ...prev, kind: id, port: PORT_DEFAULTS[id] ?? "" }));
+
+  const selected = kinds.find((k) => k.id === form.kind);
+  const fields = selected?.fields ?? [];
+  const show = (field: string) => fields.includes(field);
+
+  const byCategory = React.useMemo(() => {
+    const grouped = new Map<string, CapkitKind[]>();
+    for (const k of kinds) {
+      const list = grouped.get(k.category) ?? [];
+      list.push(k);
+      grouped.set(k.category, list);
+    }
+    return [...grouped.entries()].sort((a, b) => CATEGORY_ORDER.indexOf(a[0]) - CATEGORY_ORDER.indexOf(b[0]));
+  }, [kinds]);
+
+  const needsAddress = show("url") || show("host");
+  const canSubmit = !!selected?.available && !busy && (!needsAddress || form.host.trim() !== "");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>打开会话</DialogTitle>
-          <DialogDescription>
-            webshell 的 host 填已落地 shell 的完整 URL；其余类型填主机。凭据只用于本次连接，不落库。
-          </DialogDescription>
+          <DialogTitle>新建终端</DialogTitle>
+          <DialogDescription>按类型分组；不可用的类型会说明原因。凭据只用于本次连接，不落库。</DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-1.5">
-              <Label htmlFor="sess-kind">类型</Label>
-              <Select value={form.kind} onValueChange={(v) => set("kind", v)}>
-                <SelectTrigger id="sess-kind">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {KINDS.map((k) => (
-                    <SelectItem key={k} value={k}>
-                      {k}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="sess-port">端口（可选）</Label>
-              <Input
-                id="sess-port"
-                value={form.port}
-                onChange={(e) => set("port", e.target.value)}
-                placeholder="22"
-                inputMode="numeric"
-              />
-            </div>
-          </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="sess-host">{form.kind === "webshell" ? "Shell URL" : "主机"}</Label>
-            <Input
-              id="sess-host"
-              value={form.host}
-              onChange={(e) => set("host", e.target.value)}
-              placeholder={form.kind === "webshell" ? "http://target/shell.php" : "10.0.0.5"}
-              className="font-mono"
-            />
+            <Label htmlFor="sess-kind">类型</Label>
+            <Select value={form.kind} onValueChange={pickKind}>
+              <SelectTrigger id="sess-kind">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {byCategory.map(([category, items]) => (
+                  <SelectGroup key={category}>
+                    <SelectLabel>{CATEGORY_LABELS[category] ?? category}</SelectLabel>
+                    {items.map((k) => (
+                      <SelectItem key={k.id} value={k.id} disabled={!k.available}>
+                        {k.label}
+                        {k.available ? "" : "（不可用）"}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
+
+          {selected?.hint && (
+            <div
+              className={cn(
+                "rounded-md border px-2.5 py-2 text-xs leading-relaxed",
+                selected.available
+                  ? "text-muted-foreground"
+                  : "border-destructive/40 bg-destructive/5 text-destructive",
+              )}
+            >
+              {selected.hint}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-1.5">
-              <Label htmlFor="sess-user">用户</Label>
-              <Input id="sess-user" value={form.user} onChange={(e) => set("user", e.target.value)} />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="sess-secret">口令 / 私钥</Label>
-              <Input
-                id="sess-secret"
-                type="password"
-                autoComplete="off"
-                value={form.secret}
-                onChange={(e) => set("secret", e.target.value)}
-              />
-            </div>
-          </div>
-          {form.kind === "webshell" && (
-            <div className="grid grid-cols-3 gap-3">
+            {show("url") && (
+              <div className="col-span-2 grid gap-1.5">
+                <Label htmlFor="sess-host">Shell URL</Label>
+                <Input
+                  id="sess-host"
+                  value={form.host}
+                  onChange={(e) => set("host", e.target.value)}
+                  placeholder="http://target/shell.php"
+                  className="font-mono"
+                />
+              </div>
+            )}
+            {show("host") && (
+              <div className={show("port") ? "grid gap-1.5" : "col-span-2 grid gap-1.5"}>
+                <Label htmlFor="sess-host">主机</Label>
+                <Input
+                  id="sess-host"
+                  value={form.host}
+                  onChange={(e) => set("host", e.target.value)}
+                  placeholder="10.0.0.5"
+                  className="font-mono"
+                />
+              </div>
+            )}
+            {show("port") && (
+              <div className="grid gap-1.5">
+                <Label htmlFor="sess-port">端口</Label>
+                <Input
+                  id="sess-port"
+                  value={form.port}
+                  onChange={(e) => set("port", e.target.value)}
+                  placeholder={PORT_DEFAULTS[form.kind] ?? ""}
+                  inputMode="numeric"
+                />
+              </div>
+            )}
+            {show("user") && (
+              <div className="grid gap-1.5">
+                <Label htmlFor="sess-user">用户</Label>
+                <Input id="sess-user" value={form.user} onChange={(e) => set("user", e.target.value)} />
+              </div>
+            )}
+            {show("domain") && (
+              <div className="grid gap-1.5">
+                <Label htmlFor="sess-domain">域（可选）</Label>
+                <Input id="sess-domain" value={form.domain} onChange={(e) => set("domain", e.target.value)} />
+              </div>
+            )}
+            {show("share") && (
+              <div className="grid gap-1.5">
+                <Label htmlFor="sess-share">共享名</Label>
+                <Input
+                  id="sess-share"
+                  value={form.share}
+                  onChange={(e) => set("share", e.target.value)}
+                  placeholder="public"
+                />
+              </div>
+            )}
+            {(show("secret") || show("password")) && (
+              <div className={show("user") ? "grid gap-1.5" : "col-span-2 grid gap-1.5"}>
+                <Label htmlFor="sess-secret">{show("password") ? "Shell 口令" : "口令 / 私钥"}</Label>
+                <Input
+                  id="sess-secret"
+                  type="password"
+                  autoComplete="off"
+                  value={form.secret}
+                  onChange={(e) => set("secret", e.target.value)}
+                />
+              </div>
+            )}
+            {show("shell") && (
+              <div className="col-span-2 grid gap-1.5">
+                <Label htmlFor="sess-shell-bin">Shell</Label>
+                <Input
+                  id="sess-shell-bin"
+                  value={form.shell}
+                  onChange={(e) => set("shell", e.target.value)}
+                  placeholder="/bin/sh"
+                  className="font-mono"
+                />
+              </div>
+            )}
+            {show("shell_type") && (
               <div className="grid gap-1.5">
                 <Label htmlFor="sess-shell">Shell 类型</Label>
                 <Select value={form.shellType} onValueChange={(v) => set("shellType", v)}>
@@ -409,10 +536,14 @@ function OpenSessionDialog({
                   </SelectContent>
                 </Select>
               </div>
+            )}
+            {show("cmd_param") && (
               <div className="grid gap-1.5">
                 <Label htmlFor="sess-param">命令参数</Label>
                 <Input id="sess-param" value={form.cmdParam} onChange={(e) => set("cmdParam", e.target.value)} />
               </div>
+            )}
+            {show("method") && (
               <div className="grid gap-1.5">
                 <Label htmlFor="sess-method">方法</Label>
                 <Select value={form.method} onValueChange={(v) => set("method", v)}>
@@ -428,14 +559,14 @@ function OpenSessionDialog({
                   </SelectContent>
                 </Select>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             取消
           </Button>
-          <Button disabled={busy || !form.host.trim()} onClick={() => onSubmit(form)}>
+          <Button disabled={!canSubmit} onClick={() => onSubmit(form)}>
             {busy && <Loader2Icon className="h-4 w-4 animate-spin" />}
             打开
           </Button>

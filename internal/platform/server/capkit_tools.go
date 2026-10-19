@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c1ayooo/capkit/adapters/exec"
 	"github.com/c1ayooo/capkit/adapters/httpx"
 	capkit "github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/gates"
@@ -51,6 +52,10 @@ func (s *Server) buildCapkitBridge() (*capkitbridge.Bridge, error) {
 	// on every redirect hop and applies per-host rate limiting, which is exactly
 	// the boundary a bridged tool must not bypass.
 	httpDoer := httpx.New(scope, limiter, audit)
+	// cli / smb sessions run through subprocesses (a local shell, smbclient).
+	// Giving them the gate-aware runner keeps the target check, the rate limit
+	// and the audit record on the same path as every other capkit call.
+	process := exec.New(scope, limiter, audit)
 
 	points := newConfirmedPoints()
 	deployer := &capkitDeployer{points: points}
@@ -61,6 +66,7 @@ func (s *Server) buildCapkitBridge() (*capkitbridge.Bridge, error) {
 		Limiter:  limiter,
 		Audit:    audit,
 		Executor: &webshellExecutor{http: httpDoer},
+		Process:  process,
 		Flows:    identitykit.NewAuthFlowRegistry(),
 		Deployer: deployer,
 		Context: func(ctx context.Context) capkit.CallContext {

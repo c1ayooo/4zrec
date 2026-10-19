@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -181,6 +182,112 @@ func TestSessionAPIOpenValidatesRequiredFields(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("缺 host 应 400, got %d %s", w.Code, w.Body.String())
 	}
+}
+
+func TestSessionAPIKindCatalogMatchesTransports(t *testing.T) {
+	s := newSessionAPIServer(t)
+	r := withProject(httptest.NewRequest(http.MethodGet, "/api/capkit/sessions", nil), 7)
+	w := httptest.NewRecorder()
+	s.capkitSessionList(w, r)
+	var out struct {
+		Kinds []capkitKindDTO `json:"kinds"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	byID := map[string]capkitKindDTO{}
+	for _, k := range out.Kinds {
+		byID[k.ID] = k
+	}
+	if !byID["webshell"].Available {
+		t.Fatalf("注入 Executor 后 webshell 应可用: %+v", byID["webshell"])
+	}
+	if !byID["ssh"].Available {
+		t.Fatalf("ssh opener 总是注册,应可用: %+v", byID["ssh"])
+	}
+	if byID["cli"].Available || byID["smb"].Available {
+		t.Fatalf("未注入 ProcessRunner 时 cli/smb 不应可用")
+	}
+	if byID["db"].Available {
+		t.Fatalf("数据库不是 capkit 会话类型,不应标记可用")
+	}
+	if byID["db"].Hint == "" {
+		t.Fatalf("不可用类型必须给出原因")
+	}
+	if byID["webshell"].Category == "" || len(byID["webshell"].Fields) == 0 {
+		t.Fatalf("目录项需要分类与字段: %+v", byID["webshell"])
+	}
+}
+
+func TestSessionAPIOpenRejectsUnavailableKind(t *testing.T) {
+	s := newSessionAPIServer(t)
+	r := withProject(httptest.NewRequest(http.MethodPost, "/api/capkit/sessions/open",
+		strings.NewReader(`{"kind":"db","host":"127.0.0.1"}`)), 7)
+	w := httptest.NewRecorder()
+	s.capkitSessionOpen(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("不可用类型应 400, got %d %s", w.Code, w.Body.String())
+	}
+}
+
+// TestSessionAPISSHLab drives the whole HTTP path — API handler, bridge, real
+// opener — against a real sshd. Opt-in: CAPKIT_SSH_LAB=127.0.0.1:12222.
+func TestSessionAPISSHLab(t *testing.T) {
+	addr := os.Getenv("CAPKIT_SSH_LAB")
+	if addr == "" {
+		t.Skip("未设置 CAPKIT_SSH_LAB")
+	}
+	host, portText, found := strings.Cut(addr, ":")
+	if !found {
+		t.Fatalf("地址需为 host:port: %q", addr)
+	}
+	s := newSessionAPIServer(t)
+
+	body := `{"kind":"ssh","host":"` + host + `","port":` + portText +
+		`,"user":"` + labEnvOr("CAPKIT_SSH_USER", "root") +
+		`","secret":"` + labEnvOr("CAPKIT_SSH_PASS", "capkit") + `"}`
+	req := withProject(httptest.NewRequest(http.MethodPost, "/api/capkit/sessions/open", strings.NewReader(body)), 7)
+	w := httptest.NewRecorder()
+	s.capkitSessionOpen(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("open: %d %s", w.Code, w.Body.String())
+	}
+	var opened capkitSessionDTO
+	if err := json.Unmarshal(w.Body.Bytes(), &opened); err != nil || opened.ID == "" {
+		t.Fatalf("open 响应异常: %s (%v)", w.Body.String(), err)
+	}
+
+	execReq := withProject(httptest.NewRequest(http.MethodPost, "/api/capkit/sessions/x/exec",
+		strings.NewReader(`{"command":"id"}`)), 7)
+	execReq.SetPathValue("id", opened.ID)
+	execW := httptest.NewRecorder()
+	s.capkitSessionExec(execW, execReq)
+	if execW.Code != http.StatusOK {
+		t.Fatalf("exec: %d %s", execW.Code, execW.Body.String())
+	}
+	var out struct {
+		Stdout string `json:"stdout"`
+	}
+	_ = json.Unmarshal(execW.Body.Bytes(), &out)
+	if !strings.Contains(out.Stdout, "uid=") {
+		t.Fatalf("ssh exec 输出异常: %q", out.Stdout)
+	}
+
+	closeReq := withProject(httptest.NewRequest(http.MethodPost, "/api/capkit/sessions/x/close",
+		strings.NewReader(`{}`)), 7)
+	closeReq.SetPathValue("id", opened.ID)
+	closeW := httptest.NewRecorder()
+	s.capkitSessionClose(closeW, closeReq)
+	if closeW.Code != http.StatusOK {
+		t.Fatalf("close: %d %s", closeW.Code, closeW.Body.String())
+	}
+}
+
+func labEnvOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }
 
 func TestSessionAPIWithoutBridgeIsDisabled(t *testing.T) {

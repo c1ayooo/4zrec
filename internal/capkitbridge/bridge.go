@@ -56,6 +56,11 @@ type Options struct {
 	// Executor drives WebShell sessions. Nil means session_open(kind=webshell)
 	// will report the kind as unregistered.
 	Executor shellsession.Executor
+	// Process backs the kinds that capkit routes through a subprocess: cli (a
+	// local shell) and smb (smbclient). Nil leaves both kinds unregistered.
+	Process capkit.ProcessRunner
+	// WinRMTLS selects https/5986 over http/5985 for the winrm kind.
+	WinRMTLS bool
 	// Flows lets the host assemble site logins once and share them with every
 	// identity_login call. Nil starts with an empty registry (login reports the
 	// kind as unregistered rather than pretending).
@@ -81,6 +86,10 @@ type Bridge struct {
 	// a multi-project host would show one project's footholds to another.
 	ownerMu sync.RWMutex
 	owners  map[string]int64
+	// kinds lists the session transports registered in this bridge. The host
+	// uses it to keep its UI honest: no selector entry for a kind the runtime
+	// cannot open.
+	kinds []string
 }
 
 // New builds the runtime. It fails closed: a missing required port is an error
@@ -110,8 +119,34 @@ func New(opts Options) (*Bridge, error) {
 	}
 
 	mgr := sessionkit.NewManager(nil, nil)
+	// Every kind the session tools advertise is registered here, so a kind that
+	// shows up in the UI is a kind that can actually be opened. Registering a
+	// transport whose port is missing would be worse than not offering it: the
+	// user would get a generic failure instead of "this transport is off".
+	var kinds []string
 	if opts.Executor != nil {
 		mgr.RegisterOpener("webshell", &shellkit.WebShellOpener{Executor: opts.Executor})
+		kinds = append(kinds, "webshell")
+	}
+	// SSH dials TCP directly; the session_open gate still re-checks the target
+	// against project scope before the dial, and the host may pin host keys.
+	mgr.RegisterOpener("ssh", &sessionkit.SSHOwner{})
+	kinds = append(kinds, "ssh")
+	if opts.HTTP != nil {
+		mgr.RegisterOpener("winrm", &sessionkit.WinRMOpener{HTTP: opts.HTTP, TLS: opts.WinRMTLS})
+		kinds = append(kinds, "winrm")
+	}
+	if opts.Process != nil {
+		// Routing through the host's ProcessRunner (never os/exec inside the
+		// kit) keeps gate, audit and sandbox policy on the host side.
+		//
+		// cli is deliberately not registered. A cli session runs on the
+		// platform host, which is not a project target, so the scope fence has
+		// nothing to authorize it against — session_open(kind=cli) is denied
+		// for every project. Agents already have the host's own guarded Bash
+		// tool for that, with interception rules attached.
+		mgr.RegisterOpener("smb", &sessionkit.SMBOpener{Runner: opts.Process})
+		kinds = append(kinds, "smb")
 	}
 
 	reg := capkit.NewRegistry()
@@ -155,8 +190,16 @@ func New(opts Options) (*Bridge, error) {
 	}
 	return &Bridge{
 		rt: rt, mgr: mgr, flows: flows, ctxFn: opts.Context, onResult: opts.OnResult,
-		owners: map[string]int64{},
+		owners: map[string]int64{}, kinds: kinds,
 	}, nil
+}
+
+// AvailableKinds returns the session transports this bridge can actually
+// open, sorted by registration order.
+func (b *Bridge) AvailableKinds() []string {
+	out := make([]string, len(b.kinds))
+	copy(out, b.kinds)
+	return out
 }
 
 // Flows exposes the registry so the host can assemble site logins at startup.
