@@ -52,17 +52,32 @@ func (s *Server) buildCapkitBridge() (*capkitbridge.Bridge, error) {
 	// the boundary a bridged tool must not bypass.
 	httpDoer := httpx.New(scope, limiter, audit)
 
-	return capkitbridge.New(capkitbridge.Options{
+	points := newConfirmedPoints()
+	deployer := &capkitDeployer{points: points}
+
+	bridge, err := capkitbridge.New(capkitbridge.Options{
 		Scope:    scope,
 		HTTP:     httpDoer,
 		Limiter:  limiter,
 		Audit:    audit,
 		Executor: &webshellExecutor{http: httpDoer},
 		Flows:    identitykit.NewAuthFlowRegistry(),
+		Deployer: deployer,
 		Context: func(ctx context.Context) capkit.CallContext {
 			return s.capkitCallContext(ctx)
 		},
+		// The deployer needs the runtime to reach the confirmed injection point,
+		// and the runtime is built with the deployer already inside it.
+		OnResult: func(ctx context.Context, tool string, input json.RawMessage, res capkit.Result) {
+			s.observeCapkitResult(ctx, tool, input, res)
+		},
 	})
+	if err != nil {
+		return nil, err
+	}
+	deployer.bridge = bridge
+	s.capkitPoints = points
+	return bridge, nil
 }
 
 // capkitCallContext maps the host's per-call attribution onto capkit's caller
@@ -97,6 +112,19 @@ var capkitToolBindings = map[string][]string{
 	"identity_csrf":        {"worker", "pentest", "recon", "auto"},
 	"identity_token_check": {"worker", "pentest", "recon", "auto"},
 	"job_status":           {"worker", "pentest", "auto"},
+	// exploitkit supplies the primitives the deployer and the agent both need:
+	// cmdi_probe confirms a point, cmdi_execute proves command output (and is
+	// what records the point for delivery). Bound to the same agents as the
+	// deploy tool so a confirm → deploy chain is one agent's work.
+	"cmdi_probe":     {"worker", "pentest", "auto"},
+	"cmdi_execute":   {"worker", "pentest", "auto"},
+	"ssti_probe":     {"worker", "pentest", "auto"},
+	"lfi_probe":      {"worker", "pentest", "auto"},
+	"lfi_read":       {"worker", "pentest", "auto"},
+	"sqli_probe":     {"worker", "pentest", "auto"},
+	"ssrf_probe":     {"worker", "pentest", "auto"},
+	"redis_gopher":   {"worker", "pentest", "auto"},
+	"deser_generate": {"worker", "pentest", "auto"},
 }
 
 // seedCapkitTools inserts the bridged tools into the tools table once, so they

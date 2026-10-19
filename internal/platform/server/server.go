@@ -64,6 +64,9 @@ type Server struct {
 	capkitMu     sync.Mutex
 	capkitBridge *capkitbridge.Bridge
 	capkitErr    error
+	// capkitPoints are the injection points proven in this process: the deployer
+	// reads them, cmdi_probe/cmdi_execute write them.
+	capkitPoints *confirmedPoints
 	// nucleiUpdateMu guards the async manual update job shown on the templates page.
 	nucleiUpdateMu sync.Mutex
 	nucleiUpdate   *nucleiUpdateState

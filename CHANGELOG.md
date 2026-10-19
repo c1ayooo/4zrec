@@ -230,15 +230,19 @@
 
 #### 新增的功能
 
-- **capkit 工具进入 agent 工具面**：`internal/capkitbridge` 把 capkit 的 `ToolSpec` 适配成宿主 `actool.CoreTool`（输入 schema 原样透出，结果统一渲染成 capkit 信封），`Server.hostTools()` 统一注入。12 个工具——`session_open/exec/upload/download/close/list`、`tunnel_open`、`webshell_deploy`、`identity_login/identity_csrf/identity_token_check`、`job_status`——与内置工具同权：`/system/tools` 可启停、按 agent 绑定，调用写进 `tool_usage` 与「工具执行」页历史。桥接不 import capkit 的 `all/`，避免把全部云 SDK 拉进宿主二进制。
+- **capkit 工具进入 agent 工具面**：`internal/capkitbridge` 把 capkit 的 `ToolSpec` 适配成宿主 `actool.CoreTool`（输入 schema 原样透出，结果统一渲染成 capkit 信封），`Server.hostTools()` 统一注入。22 个工具——会话七件套 + `tunnel_open` + `webshell_deploy`、身份三件套、`job_status`、exploitkit 的 10 个（`cmdi_probe`/`cmdi_execute`/`ssti_probe`/`lfi_probe`/`lfi_read`/`sqli_probe`/`ssrf_probe`/`redis_gopher`/`msf_execute`/`deser_generate`）——与内置工具同权：`/system/tools` 可启停、按 agent 绑定，调用写进 `tool_usage` 与「工具执行」页历史。桥接不 import capkit 的 `all/`，按需只注册 shellkit/identitykit/exploitkit，避免把全部云 SDK 拉进宿主二进制。
 - **宿主端口实现**（`internal/platform/server/capkit_tools.go`）：项目授权范围复用 `db.AuthorizedTarget`（范围外目标返回 `scope_denied` 信封，agent 看到的是“被拒”而不是“可重试的故障”）；出站 HTTP 用 capkit `adapters/httpx`（初始 URL 与每一跳跳转都复检 scope，并按目标限速）；审计落服务端日志（只记工具/风险/状态/耗时/项目，不含请求体与凭据）；调用上下文（项目、任务、actor）由宿主按 task/会话解析，**不取工具入参**。
 - **WebShell 会话接管**：宿主实现 shellkit 的 `session.Executor`，按 plain PHP/ASP/JSP 模板的协议（`pass` + 命令参数）发请求，GET 走 query、POST 走 body；`session_open(kind=webshell)` 的 `method/cmd_param/pass_param` 由入参透传到执行器。
+- **漏洞 → 落地 → 接管（M2-4 闭环）**：`webshell_deploy` 已接投递通道。宿主在 `cmdi_probe` 确认 / `cmdi_execute` 成功时把注入点（URL、参数、位置、已验证模板）记进进程内注册表；投递时按目标 URL 找到该点，复用 `cmdi_execute` 走同一套门禁把 base64 载荷写入 `dir/filename`，返回落点 URL 与 `rm -f` 清理命令。载荷与口令不出现在命令、日志或证据里。
+- **真实靶机实测**（PHP 8.2 + Apache，`127.0.0.1:18080`）：`cmdi_probe` 确认 → `cmdi_execute` 拿到 `uid=33(www-data)` → `webshell_deploy` 落地 → `session_open(kind=webshell)` → `session_exec` 再拿到 `uid=33(www-data)` → 执行返回的清理命令后落点 404，webroot 仅剩原始三个文件。测试为 opt-in（`CAPKIT_LAB_URL`/`CAPKIT_LAB_WEBROOT`），CI 不依赖 Docker。
 - **依赖**：`require github.com/c1ayooo/capkit v0.4.12`。capkit 是私有仓库，构建与 CI 需 `GOPRIVATE=github.com/c1ayooo/*`（否则 GOPROXY 取不到）。
 
 #### 已知限制
 
-- **`webshell_deploy` 尚未接投递通道**：工具已注册，但未注入宿主 `WebShellDeployer`，调用固定返回 `tool_missing`。投递通道需按目标实现（命令注入点按模板写文件 / 上传接口直传）。
+- **`webshell_deploy` 只认已确认的注入点**：它不会盲写。目标 URL 没有对应的 `cmdi_probe`/`cmdi_execute` 记录时直接报错并提示先确认；文件 URL 按“注入脚本所在目录 == 落盘目录”推导，目录不一致时 `session_open` 会明确失败。上传接口型投递通道尚未实现。
 - **capkit 工具的流量不入平台证据库**：它们的 HTTP 走 capkit 的 httpx，不经过 4zrec 的录制代理，因此「流量」页看不到这些请求。需要证据留存的工具应把 HTTPDoer 换成走录制代理的实现。
+- **plain 模板不支持文件操作**：`session_upload` / `session_download` 对这类 payload 返回明确的“不支持文件操作”，不是静默成功；要文件能力需换成带文件操作的 payload 协议（behinder/godzilla）。
+- **identity 工具尚无站点注册**：`AuthFlowRegistry` 为空时 `identity_login` 报“该 kind 未注册”，不会伪登录；站点级登录脚本需宿主按项目装配。
 - **plain 模板不支持文件操作**：`session_upload` / `session_download` 对这类 payload 返回明确的“不支持文件操作”，不是静默成功；要文件能力需换成带文件操作的 payload 协议（behinder/godzilla）。
 - **identity 工具尚无站点注册**：`AuthFlowRegistry` 为空时 `identity_login` 报“该 kind 未注册”，不会伪登录；站点级登录脚本需宿主按项目装配。
 

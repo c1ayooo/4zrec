@@ -22,6 +22,7 @@ import (
 
 	capkit "github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/gates"
+	"github.com/c1ayooo/capkit/kits/exploitkit"
 	"github.com/c1ayooo/capkit/kits/identitykit"
 	"github.com/c1ayooo/capkit/kits/sessionkit"
 	"github.com/c1ayooo/capkit/kits/shellkit"
@@ -61,14 +62,19 @@ type Options struct {
 	// Context maps the host's per-call context onto capkit's caller identity.
 	// The host supplies project/task/actor here; the bridge never invents them.
 	Context func(context.Context) capkit.CallContext
+	// OnResult, when set, observes every finished tool call. The host uses it to
+	// remember state that only a result reveals — a confirmed injection point
+	// being the case it exists for.
+	OnResult func(ctx context.Context, tool string, input json.RawMessage, res capkit.Result)
 }
 
 // Bridge holds a capkit runtime with the host ports bound.
 type Bridge struct {
-	rt    *capruntime.Runtime
-	mgr   *sessionkit.Manager
-	flows *identitykit.AuthFlowRegistry
-	ctxFn func(context.Context) capkit.CallContext
+	rt       *capruntime.Runtime
+	mgr      *sessionkit.Manager
+	flows    *identitykit.AuthFlowRegistry
+	ctxFn    func(context.Context) capkit.CallContext
+	onResult func(context.Context, string, json.RawMessage, capkit.Result)
 }
 
 // New builds the runtime. It fails closed: a missing required port is an error
@@ -103,8 +109,9 @@ func New(opts Options) (*Bridge, error) {
 	}
 
 	reg := capkit.NewRegistry()
-	// Same declarations as all.RegisterSessionWithDeployer / RegisterIdentity —
-	// written out here so this package does not pull all/ (and every kit) in.
+	// Same declarations as all.RegisterSessionWithDeployer / RegisterIdentity /
+	// RegisterExploit — written out here so this package does not pull all/
+	// (and every kit) in.
 	if err := reg.Add(capkit.Spec{
 		Manifest: shellkit.Manifest(),
 		New: func(deps capkit.Deps) (capkit.Capability, error) {
@@ -124,6 +131,14 @@ func New(opts Options) (*Bridge, error) {
 	}); err != nil {
 		return nil, err
 	}
+	// exploitkit supplies the delivery primitive webshell_deploy needs: a
+	// confirmed command-injection point is what lets the host write the payload.
+	if err := reg.Add(capkit.Spec{
+		Manifest: exploitkit.Manifest(),
+		New:      exploitkit.NewCapability,
+	}); err != nil {
+		return nil, err
+	}
 
 	rt, err := capruntime.New(capruntime.Config{
 		Scope: opts.Scope, Approval: approval, Limiter: limiter, Audit: audit,
@@ -132,7 +147,7 @@ func New(opts Options) (*Bridge, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Bridge{rt: rt, mgr: mgr, flows: flows, ctxFn: opts.Context}, nil
+	return &Bridge{rt: rt, mgr: mgr, flows: flows, ctxFn: opts.Context, onResult: opts.OnResult}, nil
 }
 
 // Flows exposes the registry so the host can assemble site logins at startup.
@@ -141,6 +156,18 @@ func (b *Bridge) Flows() *identitykit.AuthFlowRegistry { return b.flows }
 // Sessions exposes the manager (session_list/session_close already operate on
 // it; the host may also use it to close footholds on shutdown).
 func (b *Bridge) Sessions() *sessionkit.Manager { return b.mgr }
+
+// Call invokes a capkit tool directly, for host code that needs a capability as
+// a building block (the deployer reuses cmdi_execute instead of opening its own
+// HTTP path, so the same gates and evidence apply). It goes through the same
+// runtime as an agent call.
+func (b *Bridge) Call(ctx context.Context, tool string, input json.RawMessage, cc capkit.CallContext) (capkit.Result, error) {
+	res, err := b.rt.Call(ctx, tool, input, cc)
+	if b.onResult != nil {
+		b.onResult(ctx, tool, input, res)
+	}
+	return res, err
+}
 
 // Tools adapts every registered capkit tool to the host's CoreTool contract.
 func (b *Bridge) Tools() []actool.CoreTool {
@@ -223,6 +250,9 @@ func (b *Bridge) invoke(ctx context.Context, tool string, input json.RawMessage,
 		}
 	}
 	res, err := b.rt.Call(ctx, tool, input, cc)
+	if b.onResult != nil {
+		b.onResult(ctx, tool, input, res)
+	}
 	text := renderEnvelope(res)
 	if !res.OK {
 		// Gate blocks and tool failures both come back as a full envelope. The
