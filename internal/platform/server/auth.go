@@ -454,6 +454,11 @@ func projectKeyPathAllowed(method, path string) bool {
 	if path == "/api/tasks" {
 		return true // GET 列表 / POST 创建(创建时强制本项目)
 	}
+	if strings.HasPrefix(path, "/api/capkit/sessions") {
+		// 会话按打开时的项目隔离(capkitOwnsSession):项目 Key 只能看、驱动
+		// 本项目打开的 foothold,列表/打开/执行/关闭全部路由可进。
+		return true
+	}
 	if strings.HasPrefix(path, "/api/tasks/") {
 		rest := strings.TrimPrefix(path, "/api/tasks/")
 		seg := strings.SplitN(rest, "/", 2)[0]

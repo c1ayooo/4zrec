@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	capkit "github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/gates"
@@ -75,6 +76,11 @@ type Bridge struct {
 	flows    *identitykit.AuthFlowRegistry
 	ctxFn    func(context.Context) capkit.CallContext
 	onResult func(context.Context, string, json.RawMessage, capkit.Result)
+	// owners maps session id → the project that opened it. capkit's session
+	// manager is process-wide and knows nothing about projects, so without this
+	// a multi-project host would show one project's footholds to another.
+	ownerMu sync.RWMutex
+	owners  map[string]int64
 }
 
 // New builds the runtime. It fails closed: a missing required port is an error
@@ -147,7 +153,10 @@ func New(opts Options) (*Bridge, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Bridge{rt: rt, mgr: mgr, flows: flows, ctxFn: opts.Context, onResult: opts.OnResult}, nil
+	return &Bridge{
+		rt: rt, mgr: mgr, flows: flows, ctxFn: opts.Context, onResult: opts.OnResult,
+		owners: map[string]int64{},
+	}, nil
 }
 
 // Flows exposes the registry so the host can assemble site logins at startup.
@@ -166,7 +175,80 @@ func (b *Bridge) Call(ctx context.Context, tool string, input json.RawMessage, c
 	if b.onResult != nil {
 		b.onResult(ctx, tool, input, res)
 	}
+	if res.OK && cc.ProjectID > 0 {
+		b.noteSession(tool, input, res.Data, cc.ProjectID)
+	}
 	return res, err
+}
+
+// noteSession keeps the session→project map in step with opens and closes. The
+// session id is read from the envelope data (open) or the input (close), so it
+// stays correct even if a tool's data shape gains fields.
+func (b *Bridge) noteSession(tool string, input, data json.RawMessage, projectID int64) {
+	switch tool {
+	case "session_open":
+		var out struct {
+			SessionID string `json:"session_id"`
+		}
+		if json.Unmarshal(data, &out) == nil && out.SessionID != "" {
+			b.ownerMu.Lock()
+			b.owners[out.SessionID] = projectID
+			b.ownerMu.Unlock()
+		}
+	case "session_close":
+		var in struct {
+			SessionID string `json:"session_id"`
+		}
+		if json.Unmarshal(input, &in) == nil && in.SessionID != "" {
+			b.ownerMu.Lock()
+			delete(b.owners, in.SessionID)
+			b.ownerMu.Unlock()
+		}
+	}
+}
+
+// SessionInfo is one entry of SessionList: the capkit info plus the owning
+// project. Hosts filter on Project to isolate multi-project views.
+type SessionInfo struct {
+	capkit.SessionInfo
+	ProjectID int64 `json:"project_id"`
+}
+
+// LiveSessions returns live sessions. When projectID > 0 only that project's
+// footholds come back; 0 returns all of them.
+func (b *Bridge) LiveSessions(projectID int64) []SessionInfo {
+	list := b.mgr.List()
+	b.ownerMu.RLock()
+	defer b.ownerMu.RUnlock()
+	out := make([]SessionInfo, 0, len(list))
+	for _, info := range list {
+		owner := b.owners[info.ID]
+		if projectID > 0 && owner != projectID {
+			continue
+		}
+		out = append(out, SessionInfo{SessionInfo: info, ProjectID: owner})
+	}
+	return out
+}
+
+// CloseSession closes one session.
+func (b *Bridge) CloseSession(id string) error {
+	err := b.mgr.Close(id)
+	if err == nil {
+		b.ownerMu.Lock()
+		delete(b.owners, id)
+		b.ownerMu.Unlock()
+	}
+	return err
+}
+
+// SessionProject returns the project that opened the session. ok is false for
+// sessions opened without a project context (global / unscoped).
+func (b *Bridge) SessionProject(id string) (int64, bool) {
+	b.ownerMu.RLock()
+	defer b.ownerMu.RUnlock()
+	p, ok := b.owners[id]
+	return p, ok
 }
 
 // Tools adapts every registered capkit tool to the host's CoreTool contract.
@@ -252,6 +334,9 @@ func (b *Bridge) invoke(ctx context.Context, tool string, input json.RawMessage,
 	res, err := b.rt.Call(ctx, tool, input, cc)
 	if b.onResult != nil {
 		b.onResult(ctx, tool, input, res)
+	}
+	if res.OK && cc.ProjectID > 0 {
+		b.noteSession(tool, input, res.Data, cc.ProjectID)
 	}
 	text := renderEnvelope(res)
 	if !res.OK {

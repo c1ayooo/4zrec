@@ -236,14 +236,13 @@
 - **漏洞 → 落地 → 接管（M2-4 闭环）**：`webshell_deploy` 已接投递通道。宿主在 `cmdi_probe` 确认 / `cmdi_execute` 成功时把注入点（URL、参数、位置、已验证模板）记进进程内注册表；投递时按目标 URL 找到该点，复用 `cmdi_execute` 走同一套门禁把 base64 载荷写入 `dir/filename`，返回落点 URL 与 `rm -f` 清理命令。载荷与口令不出现在命令、日志或证据里。
 - **真实靶机实测**（PHP 8.2 + Apache，`127.0.0.1:18080`）：`cmdi_probe` 确认 → `cmdi_execute` 拿到 `uid=33(www-data)` → `webshell_deploy` 落地 → `session_open(kind=webshell)` → `session_exec` 再拿到 `uid=33(www-data)` → 执行返回的清理命令后落点 404，webroot 仅剩原始三个文件。测试为 opt-in（`CAPKIT_LAB_URL`/`CAPKIT_LAB_WEBROOT`），CI 不依赖 Docker。
 - **依赖**：`require github.com/c1ayooo/capkit v0.4.12`。capkit 是私有仓库，构建与 CI 需 `GOPRIVATE=github.com/c1ayooo/*`（否则 GOPROXY 取不到）。
+- **会话控制台（Web）**：新增 `/function/sessions` 页面与 `GET /api/capkit/sessions`、`POST /api/capkit/sessions/open`、`/{id}/exec`、`/{id}/close` 四个接口。页面列出活动 foothold，按会话执行一次性命令并追加 stdout/stderr/exit，支持一键关闭；打开对话框覆盖 webshell/ssh/winrm/smb/cli，webshell 可指定 `shell_type`/`cmd_param`/`method`。Web 调用与 agent 走同一个桥接、同一条门禁链，项目级 API Key 只能看见和驱动本项目打开的会话。侧边栏「流量与执行」下新增「会话」入口。命令是 `session_exec` 的单次 exec 语义，不是 PTY（capkit 契约没有交互式 stdin），页面不伪造 shell 提示符。
 
 #### 已知限制
 
 - **`webshell_deploy` 只认已确认的注入点**：它不会盲写。目标 URL 没有对应的 `cmdi_probe`/`cmdi_execute` 记录时直接报错并提示先确认；文件 URL 按“注入脚本所在目录 == 落盘目录”推导，目录不一致时 `session_open` 会明确失败。上传接口型投递通道尚未实现。
 - **capkit 工具的流量不入平台证据库**：它们的 HTTP 走 capkit 的 httpx，不经过 4zrec 的录制代理，因此「流量」页看不到这些请求。需要证据留存的工具应把 HTTPDoer 换成走录制代理的实现。
-- **plain 模板不支持文件操作**：`session_upload` / `session_download` 对这类 payload 返回明确的“不支持文件操作”，不是静默成功；要文件能力需换成带文件操作的 payload 协议（behinder/godzilla）。
-- **identity 工具尚无站点注册**：`AuthFlowRegistry` 为空时 `identity_login` 报“该 kind 未注册”，不会伪登录；站点级登录脚本需宿主按项目装配。
-- **plain 模板不支持文件操作**：`session_upload` / `session_download` 对这类 payload 返回明确的“不支持文件操作”，不是静默成功；要文件能力需换成带文件操作的 payload 协议（behinder/godzilla）。
+- **plain 模板不支持文件操作**：`session_upload` / `session_download` 对这类 payload 返回明确的“不支持文件操作”，不是静默成功；要文件能力需换成带文件操作的 payload 协议（behinder/godzilla）。控制台目前也只提供命令执行，没有上传/下载入口。
 - **identity 工具尚无站点注册**：`AuthFlowRegistry` 为空时 `identity_login` 报“该 kind 未注册”，不会伪登录；站点级登录脚本需宿主按项目装配。
 
 ### 资产同步（4zrecon，原 ScopeSentry）

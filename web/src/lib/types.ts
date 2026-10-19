@@ -2181,3 +2181,36 @@ export interface ReportTemplate {
   created_at?: string;
   updated_at?: string;
 }
+
+// ---- capkit 会话（桥接的 foothold：webshell/ssh/winrm/smb/cli）----
+// 后端 /api/capkit/sessions/*；项目级 Key 只能看到本项目打开的会话。
+export interface CapkitSession {
+  id: string;
+  kind: string;
+  host?: string;
+  port?: number;
+  user?: string;
+  os?: string;
+  arch?: string;
+  elevated?: boolean;
+  labels?: string[];
+  meta?: Record<string, string>;
+  project_id?: number;
+}
+
+export interface CapkitSessionList {
+  sessions: CapkitSession[];
+  enabled: boolean;
+}
+
+export interface CapkitExecResult {
+  session_id: string;
+  command: string;
+  stdout: string;
+  stderr: string;
+  exit_code: number;
+  duration_ms: number;
+  truncated?: boolean;
+  summary?: string;
+  evidence?: { id?: string; kind?: string; size?: number; sha256?: string; preview?: string }[];
+}

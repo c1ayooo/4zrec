@@ -898,6 +898,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/findings/{id}/enrich", s.findingEnrich)
 	mux.HandleFunc("GET /api/findings/{id}/enrich/status", s.findingEnrichStatus)
 	mux.HandleFunc("GET /api/llm/records", s.pgListLLMRecords)
+	// capkit 会话(capkit 桥接工具开的 foothold;项目级 Key 只看本项目)
+	mux.HandleFunc("GET /api/capkit/sessions", s.capkitSessionList)
+	mux.HandleFunc("POST /api/capkit/sessions/open", s.capkitSessionOpen)
+	mux.HandleFunc("POST /api/capkit/sessions/{id}/exec", s.capkitSessionExec)
+	mux.HandleFunc("POST /api/capkit/sessions/{id}/close", s.capkitSessionClose)
 	mux.HandleFunc("DELETE /api/llm/records", s.pgDeleteLLMRecords)
 	mux.HandleFunc("GET /api/llm/records/tasks", s.pgLLMTasks)
 	mux.HandleFunc("GET /api/llm/records/by-model", s.pgTokenByModel) // 按模型聚合本任务 token 用量

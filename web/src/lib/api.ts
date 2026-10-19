@@ -21,6 +21,9 @@ import type {
   Audit,
   BatchCategoryItem,
   BatchControlItem,
+  CapkitExecResult,
+  CapkitSession,
+  CapkitSessionList,
   ChatAttachment,
   CommandRecord,
   Company,
@@ -1661,6 +1664,25 @@ export const api = {
   updateReportTemplate: (id: number, body: Partial<ReportTemplate>) =>
     put<ReportTemplate>(`/report-templates/${id}`, body),
   deleteReportTemplate: (id: number) => del<{ ok: boolean }>(`/report-templates/${id}`),
+  // ---- capkit 会话（WebShell/SSH 等 foothold；项目级 Key 只看本项目）----
+  capkitSessions: () => get<CapkitSessionList>("/capkit/sessions"),
+  openCapkitSession: (input: {
+    kind: string;
+    host: string;
+    port?: number;
+    user?: string;
+    secret?: string;
+    domain?: string;
+    options?: Record<string, string>;
+    labels?: string[];
+  }) => post<CapkitSession>("/capkit/sessions/open", input),
+  execCapkitSession: (id: string, command: string, timeoutMs?: number) =>
+    post<CapkitExecResult>(`/capkit/sessions/${encodeURIComponent(id)}/exec`, {
+      command,
+      timeout_ms: timeoutMs,
+    }),
+  closeCapkitSession: (id: string) =>
+    post<{ ok: boolean; session_id: string }>(`/capkit/sessions/${encodeURIComponent(id)}/close`, {}),
   uploadReportLogo: async (file: File) => {
     const fd = new FormData();
     fd.append("file", file);
