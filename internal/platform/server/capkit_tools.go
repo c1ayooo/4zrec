@@ -67,8 +67,11 @@ func (s *Server) buildCapkitBridge() (*capkitbridge.Bridge, error) {
 		Audit:    audit,
 		Executor: &webshellExecutor{http: httpDoer},
 		Process:  process,
-		Flows:    identitykit.NewAuthFlowRegistry(),
-		Deployer: deployer,
+		// Database footholds are host-implemented: capkit's sessionkit has no
+		// SQL client, and the platform already carries the drivers.
+		ExtraOpeners: dbOpeners(),
+		Flows:        identitykit.NewAuthFlowRegistry(),
+		Deployer:     deployer,
 		Context: func(ctx context.Context) capkit.CallContext {
 			return s.capkitCallContext(ctx)
 		},

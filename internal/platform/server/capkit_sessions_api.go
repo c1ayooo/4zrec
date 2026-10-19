@@ -84,8 +84,14 @@ var capkitKindCatalog = []capkitKindDTO{
 		Hint:   "无远程 shell，exec 执行的是 smbclient 子命令（ls/get/put/del）",
 	},
 	{
-		ID: "db", Label: "数据库", Category: "database",
-		Fields: []string{"host", "port", "user", "secret"},
+		ID: "mysql", Label: "MySQL", Category: "database",
+		Fields: []string{"host", "port", "user", "secret", "database"},
+		Hint:   "command 是一条 SQL 语句；库名在 database 字段。写操作会在输出里标注。",
+	},
+	{
+		ID: "postgres", Label: "PostgreSQL", Category: "database",
+		Fields: []string{"host", "port", "user", "secret", "database", "sslmode"},
+		Hint:   "command 是一条 SQL 语句；sslmode 默认 disable（靶场/内网多无有效证书），WAL/复制类语句请自行确认目标角色。",
 	},
 	{
 		ID: "cli", Label: "本地 Shell", Category: "local",
@@ -94,12 +100,10 @@ var capkitKindCatalog = []capkitKindDTO{
 }
 
 // capkitUnsupported marks kinds the platform deliberately does not offer, with
-// the reason shown in the UI. Listing them beats leaving an unexplained gap:
-// "数据库" is the one users ask for first, and the answer is that capkit's
-// session transports do not cover it. "本地 Shell" is the second: the platform
-// host is not a project target, so a local session cannot pass the scope fence.
+// the reason shown in the UI. Listing them beats leaving an unexplained gap.
+// "本地 Shell" is the case: the platform host is not a project target, so a
+// local session cannot pass the scope fence.
 var capkitUnsupported = map[string]string{
-	"db":  "capkit 的会话传输只有 webshell/ssh/winrm/smb，不含数据库；数据库连通与取数属于独立能力，宿主尚未接入。",
 	"cli": "本地 Shell 运行在平台主机上，而平台主机不是项目授权目标，过不了 scope 围栏；本地命令请用带护栏的 Bash 工具。",
 }
 

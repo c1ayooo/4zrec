@@ -29,15 +29,19 @@ func (apiFakeExec) File(context.Context, shellsession.Session, shellsession.File
 	return &shellsession.ExecResult{Output: "unsupported"}, nil
 }
 
-func newSessionAPIServer(t *testing.T) *Server {
+func newSessionAPIServer(t *testing.T, openers ...map[string]capkit.SessionOpener) *Server {
 	t.Helper()
 	scope := &capkitScope{pg: stubScopePG{allowed: "127.0.0.1"}}
 	limiter := gates.NewLimiter()
 	audit := &capkitAudit{}
-	b, err := capkitbridge.New(capkitbridge.Options{
+	opts := capkitbridge.Options{
 		Scope: scope, HTTP: httpx.New(scope, limiter, audit), Limiter: limiter,
 		Audit: audit, Executor: apiFakeExec{},
-	})
+	}
+	if len(openers) > 0 {
+		opts.ExtraOpeners = openers[0]
+	}
+	b, err := capkitbridge.New(opts)
 	if err != nil {
 		t.Fatalf("bridge: %v", err)
 	}
@@ -209,24 +213,71 @@ func TestSessionAPIKindCatalogMatchesTransports(t *testing.T) {
 		t.Fatalf("未注入 ProcessRunner 时 cli/smb 不应可用")
 	}
 	if byID["db"].Available {
-		t.Fatalf("数据库不是 capkit 会话类型,不应标记可用")
+		t.Fatalf("数据库类型由 opener 决定可用性,未注册时不应标记可用")
 	}
-	if byID["db"].Hint == "" {
-		t.Fatalf("不可用类型必须给出原因")
+	if byID["mysql"].Available || byID["postgres"].Available {
+		t.Fatalf("未注入数据库 opener 时 mysql/postgres 不应可用")
 	}
 	if byID["webshell"].Category == "" || len(byID["webshell"].Fields) == 0 {
 		t.Fatalf("目录项需要分类与字段: %+v", byID["webshell"])
 	}
 }
 
+func TestSessionAPIKindCatalogWithDatabaseOpener(t *testing.T) {
+	s := newSessionAPIServer(t, map[string]capkit.SessionOpener{"mysql": stubOpener{}})
+	r := withProject(httptest.NewRequest(http.MethodGet, "/api/capkit/sessions", nil), 7)
+	w := httptest.NewRecorder()
+	s.capkitSessionList(w, r)
+	var out struct {
+		Kinds []capkitKindDTO `json:"kinds"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	byID := map[string]capkitKindDTO{}
+	for _, k := range out.Kinds {
+		byID[k.ID] = k
+	}
+	if !byID["mysql"].Available {
+		t.Fatalf("注册了 mysql opener 后应可用: %+v", byID["mysql"])
+	}
+	if byID["mysql"].Category != "database" {
+		t.Fatalf("mysql 应归入 database 分类, got %q", byID["mysql"].Category)
+	}
+	if !strings.Contains(strings.Join(byID["mysql"].Fields, ","), "database") {
+		t.Fatalf("mysql 表单需要库名字段: %v", byID["mysql"].Fields)
+	}
+	if byID["postgres"].Available {
+		t.Fatalf("postgres 未注册 opener,不应可用")
+	}
+}
+
+// stubOpener is a no-op transport: enough for catalogue and validation tests,
+// which never reach Exec.
+type stubOpener struct{}
+
+func (stubOpener) Open(context.Context, capkit.SessionSpec) (capkit.Session, error) {
+	return stubSession{}, nil
+}
+
+type stubSession struct{}
+
+func (stubSession) Exec(context.Context, string, capkit.ExecOpts) (capkit.Output, error) {
+	return capkit.Output{}, nil
+}
+
+func (stubSession) Info() capkit.SessionInfo { return capkit.SessionInfo{Kind: "mysql"} }
+
+func (stubSession) Close() error { return nil }
+
 func TestSessionAPIOpenRejectsUnavailableKind(t *testing.T) {
 	s := newSessionAPIServer(t)
 	r := withProject(httptest.NewRequest(http.MethodPost, "/api/capkit/sessions/open",
-		strings.NewReader(`{"kind":"db","host":"127.0.0.1"}`)), 7)
+		strings.NewReader(`{"kind":"mysql","host":"127.0.0.1"}`)), 7)
 	w := httptest.NewRecorder()
 	s.capkitSessionOpen(w, r)
 	if w.Code != http.StatusBadRequest {
-		t.Fatalf("不可用类型应 400, got %d %s", w.Code, w.Body.String())
+		t.Fatalf("未注册 opener 的类型应 400, got %d %s", w.Code, w.Body.String())
 	}
 }
 
@@ -280,6 +331,51 @@ func TestSessionAPISSHLab(t *testing.T) {
 	s.capkitSessionClose(closeW, closeReq)
 	if closeW.Code != http.StatusOK {
 		t.Fatalf("close: %d %s", closeW.Code, closeW.Body.String())
+	}
+}
+
+// TestSessionAPIDBLab drives a database session through the HTTP surface:
+// open with a real MySQL, run SELECT, close. Opt-in: CAPKIT_MYSQL_LAB=host:port.
+func TestSessionAPIDBLab(t *testing.T) {
+	addr := os.Getenv("CAPKIT_MYSQL_LAB")
+	if addr == "" {
+		t.Skip("未设置 CAPKIT_MYSQL_LAB")
+	}
+	host, portText, found := strings.Cut(addr, ":")
+	if !found {
+		t.Fatalf("地址需为 host:port: %q", addr)
+	}
+	s := newSessionAPIServer(t, dbOpeners())
+
+	body := `{"kind":"mysql","host":"` + host + `","port":` + portText +
+		`,"user":"` + labEnvOr("CAPKIT_MYSQL_USER", "root") +
+		`","secret":"` + labEnvOr("CAPKIT_MYSQL_PASS", "capkit") +
+		`","options":{"database":"` + labEnvOr("CAPKIT_MYSQL_DB", "app") + `"}}`
+	req := withProject(httptest.NewRequest(http.MethodPost, "/api/capkit/sessions/open", strings.NewReader(body)), 7)
+	w := httptest.NewRecorder()
+	s.capkitSessionOpen(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("open: %d %s", w.Code, w.Body.String())
+	}
+	var opened capkitSessionDTO
+	if err := json.Unmarshal(w.Body.Bytes(), &opened); err != nil || opened.ID == "" {
+		t.Fatalf("open 响应异常: %s (%v)", w.Body.String(), err)
+	}
+
+	execReq := withProject(httptest.NewRequest(http.MethodPost, "/api/capkit/sessions/x/exec",
+		strings.NewReader(`{"command":"SELECT 1+1 AS n"}`)), 7)
+	execReq.SetPathValue("id", opened.ID)
+	execW := httptest.NewRecorder()
+	s.capkitSessionExec(execW, execReq)
+	if execW.Code != http.StatusOK {
+		t.Fatalf("exec: %d %s", execW.Code, execW.Body.String())
+	}
+	var out struct {
+		Stdout string `json:"stdout"`
+	}
+	_ = json.Unmarshal(execW.Body.Bytes(), &out)
+	if !strings.Contains(out.Stdout, "n") || !strings.Contains(out.Stdout, "2") {
+		t.Fatalf("SQL 输出异常: %q", out.Stdout)
 	}
 }
 

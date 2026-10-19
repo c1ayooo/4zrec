@@ -65,12 +65,10 @@ func labEnv(key, def string) string {
 	return def
 }
 
-// openAndExec opens one session and runs a command, returning stdout.
-func openAndExec(t *testing.T, b *capkitbridge.Bridge, open, command string) (string, capkit.Result) {
+// openLab opens one session and returns its id.
+func openLab(t *testing.T, b *capkitbridge.Bridge, open string) string {
 	t.Helper()
-	ctx := context.Background()
-	cc := capkit.CallContext{ProjectID: 1, Actor: "lab"}
-	res, err := b.Call(ctx, "session_open", json.RawMessage(open), cc)
+	res, err := b.Call(context.Background(), "session_open", json.RawMessage(open), labCallContext())
 	if err != nil {
 		t.Fatalf("session_open: %v", err)
 	}
@@ -83,27 +81,51 @@ func openAndExec(t *testing.T, b *capkitbridge.Bridge, open, command string) (st
 	if err := json.Unmarshal(res.Data, &out); err != nil || out.SessionID == "" {
 		t.Fatalf("session_id 解析失败: %s (%v)", string(res.Data), err)
 	}
-	execRaw, _ := json.Marshal(map[string]any{"session_id": out.SessionID, "command": command})
-	execRes, err := b.Call(ctx, "session_exec", execRaw, cc)
+	return out.SessionID
+}
+
+// execLab runs one command on an already-open session and returns stdout.
+func execLab(t *testing.T, b *capkitbridge.Bridge, id, command string) (string, capkit.Result) {
+	t.Helper()
+	raw, _ := json.Marshal(map[string]any{"session_id": id, "command": command})
+	res, err := b.Call(context.Background(), "session_exec", raw, labCallContext())
 	if err != nil {
 		t.Fatalf("session_exec: %v", err)
 	}
-	if !execRes.OK {
-		t.Fatalf("session_exec 失败: %s", execRes.Summary)
+	if !res.OK {
+		t.Fatalf("session_exec 失败: %s", res.Summary)
 	}
-	closeRaw, _ := json.Marshal(map[string]string{"session_id": out.SessionID})
-	if closeRes, err := b.Call(ctx, "session_close", closeRaw, cc); err != nil || !closeRes.OK {
-		t.Fatalf("session_close 失败: %v", execRes.Summary)
-	}
-	var execOut struct {
+	var out struct {
 		Stdout   string `json:"stdout"`
 		ExitCode int    `json:"exit_code"`
 	}
-	_ = json.Unmarshal(execRes.Data, &execOut)
-	if execOut.ExitCode != 0 {
-		t.Fatalf("命令退出码 %d: %s", execOut.ExitCode, execOut.Stdout)
+	_ = json.Unmarshal(res.Data, &out)
+	if out.ExitCode != 0 {
+		t.Fatalf("命令退出码 %d: %s", out.ExitCode, out.Stdout)
 	}
-	return execOut.Stdout, execRes
+	return out.Stdout, res
+}
+
+func closeLab(t *testing.T, b *capkitbridge.Bridge, id string) {
+	t.Helper()
+	raw, _ := json.Marshal(map[string]string{"session_id": id})
+	res, err := b.Call(context.Background(), "session_close", raw, labCallContext())
+	if err != nil || !res.OK {
+		t.Fatalf("session_close 失败: %v (%s)", err, res.Summary)
+	}
+}
+
+func labCallContext() capkit.CallContext {
+	return capkit.CallContext{ProjectID: 1, Actor: "lab"}
+}
+
+// openAndExec opens a session, runs one command, and closes it.
+func openAndExec(t *testing.T, b *capkitbridge.Bridge, open, command string) (string, capkit.Result) {
+	t.Helper()
+	id := openLab(t, b, open)
+	out, res := execLab(t, b, id, command)
+	closeLab(t, b, id)
+	return out, res
 }
 
 func TestLabSSHSession(t *testing.T) {
@@ -141,6 +163,90 @@ func TestLabSMBSession(t *testing.T) {
 	}
 	if !strings.Contains(res.Summary, "smb") && res.Summary == "" {
 		t.Fatalf("会话摘要为空")
+	}
+}
+
+// labBridgeDB is labBridge plus the database transports, which the host wires
+// through ExtraOpeners.
+func labBridgeDB(t *testing.T) *capkitbridge.Bridge {
+	t.Helper()
+	scope := gates.StaticScope("127.0.0.1")
+	limiter := gates.NewLimiter()
+	audit := &capkitAudit{}
+	b, err := capkitbridge.New(capkitbridge.Options{
+		Scope:        scope,
+		HTTP:         httpx.New(scope, limiter, audit),
+		Process:      exec.New(scope, limiter, audit),
+		Limiter:      limiter,
+		Audit:        audit,
+		Executor:     &webshellExecutor{http: httpx.New(scope, limiter, audit)},
+		ExtraOpeners: dbOpeners(),
+	})
+	if err != nil {
+		t.Fatalf("bridge: %v", err)
+	}
+	return b
+}
+
+// TestLabMySQLSession runs a real statement round trip against a MySQL lab.
+func TestLabMySQLSession(t *testing.T) {
+	labEnabled(t)
+	addr := os.Getenv("CAPKIT_MYSQL_LAB")
+	if addr == "" {
+		t.Skip("未设置 CAPKIT_MYSQL_LAB")
+	}
+	host, port := splitLabAddr(t, addr, 3306)
+	open := `{"kind":"mysql","host":"` + host + `","port":` + strconv.Itoa(port) +
+		`,"user":"` + labEnv("CAPKIT_MYSQL_USER", "root") +
+		`","secret":"` + labEnv("CAPKIT_MYSQL_PASS", "capkit") +
+		`","options":{"database":"` + labEnv("CAPKIT_MYSQL_DB", "app") + `"}}`
+	out, _ := openAndExec(t, labBridgeDB(t), open, "SELECT 1+1 AS n")
+	if !strings.Contains(out, "n") || !strings.Contains(out, "2") {
+		t.Fatalf("mysql 查询结果异常: %q", out)
+	}
+}
+
+// TestLabPostgresSession is the same for PostgreSQL.
+func TestLabPostgresSession(t *testing.T) {
+	labEnabled(t)
+	addr := os.Getenv("CAPKIT_PG_LAB")
+	if addr == "" {
+		t.Skip("未设置 CAPKIT_PG_LAB")
+	}
+	host, port := splitLabAddr(t, addr, 5432)
+	open := `{"kind":"postgres","host":"` + host + `","port":` + strconv.Itoa(port) +
+		`,"user":"` + labEnv("CAPKIT_PG_USER", "capkit") +
+		`","secret":"` + labEnv("CAPKIT_PG_PASS", "capkit") +
+		`","options":{"database":"` + labEnv("CAPKIT_PG_DB", "app") + `"}}`
+	out, _ := openAndExec(t, labBridgeDB(t), open, "SELECT current_database()")
+	if !strings.Contains(out, "app") {
+		t.Fatalf("postgres 查询结果异常: %q", out)
+	}
+}
+
+// TestLabDBWriteIsLabelled checks the write marker the console shows: a write
+// statement must come back with the 写操作 prefix, a read must not.
+func TestLabDBWriteIsLabelled(t *testing.T) {
+	labEnabled(t)
+	addr := os.Getenv("CAPKIT_MYSQL_LAB")
+	if addr == "" {
+		t.Skip("未设置 CAPKIT_MYSQL_LAB")
+	}
+	host, port := splitLabAddr(t, addr, 3306)
+	b := labBridgeDB(t)
+	open := `{"kind":"mysql","host":"` + host + `","port":` + strconv.Itoa(port) +
+		`,"user":"` + labEnv("CAPKIT_MYSQL_USER", "root") +
+		`","secret":"` + labEnv("CAPKIT_MYSQL_PASS", "capkit") +
+		`","options":{"database":"` + labEnv("CAPKIT_MYSQL_DB", "app") + `"}}`
+	id := openLab(t, b, open)
+	defer closeLab(t, b, id)
+	wrote, _ := execLab(t, b, id, "CREATE TABLE IF NOT EXISTS zrec_probe (id int)")
+	if !strings.Contains(wrote, "写操作") {
+		t.Fatalf("写语句未标注: %q", wrote)
+	}
+	read, _ := execLab(t, b, id, "SELECT 1 AS n")
+	if strings.Contains(read, "写操作") {
+		t.Fatalf("读语句被误标为写: %q", read)
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -61,6 +62,11 @@ type Options struct {
 	Process capkit.ProcessRunner
 	// WinRMTLS selects https/5986 over http/5985 for the winrm kind.
 	WinRMTLS bool
+	// ExtraOpeners registers host-implemented session transports under their
+	// kind name. capkit's sessionkit covers the network transports; a host that
+	// has drivers the kit does not (database clients, for example) plugs them in
+	// here instead of forking the kit. The kind name becomes the UI's kind id.
+	ExtraOpeners map[string]capkit.SessionOpener
 	// Flows lets the host assemble site logins once and share them with every
 	// identity_login call. Nil starts with an empty registry (login reports the
 	// kind as unregistered rather than pretending).
@@ -148,6 +154,17 @@ func New(opts Options) (*Bridge, error) {
 		mgr.RegisterOpener("smb", &sessionkit.SMBOpener{Runner: opts.Process})
 		kinds = append(kinds, "smb")
 	}
+	// Host-implemented transports (database clients and the like). Sorted so
+	// the kind list the UI receives is stable between restarts.
+	extra := make([]string, 0, len(opts.ExtraOpeners))
+	for kind := range opts.ExtraOpeners {
+		extra = append(extra, kind)
+	}
+	sort.Strings(extra)
+	for _, kind := range extra {
+		mgr.RegisterOpener(kind, opts.ExtraOpeners[kind])
+	}
+	kinds = append(kinds, extra...)
 
 	reg := capkit.NewRegistry()
 	// Same declarations as all.RegisterSessionWithDeployer / RegisterIdentity /

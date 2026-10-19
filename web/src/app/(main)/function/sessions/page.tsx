@@ -52,7 +52,12 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 const CATEGORY_ORDER = ["webshell", "remote", "windows", "share", "database", "local"];
 
-const PORT_DEFAULTS: Record<string, string> = { ssh: "22", winrm: "5985", smb: "445" };
+const PORT_DEFAULTS: Record<string, string> = { ssh: "22", winrm: "5985", smb: "445", mysql: "3306", postgres: "5432" };
+
+// 数据库会话的“命令”是一条 SQL；给个能立刻验证连通性的默认语句。
+function defaultCommand(kind?: string): string {
+  return kind === "mysql" || kind === "postgres" ? "SELECT version()" : "id";
+}
 
 export default function SessionsPage() {
   const [sessions, setSessions] = React.useState<CapkitSession[]>([]);
@@ -144,6 +149,12 @@ export default function SessionsPage() {
       if (form.kind === "smb") {
         options.share = form.share.trim() || "public";
       }
+      if (kind.fields.includes("database")) {
+        options.database = form.database.trim();
+      }
+      if (form.kind === "postgres" && form.sslmode) {
+        options.sslmode = form.sslmode;
+      }
       const created = await api.openCapkitSession({
         kind: form.kind,
         // cli 一类的本地会话没有地址，后端 schema 仍要求 host，填占位值。
@@ -157,6 +168,7 @@ export default function SessionsPage() {
       toast.success(`已打开 ${kind.label} 会话 ${created.id}`);
       setDialogOpen(false);
       setSelected(created.id);
+      setCommand(defaultCommand(created.kind));
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "打开会话失败");
@@ -224,7 +236,10 @@ export default function SessionsPage() {
                   <TableRow
                     key={s.id}
                     className={cn("cursor-pointer", selected === s.id && "bg-muted/50")}
-                    onClick={() => setSelected(s.id)}
+                    onClick={() => {
+                      setSelected(s.id);
+                      setCommand(defaultCommand(s.kind));
+                    }}
                   >
                     <TableCell>
                       <div className="font-mono text-xs">{s.id}</div>
@@ -278,7 +293,7 @@ export default function SessionsPage() {
                     void exec();
                   }
                 }}
-                placeholder="id"
+                placeholder={defaultCommand(current?.kind)}
                 className="font-mono"
                 disabled={!current}
               />
@@ -292,7 +307,7 @@ export default function SessionsPage() {
               {!current && <div className="text-neutral-500">选择一个会话后执行命令。</div>}
               {current && activeLogs.length === 0 && (
                 <div className="text-neutral-500">
-                  会话已就绪。输入命令并回车；输出按调用追加，上方命令不会留在目标 shell 历史之外。
+                  会话已就绪。输入命令（数据库会话输 SQL）并回车；输出按调用追加，不伪造交互式回显。
                 </div>
               )}
               {activeLogs.map((entry) => (
@@ -331,6 +346,8 @@ interface OpenForm {
   secret: string;
   domain: string;
   share: string;
+  database: string;
+  sslmode: string;
   shellType: string;
   cmdParam: string;
   method: string;
@@ -346,6 +363,8 @@ function emptyForm(kind: string): OpenForm {
     secret: "",
     domain: "",
     share: "public",
+    database: "",
+    sslmode: "disable",
     shellType: "php",
     cmdParam: "cmd",
     method: "POST",
@@ -494,6 +513,35 @@ function OpenSessionDialog({
                   onChange={(e) => set("share", e.target.value)}
                   placeholder="public"
                 />
+              </div>
+            )}
+            {show("database") && (
+              <div className="grid gap-1.5">
+                <Label htmlFor="sess-database">库名</Label>
+                <Input
+                  id="sess-database"
+                  value={form.database}
+                  onChange={(e) => set("database", e.target.value)}
+                  placeholder="app"
+                  className="font-mono"
+                />
+              </div>
+            )}
+            {show("sslmode") && (
+              <div className="grid gap-1.5">
+                <Label htmlFor="sess-sslmode">sslmode</Label>
+                <Select value={form.sslmode} onValueChange={(v) => set("sslmode", v)}>
+                  <SelectTrigger id="sess-sslmode">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {["disable", "prefer", "require"].map((m) => (
+                      <SelectItem key={m} value={m}>
+                        {m}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             )}
             {(show("secret") || show("password")) && (

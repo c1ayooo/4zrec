@@ -15,6 +15,13 @@ SMB_PORT=445
 SMB_USER=capkit
 SMB_PASS=capkit
 SMB_SHARE=public
+MYSQL_NAME=capkit-mysql-lab
+MYSQL_PORT=13306
+PG_NAME=capkit-pg-lab
+PG_PORT=15432
+DB_USER=capkit
+DB_PASS=capkit
+DB_NAME=app
 
 info() { printf '[*] %s\n' "$*"; }
 ok() { printf '[+] %s\n' "$*"; }
@@ -91,13 +98,43 @@ up_webshell() {
   fi
 }
 
+up_databases() {
+  if ! docker ps --format '{{.Names}}' | grep -qx "$MYSQL_NAME"; then
+    docker rm -f "$MYSQL_NAME" >/dev/null 2>&1 || true
+    info "启动 MySQL 靶机（mysql:8.0，127.0.0.1:${MYSQL_PORT}）"
+    docker run -d --name "$MYSQL_NAME" -p "127.0.0.1:${MYSQL_PORT}:3306" \
+      -e MYSQL_ROOT_PASSWORD="$DB_PASS" -e MYSQL_DATABASE="$DB_NAME" mysql:8.0 >/dev/null
+  fi
+  if ! docker ps --format '{{.Names}}' | grep -qx "$PG_NAME"; then
+    docker rm -f "$PG_NAME" >/dev/null 2>&1 || true
+    info "启动 PostgreSQL 靶机（postgres:16-alpine，127.0.0.1:${PG_PORT}）"
+    docker run -d --name "$PG_NAME" -p "127.0.0.1:${PG_PORT}:5432" \
+      -e POSTGRES_PASSWORD="$DB_PASS" -e POSTGRES_USER="$DB_USER" -e POSTGRES_DB="$DB_NAME" \
+      postgres:16-alpine >/dev/null
+  fi
+  # 数据库镜像初始化要十几秒，端口通了才算就绪。
+  for spec in "${MYSQL_NAME}:${MYSQL_PORT}" "${PG_NAME}:${PG_PORT}"; do
+    name="${spec%%:*}"
+    port="${spec##*:}"
+    for _ in $(seq 1 40); do
+      if (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null; then
+        exec 3>&- 3<&- || true
+        ok "$name 就绪"
+        break
+      fi
+      sleep 1
+    done
+  done
+}
+
 down() {
-  docker rm -f "$SSH_NAME" "$SMB_NAME" >/dev/null 2>&1 || true
-  ok "已删除 $SSH_NAME / $SMB_NAME"
+  docker rm -f "$SSH_NAME" "$SMB_NAME" "$MYSQL_NAME" "$PG_NAME" >/dev/null 2>&1 || true
+  ok "已删除 $SSH_NAME / $SMB_NAME / $MYSQL_NAME / $PG_NAME"
 }
 
 status() {
-  docker ps -a --filter "name=${SSH_NAME}" --filter "name=${SMB_NAME}" --filter "name=capkit-lab" \
+  docker ps -a --filter "name=${SSH_NAME}" --filter "name=${SMB_NAME}" --filter "name=${MYSQL_NAME}" \
+    --filter "name=${PG_NAME}" --filter "name=capkit-lab" \
     --format '{{.Names}}\t{{.Status}}\t{{.Ports}}'
 }
 
@@ -106,6 +143,7 @@ case "${1:-up}" in
     require_docker
     up_ssh
     up_smb
+    up_databases
     up_webshell
     cat <<EOF
 
@@ -117,10 +155,15 @@ case "${1:-up}" in
     go test ./internal/platform/server/ -run TestLabSMBSession -v
   CAPKIT_LAB_URL=http://127.0.0.1:18080 CAPKIT_LAB_WEBROOT=/var/www/html \\
     go test ./internal/platform/server/ -run TestCapkitDeployChainAgainstRealTarget -v
+  CAPKIT_LABS=1 CAPKIT_MYSQL_LAB=127.0.0.1:${MYSQL_PORT} CAPKIT_PG_LAB=127.0.0.1:${PG_PORT} \\
+    CAPKIT_MYSQL_USER=root CAPKIT_MYSQL_PASS=${DB_PASS} CAPKIT_MYSQL_DB=${DB_NAME} \\
+    CAPKIT_PG_USER=${DB_USER} CAPKIT_PG_PASS=${DB_PASS} CAPKIT_PG_DB=${DB_NAME} \\
+    go test ./internal/platform/server/ -run 'TestLabMySQLSession|TestLabPostgresSession|TestLabDBWriteIsLabelled' -v
+  CAPKIT_MYSQL_LAB=127.0.0.1:${MYSQL_PORT} \\
+    go test ./internal/platform/server/ -run TestSessionAPIDBLab -v
 
-[!] WinRM 与数据库没有可用靶场：
-    - WinRM 需要 Windows 目标，Linux 上的 Docker 起不了真实 WinRM；
-    - capkit 的会话类型不含数据库，数据库能力尚未接入宿主。
+[!] WinRM 没有可用靶场：真实 WinRM 需要 Windows 目标，Linux 上的 Docker 起不了；
+    传输已注册，目前只有单元级覆盖。
 EOF
     ;;
   down) require_docker; down ;;
