@@ -55,6 +55,7 @@ func (s *Server) hostTools() ([]actool.CoreTool, map[string][]string) {
 	tools = append(tools, s.diffProbeTools()...)      // 基线/变体差分测量(推理型注入验证)
 	tools = append(tools, s.connTools()...)           // 连接台账(查询/手工登记)
 	tools = append(tools, s.nucleiTools()...)         // 项目内 nuclei 二进制/模板 + 结构化扫描
+	tools = append(tools, s.capkitTools()...)         // capkit:WebShell 会话接管 + 登录态(桥接)
 	custom, err := s.customTools()
 	if err != nil {
 		log.Printf("[custom-tool] 加载失败: %v", err)

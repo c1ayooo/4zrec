@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/c1ayooo/4zrec/internal/capability/vuln/nuclei"
+	"github.com/c1ayooo/4zrec/internal/capkitbridge"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
 	"github.com/c1ayooo/4zrec/internal/domain/traffic"
 	"github.com/c1ayooo/4zrec/internal/kernel/transcript"
@@ -57,6 +58,12 @@ type Server struct {
 
 	// nucleiMgr 管理项目自带的 nuclei 外部二进制/模板（<dataDir>/nuclei）。
 	nucleiMgr *nuclei.Manager
+	// capkitMu guards the lazily built capkit runtime. hostTools() runs for every
+	// agent run, so the bridge (with its live session map and rate-limit buckets)
+	// must be built once per Server, not per call.
+	capkitMu     sync.Mutex
+	capkitBridge *capkitbridge.Bridge
+	capkitErr    error
 	// nucleiUpdateMu guards the async manual update job shown on the templates page.
 	nucleiUpdateMu sync.Mutex
 	nucleiUpdate   *nucleiUpdateState
@@ -258,6 +265,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		wireTools(m.pg, domainReg) // 内置工具表：按 agent 过滤 + 覆盖描述/schema + 注入默认值
 		seedPrompts(m.pg)          // 内置 agent 默认提示词正文播种进 agent_prompts(仅空时)
 		s.seedOrchestrationTools() // P2 跨任务编排工具 seed 进 tools 表(可按 agent 绑定)
+		s.seedCapkitTools()        // capkit 桥接工具 seed 进 tools 表(可按 agent 绑定)
 		if err := s.seedFindingRetester(); err != nil {
 			log.Printf("[retester] seed: %v", err)
 		}
@@ -859,7 +867,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/feature-calls", s.getFeatureCalls)
 	mux.HandleFunc("GET /api/feature-calls/stats", s.getFeatureCallStats)
 	mux.HandleFunc("GET /api/feature-calls/{id}", s.getFeatureCall)
-	mux.HandleFunc("GET /api/vulnkb", s.pgListVulnKB)        // 漏洞知识库(1day 库)
+	mux.HandleFunc("GET /api/vulnkb", s.pgListVulnKB) // 漏洞知识库(1day 库)
 	mux.HandleFunc("GET /api/vulnkb/stats", s.pgVulnKBStats)
 	mux.HandleFunc("GET /api/vulnkb/{id}", s.pgGetVulnKB)
 	mux.HandleFunc("GET /api/vuln-library", s.pgListVulnLibrary) // 统一漏洞库(1day + 情报流)
