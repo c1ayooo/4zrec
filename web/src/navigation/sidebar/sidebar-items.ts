@@ -104,7 +104,10 @@ export const sidebarItems: NavGroup[] = [
         id: "connections",
         title: "连接管理",
         icon: Cable,
-        subItems: [{ id: "connections", title: "凭据台账", url: "/function/connections", icon: KeyRound }],
+        subItems: [
+          { id: "connections", title: "凭据台账", url: "/function/connections", icon: KeyRound },
+          { id: "sessions", title: "终端", url: "/function/sessions", icon: SquareTerminal },
+        ],
       },
       {
         id: "exec",
@@ -113,7 +116,6 @@ export const sidebarItems: NavGroup[] = [
         subItems: [
           { id: "traffic", title: "流量", url: "/function/traffic", icon: Activity },
           { id: "commands", title: "工具执行", url: "/function/commands", icon: Terminal },
-          { id: "sessions", title: "终端", url: "/function/sessions", icon: SquareTerminal },
           { id: "llm-records", title: "LLM 录制", url: "/function/llm-records", icon: Radio },
         ],
       },
