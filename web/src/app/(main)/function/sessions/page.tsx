@@ -138,7 +138,7 @@ export default function SessionsPage() {
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <SquareTerminalIcon className="h-5 w-5 text-muted-foreground" />
-          <h1 className="text-xl font-semibold tracking-tight">会话</h1>
+          <h1 className="text-xl font-semibold tracking-tight">终端</h1>
           <Badge variant="secondary">{sessions.length}</Badge>
         </div>
         <div className="flex items-center gap-2">
