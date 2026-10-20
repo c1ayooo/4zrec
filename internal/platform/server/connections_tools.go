@@ -189,8 +189,14 @@ func (s *Server) connCreate(w http.ResponseWriter, r *http.Request) {
 	if in.Port <= 0 {
 		in.Port = db.DefaultConnectionPort(in.Kind)
 	}
+	in.Kind = strings.ToLower(strings.TrimSpace(in.Kind))
 	if in.Source == "" {
 		in.Source = "manual"
+	}
+	// status 有 CHECK 约束(unknown/alive/dead),空串会被库直接拒掉——新增表单
+	// 不带状态,这里必须补默认值,否则「新增凭据」按钮必然失败。
+	if in.Status == "" {
+		in.Status = "unknown"
 	}
 	id, _, err := pg.UpsertConnection(r.Context(), &in)
 	if err != nil {

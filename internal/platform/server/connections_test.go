@@ -4,12 +4,50 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/c1ayooo/4zrec/internal/domain/db"
 )
+
+// TestConnCreateDefaultsStatus 台账页「新增凭据」不带 status;库上有 CHECK
+// 约束(unknown/alive/dead),handler 必须补默认值,否则必然 500。
+func TestConnCreateDefaultsStatus(t *testing.T) {
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Skipf("postgres unavailable (%v)", err)
+	}
+	defer m.Close()
+	s := &Server{m: m}
+
+	stamp := time.Now().UnixNano()
+	host := fmt.Sprintf("conn-%d.internal", stamp)
+	defer func() { _, _ = m.pg.Exec(`DELETE FROM connections WHERE host=$1`, host) }()
+
+	p, err := m.pg.Projects().CreateProject(fmt.Sprintf("台账新建测试%d", stamp), nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.pg.Projects().DeleteProject(p.ID)
+
+	body := fmt.Sprintf(`{"project_id":%d,"kind":"SSH","host":%q,"username":"root","secret":"pw"}`, p.ID, host)
+	r := httptest.NewRequest(http.MethodPost, "/api/connections", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	s.connCreate(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("新增凭据失败: %d %s", w.Code, w.Body.String())
+	}
+	rows, err := m.pg.ListConnections(context.Background(), p.ID, "ssh", 10)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("应落 1 行: %v %v", rows, err)
+	}
+	if rows[0].Status != "unknown" || rows[0].Port != 22 || rows[0].Source != "manual" {
+		t.Fatalf("默认值不符: %+v", rows[0])
+	}
+}
 
 // TestConnectionProjectBindAndMerge 项目绑定(硬前提)+幂等合并+自动捕获路径:
 // 无项目上下文不落库并提示;登记→落库;重录(secret 空)→保留原 secret 不新建;
