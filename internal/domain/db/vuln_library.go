@@ -28,7 +28,7 @@ WITH lib AS (
          ''::text AS disclosure, ''::text AS source_name, created_at
   FROM vuln_kb
   UNION ALL
-  SELECT 'intel'::text, id, title, ''::text, ''::text, COALESCE(severity,''),
+  SELECT 'intel'::text, id, COALESCE(NULLIF(title_zh,''), title), ''::text, ''::text, COALESCE(severity,''),
          COALESCE(cve,''), ''::text, COALESCE(disclosure,''), COALESCE(source,''), created_at
   FROM vuln_intel
 )`

@@ -31,6 +31,14 @@ func (apiFakeExec) File(context.Context, shellsession.Session, shellsession.File
 
 func newSessionAPIServer(t *testing.T, openers ...map[string]capkit.SessionOpener) *Server {
 	t.Helper()
+	s := &Server{capkitBridge: apitestBridge(t, openers...)}
+	return s
+}
+
+// apitestBridge 是测试用的桥接:假 WebShell 执行器,scope 放行 127.0.0.1。
+// DB 相关的测试再按需追加 ExtraOpeners。
+func apitestBridge(t *testing.T, openers ...map[string]capkit.SessionOpener) *capkitbridge.Bridge {
+	t.Helper()
 	scope := &capkitScope{pg: stubScopePG{allowed: "127.0.0.1"}}
 	limiter := gates.NewLimiter()
 	audit := &capkitAudit{}
@@ -45,7 +53,7 @@ func newSessionAPIServer(t *testing.T, openers ...map[string]capkit.SessionOpene
 	if err != nil {
 		t.Fatalf("bridge: %v", err)
 	}
-	return &Server{capkitBridge: b}
+	return b
 }
 
 func withProject(r *http.Request, projectID int64) *http.Request {

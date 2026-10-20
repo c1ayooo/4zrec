@@ -236,12 +236,17 @@
 - **漏洞 → 落地 → 接管（M2-4 闭环）**：`webshell_deploy` 已接投递通道。宿主在 `cmdi_probe` 确认 / `cmdi_execute` 成功时把注入点（URL、参数、位置、已验证模板）记进进程内注册表；投递时按目标 URL 找到该点，复用 `cmdi_execute` 走同一套门禁把 base64 载荷写入 `dir/filename`，返回落点 URL 与 `rm -f` 清理命令。载荷与口令不出现在命令、日志或证据里。
 - **真实靶机实测**（PHP 8.2 + Apache，`127.0.0.1:18080`）：`cmdi_probe` 确认 → `cmdi_execute` 拿到 `uid=33(www-data)` → `webshell_deploy` 落地 → `session_open(kind=webshell)` → `session_exec` 再拿到 `uid=33(www-data)` → 执行返回的清理命令后落点 404，webroot 仅剩原始三个文件。测试为 opt-in（`CAPKIT_LAB_URL`/`CAPKIT_LAB_WEBROOT`），CI 不依赖 Docker。
 - **依赖**：`require github.com/c1ayooo/capkit v0.4.12`。capkit 是私有仓库，构建与 CI 需 `GOPRIVATE=github.com/c1ayooo/*`（否则 GOPROXY 取不到）。
-- **会话控制台（Web）**：新增 `/function/sessions` 页面与 `GET /api/capkit/sessions`、`POST /api/capkit/sessions/open`、`/{id}/exec`、`/{id}/close` 四个接口。页面列出活动 foothold，按会话执行一次性命令并追加 stdout/stderr/exit，支持一键关闭；打开对话框按类型分类（WebShell / 远程 Shell / Windows / 文件共享 / 数据库 / 本地），表单字段由后端返回的类型目录决定。Web 调用与 agent 走同一个桥接、同一条门禁链，项目级 API Key 只能看见和驱动本项目打开的会话。侧边栏「流量与执行」下新增「终端」入口。命令是 `session_exec` 的单次 exec 语义，不是 PTY（capkit 契约没有交互式 stdin），页面不伪造 shell 提示符。
+- **会话控制台（Web）**：新增 `/function/sessions` 页面与 `GET /api/capkit/sessions`、`POST /api/capkit/sessions/open`、`/{id}/exec`、`/{id}/close` 四个接口。页面列出活动 foothold，按会话执行一次性命令并追加 stdout/stderr/exit，支持一键关闭；打开对话框按类型分类（WebShell / 远程 Shell / Windows / 文件共享 / 数据库 / 本地），表单字段由后端返回的类型目录决定。Web 调用与 agent 走同一个桥接、同一条门禁链，项目级 API Key 只能看见和驱动本项目打开的会话。命令是 `session_exec` 的单次 exec 语义，不是 PTY（capkit 契约没有交互式 stdin），页面不伪造 shell 提示符；入口在「连接管理」下（见下方「终端入口移到连接管理」）。
 - **真实会话传输**：桥接现在注册 capkit 的 SSH（`sessionkit.SSHOwner`）、WinRM（`WinRMOpener`，走 gate-aware httpx）与 SMB（`SMBOpener`，走 gate-aware `ProcessRunner`）传输，WebShell 仍由宿主执行器驱动。`GET /api/capkit/sessions` 返回 `kinds` 目录，其 `available` 由「实际注册了哪些传输」决定，UI 只对可用类型放开提交——不会再出现能选中却打不开的类型。
 - **不提供的类型及其原因（显式列出而非留空白）**：`cli`（本地 Shell）跑在平台主机上，而平台主机不是项目授权目标，过不了 scope 围栏，本地命令请用带护栏的 Bash 工具。
 - **数据库会话（MySQL / PostgreSQL）**：capkit 的 sessionkit 不覆盖数据库，因此由宿主按同一份 `Session` 契约实现（`internal/platform/server/capkit_db.go`），通过 `Options.ExtraOpeners` 注册成 `mysql` / `postgres` 两个类型。`session_exec` 的 “command” 是一条 SQL：返回结果集时渲染成带表头的 TSV（上限 200 行、单元格 512 字节，超出标注截断），写语句（INSERT/UPDATE/DELETE/DDL/GRANT/CALL/COPY…，以及含写操作的 `WITH`）在输出首行标注 `-- 写操作：<动词>`，避免误执行无痕。库名走 `options.database`，PostgreSQL 的 `sslmode` 默认 `disable`（内网靶场多无有效证书，TLS 失败会被误读成密码错）。凭据只存在于内存中的 DSN，不落日志、不进证据。
 - **靶场脚本**：新增 `scripts/capkit-labs.sh`，一条命令拉起 SSH（alpine + openssh）、SMB（dperson/samba）、MySQL（mysql:8.0）、PostgreSQL（postgres:16-alpine）靶机，并打印各类型的测试环境变量。配套 opt-in 测试：`TestLabSSHSession` / `TestLabSMBSession` / `TestLabMySQLSession` / `TestLabPostgresSession` / `TestLabDBWriteIsLabelled`（桥接层）与 `TestSessionAPISSHLab` / `TestSessionAPIDBLab`（HTTP 接口层）。
 - **新增依赖**：`github.com/go-sql-driver/mysql v1.10.1`（MySQL 驱动，MIT）；PostgreSQL 复用已有的 `jackc/pgx/v5`。
+- **凭据台账 → 终端打通**：新增 `POST /api/capkit/sessions/from-connection`，把台账行翻成 `session_open` 入参会话（同一条门禁链，归属跟着台账行所属项目，同一目标重复点击复用已开的会话）；台账页每行多一个「用这条凭据开会话」按钮，跳转到终端并选中该会话。凭据从此只录一次、两处可用。
+- **台账新增 `webshell` 类型**：WebShell 是 URL 型目标（落点 + 口令 + 命令参数），没有主机/端口那一套语义，因此登记时填落点 URL 与协议细节（`extra.url/cmd_param/pass_param/method`），列表里的 host/port 由 URL 推导。`connections` 表的 kind 约束扩展包含 `webshell`（schema 带显式升级语句，老库启动时自动迁移）。
+- **台账控制台补齐 MySQL 与 WebShell**：`/api/connections/{id}/db/query` 原来只支持 postgres/redis，现在 MySQL 走同一套 `sqlConsole`（差别仅在驱动与 DSN）；WebShell 控制台是 `/api/connections/{id}/webshell/exec`，按登记的协议发一次请求。两者与 SSH 控制台一样是**一次性手工执行**，需要持续操作请用终端会话。
+- **终端入口移到「连接管理」**：侧边栏 `连接管理 → 终端`，与「凭据台账」同组；「流量与执行」保留流量/工具执行/LLM 录制。
+- **修复**：台账页「新增凭据」此前必然失败——`connCreate` 没给 `status` 补默认值，而库上有 CHECK 约束只接受 `unknown/alive/dead`。
 
 #### 实测结果（逐类型，2026-10-20）
 

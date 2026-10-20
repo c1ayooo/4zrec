@@ -42,6 +42,10 @@ const (
 
 	EventReconNewAssets = "recon_new_assets"
 
+	// EventVulnIntelNew 是情报流水线在单轮抓取中新增高危/严重情报时的汇总推送。
+	// 与「发现漏洞」区分:这是外部新披露的通告,尚未验证,不是已确认的资产漏洞。
+	EventVulnIntelNew = "vuln_intel_new"
+
 	EventFingerprintSyncDone   = "fingerprint_sync_done"
 	EventFingerprintSyncFailed = "fingerprint_sync_failed"
 	EventNucleiUpdateDone      = "nuclei_update_done"

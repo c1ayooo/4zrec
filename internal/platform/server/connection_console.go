@@ -1,6 +1,7 @@
-// connection_console.go 连接台账的图形化控制台（手工操作）:对台账里的 SSH/DB
-// 凭据直接在页面执行命令/查询——SSH 命令执行(x/crypto/ssh 一次性 exec)、
-// postgres SQL 制台(pgx)、redis 命令制台(裸 RESP,与 creds 探针同协议)。
+// connection_console.go 连接台账的图形化控制台（手工操作）:对台账里的 SSH/DB/
+// WebShell 凭据直接在页面执行命令/查询——SSH 命令执行(x/crypto/ssh 一次性 exec)、
+// SQL 制台(pgx / go-sql-driver)、redis 命令制台(裸 RESP,与 creds 探针同协议)、
+// WebShell 命令执行(plain 协议一次性请求)。
 // 手工操作由操作者驱动(auth 后可用),执行结果回写台账 status/last_checked_at。
 package server
 
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/c1ayooo/4zrec/internal/domain/db"
@@ -178,7 +180,7 @@ func (s *Server) connDBQuery(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	switch c.Kind {
 	case "postgres":
-		cols, rows, qerr := pgQueryConsole(ctx, c, in.Query)
+		cols, rows, qerr := sqlConsole(ctx, "pgx", pgConsoleDSN(c), c, in.Query)
 		elapsed := time.Since(start).Milliseconds()
 		if qerr != nil {
 			_ = pg.UpdateConnectionStatus(r.Context(), id, "dead")
@@ -187,6 +189,27 @@ func (s *Server) connDBQuery(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = pg.UpdateConnectionStatus(r.Context(), id, "alive")
 		writeJSON(w, 200, map[string]any{"ok": true, "columns": cols, "rows": rows, "elapsed_ms": elapsed})
+	case "mysql":
+		// 与 postgres 的差别只在驱动和 DSN,取结果的表格化逻辑共用一套。
+		cols, rows, qerr := sqlConsole(ctx, "mysql", mysqlConsoleDSN(c), c, in.Query)
+		elapsed := time.Since(start).Milliseconds()
+		if qerr != nil {
+			_ = pg.UpdateConnectionStatus(r.Context(), id, "dead")
+			writeJSON(w, 200, map[string]any{"ok": false, "error": qerr.Error(), "elapsed_ms": elapsed})
+			return
+		}
+		_ = pg.UpdateConnectionStatus(r.Context(), id, "alive")
+		writeJSON(w, 200, map[string]any{"ok": true, "columns": cols, "rows": rows, "elapsed_ms": elapsed})
+	case "webshell":
+		out, qerr := webshellConsole(ctx, c, in.Query)
+		elapsed := time.Since(start).Milliseconds()
+		if qerr != nil {
+			_ = pg.UpdateConnectionStatus(r.Context(), id, "dead")
+			writeJSON(w, 200, map[string]any{"ok": false, "error": qerr.Error(), "elapsed_ms": elapsed})
+			return
+		}
+		_ = pg.UpdateConnectionStatus(r.Context(), id, "alive")
+		writeJSON(w, 200, map[string]any{"ok": true, "output": out, "elapsed_ms": elapsed})
 	case "redis":
 		out, qerr := redisConsole(ctx, c, in.Query)
 		elapsed := time.Since(start).Milliseconds()
@@ -198,34 +221,14 @@ func (s *Server) connDBQuery(w http.ResponseWriter, r *http.Request) {
 		_ = pg.UpdateConnectionStatus(r.Context(), id, "alive")
 		writeJSON(w, 200, map[string]any{"ok": true, "output": out, "elapsed_ms": elapsed})
 	default:
-		writeErr(w, 400, fmt.Sprintf("该连接的制台暂未支持(%s);SSH 用 SSH 执行,postgres/redis 已支持", c.Kind))
+		writeErr(w, 400, fmt.Sprintf("该连接的控制台暂未支持(%s);已支持 ssh/postgres/mysql/redis/webshell", c.Kind))
 	}
 }
 
-// pgQueryConsole postgres 制台:任意 SQL,SELECT 返回表格,其余返回影响行数。
-func pgQueryConsole(ctx context.Context, c *db.Connection, query string) ([]string, [][]string, error) {
-	var extra struct {
-		Database string `json:"database"`
-	}
-	_ = jsonUnmarshalSafe(c.Extra, &extra)
-	dbname := strings.TrimSpace(extra.Database)
-	if dbname == "" {
-		dbname = "postgres"
-	}
-	port := c.Port
-	if port <= 0 {
-		port = 5432
-	}
-	var auth strings.Builder
-	if c.Username != "" {
-		fmt.Fprintf(&auth, " user=%s", c.Username)
-	}
-	if c.Secret != "" {
-		fmt.Fprintf(&auth, " password=%s", c.Secret)
-	}
-	dsn := fmt.Sprintf("host=%s port=%d%s dbname=%s sslmode=disable connect_timeout=8",
-		c.Host, port, auth.String(), dbname)
-	h, err := sql.Open("pgx", dsn)
+// sqlConsole 是 SQL 控制台的公用实现:任意语句,查询类返回表格,其余返回
+// 影响行数。driver 是 database/sql 的驱动名,dsn 由各方言的构造函数给出。
+func sqlConsole(ctx context.Context, driver, dsn string, c *db.Connection, query string) ([]string, [][]string, error) {
+	h, err := sql.Open(driver, dsn)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -264,6 +267,104 @@ func pgQueryConsole(ctx context.Context, c *db.Connection, query string) ([]stri
 	}
 	n, _ := res.RowsAffected()
 	return []string{"affected_rows"}, [][]string{{strconv.FormatInt(n, 10)}}, nil
+}
+
+// pgConsoleDSN postgres 制台连接串。
+func pgConsoleDSN(c *db.Connection) string {
+	dbname := connectionDatabase(c, "postgres")
+	port := c.Port
+	if port <= 0 {
+		port = 5432
+	}
+	var auth strings.Builder
+	if c.Username != "" {
+		fmt.Fprintf(&auth, " user=%s", c.Username)
+	}
+	if c.Secret != "" {
+		fmt.Fprintf(&auth, " password=%s", c.Secret)
+	}
+	return fmt.Sprintf("host=%s port=%d%s dbname=%s sslmode=disable connect_timeout=8",
+		c.Host, port, auth.String(), dbname)
+}
+
+// mysqlConsoleDSN mysql 制台连接串。口令里可能带 @ : / 等字符,交给驱动自己的
+// 配置格式化器转义,不手工拼串。
+func mysqlConsoleDSN(c *db.Connection) string {
+	cfg := mysqldriver.NewConfig()
+	cfg.User = c.Username
+	cfg.Passwd = c.Secret
+	cfg.Net = "tcp"
+	port := c.Port
+	if port <= 0 {
+		port = 3306
+	}
+	cfg.Addr = net.JoinHostPort(c.Host, strconv.Itoa(port))
+	cfg.DBName = connectionDatabase(c, "")
+	cfg.Timeout = 8 * time.Second
+	cfg.ReadTimeout = 30 * time.Second
+	cfg.AllowNativePasswords = true
+	return cfg.FormatDSN()
+}
+
+// connectionDatabase 取台账行里登记的库名。
+func connectionDatabase(c *db.Connection, def string) string {
+	var extra struct {
+		Database string `json:"database"`
+	}
+	_ = jsonUnmarshalSafe(c.Extra, &extra)
+	if dbname := strings.TrimSpace(extra.Database); dbname != "" {
+		return dbname
+	}
+	return def
+}
+
+// webshellConsole WebShell 控制台:按台账里登记的协议发一次命令请求。
+// 与 SSH/DB 控制台一样是"一次性执行",不建立常驻会话;需要持续操作请用终端
+// (会话带证据与项目归属)。
+func webshellConsole(ctx context.Context, c *db.Connection, command string) (string, error) {
+	conf := webshellConfigOf(c)
+	if conf.URL == "" {
+		return "", fmt.Errorf("该 WebShell 连接没填 URL(extra.url)")
+	}
+	return execWebShellOnce(ctx, conf, command)
+}
+
+// connWebShellExec WebShell 控制台入口:POST /api/connections/{id}/webshell/exec。
+func (s *Server) connWebShellExec(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	var in struct {
+		Command string `json:"command"`
+	}
+	if err := decode(r, &in); err != nil || strings.TrimSpace(in.Command) == "" {
+		writeErr(w, 400, "command 必填")
+		return
+	}
+	c, err := s.connByID(r.Context(), id)
+	if err != nil {
+		writeErr(w, 404, err.Error())
+		return
+	}
+	if c.Kind != "webshell" {
+		writeErr(w, 400, "该连接不是 WebShell 类型")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	start := time.Now()
+	out, execErr := webshellConsole(ctx, c, in.Command)
+	elapsed := time.Since(start).Milliseconds()
+	if execErr != nil {
+		// 口令错(403)与落点失效都说明这条凭据/落点不可用,如实回写状态。
+		_ = pg.UpdateConnectionStatus(r.Context(), id, "dead")
+		writeJSON(w, 200, map[string]any{"ok": false, "error": execErr.Error(), "elapsed_ms": elapsed})
+		return
+	}
+	_ = pg.UpdateConnectionStatus(r.Context(), id, "alive")
+	writeJSON(w, 200, map[string]any{"ok": true, "output": out, "elapsed_ms": elapsed})
 }
 
 func isQueryLike(q string) bool {

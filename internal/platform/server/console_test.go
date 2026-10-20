@@ -70,7 +70,7 @@ func TestConnDBConsolePostgres(t *testing.T) {
 	// 从测试 DSN 取连接参数(socket peer 认证:user/password 留空)。
 	c := &db.Connection{Kind: "postgres", Host: "/var/run/postgresql", Port: 5433, Username: "c1ay",
 		Extra: json.RawMessage(`{"database":"artex_eino_migration"}`)}
-	cols, rows, err := pgQueryConsole(context.Background(), c, "SELECT 1 AS one, 'x' AS two")
+	cols, rows, err := sqlConsole(context.Background(), "pgx", pgConsoleDSN(c), c, "SELECT 1 AS one, 'x' AS two")
 	if err != nil {
 		t.Fatalf("制台查询失败: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestConnDBConsolePostgres(t *testing.T) {
 		t.Fatalf("结果不符: %v %v", cols, rows)
 	}
 	// 非查询语句 → 影响行数。
-	cols2, rows2, err := pgQueryConsole(context.Background(), c, "CREATE TEMP TABLE console_t (id int)")
+	cols2, rows2, err := sqlConsole(context.Background(), "pgx", pgConsoleDSN(c), c, "CREATE TEMP TABLE console_t (id int)")
 	if err != nil || cols2[0] != "affected_rows" {
 		t.Fatalf("非查询应返回影响行数: %v %v", cols2, err)
 	}

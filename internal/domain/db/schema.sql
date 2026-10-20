@@ -978,7 +978,7 @@ CREATE INDEX IF NOT EXISTS idx_recon_runs_schedule ON recon_runs(schedule_id) WH
 CREATE TABLE IF NOT EXISTS connections (
     id            BIGSERIAL PRIMARY KEY,
     project_id    BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    kind          TEXT NOT NULL CHECK (kind IN ('ssh','postgres','mysql','redis','mongodb','elasticsearch','smb','winrm','ldap','vnc','ftp','proxy','tunnel')),
+    kind          TEXT NOT NULL CHECK (kind IN ('ssh','postgres','mysql','redis','mongodb','elasticsearch','smb','winrm','ldap','vnc','ftp','proxy','tunnel','webshell')),
     host          TEXT NOT NULL,
     port          INT NOT NULL DEFAULT 0,
     username      TEXT NOT NULL DEFAULT '',
@@ -994,6 +994,12 @@ CREATE TABLE IF NOT EXISTS connections (
 );
 CREATE INDEX IF NOT EXISTS idx_connections_project ON connections(project_id);
 CREATE INDEX IF NOT EXISTS idx_connections_kind ON connections(kind);
+
+-- 旧库升级：台账新增 webshell 类型（URL 型落点：extra.url + 口令 + 命令参数），
+-- 老库的 kind 约束里没有它，CREATE TABLE IF NOT EXISTS 不会改约束，必须显式重建。
+ALTER TABLE connections DROP CONSTRAINT IF EXISTS connections_kind_check;
+ALTER TABLE connections ADD CONSTRAINT connections_kind_check
+    CHECK (kind IN ('ssh','postgres','mysql','redis','mongodb','elasticsearch','smb','winrm','ldap','vnc','ftp','proxy','tunnel','webshell'));
 
 -- Skill 调用账本（见 db/skill_usage.go）。一次 Skill() 调用一行，只记维度不记正文。
 -- 刻意不设外键：任务/会话删除后统计仍要保留（与 llm_usage 同理），skill 本身也只是
@@ -1584,6 +1590,32 @@ ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS cwes TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS affected TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS lab_only BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS enriched_at TIMESTAMPTZ;
+
+-- 情报流水线(AI 分析 → 中文化 → nuclei 模板化)。短字段进列表,长文本落
+-- vuln_intel_analysis 旁表:列表页只需要「是否已分析」这类状态位。
+ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS title_zh TEXT NOT NULL DEFAULT '';
+ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS analyzed_at TIMESTAMPTZ;
+ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS localized_at TIMESTAMPTZ;
+ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS nuclei_tpl_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS nuclei_tpl_at TIMESTAMPTZ;
+ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS analysis_error TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_vuln_intel_analyzed ON vuln_intel(analyzed_at NULLS FIRST);
+
+-- AI 分析产物(1:1 旁表)。与 finding_enrichment 同思路:不改原表 payload,
+-- 分析结果独立落表,列表查询不必背着几千字的原理/PoC。重新分析即整行覆盖。
+CREATE TABLE IF NOT EXISTS vuln_intel_analysis (
+    vuln_intel_id  BIGINT PRIMARY KEY REFERENCES vuln_intel(id) ON DELETE CASCADE,
+    principle      TEXT NOT NULL DEFAULT '',
+    attack_scope   TEXT NOT NULL DEFAULT '',
+    description_zh TEXT NOT NULL DEFAULT '',
+    poc_code       TEXT NOT NULL DEFAULT '',
+    poc_lang       TEXT NOT NULL DEFAULT '',
+    -- poc_origin: ai(模型生成) / upstream(源里已有,原样保留) / none(无 PoC)
+    poc_origin     TEXT NOT NULL DEFAULT 'none',
+    nuclei_tpl     TEXT NOT NULL DEFAULT '',
+    model          TEXT NOT NULL DEFAULT '',
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- 漏洞就地复现记录(agent report_finding 时写入的结构化配方,报告确定性渲染用)。
 ALTER TABLE findings ADD COLUMN IF NOT EXISTS reproduction JSONB;

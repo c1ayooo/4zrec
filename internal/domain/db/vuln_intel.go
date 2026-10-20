@@ -23,6 +23,15 @@ type VulnIntel struct {
 	Refs        string    `json:"refs"` // JSON 数组文本
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+
+	// 情报流水线状态位(AI 分析 → 中文化 → nuclei 模板化)。长文本在
+	// vuln_intel_analysis 旁表,列表只需要这些短字段做徽章与筛选。
+	TitleZh       string     `json:"title_zh,omitempty"`
+	AnalyzedAt    *time.Time `json:"analyzed_at"`
+	LocalizedAt   *time.Time `json:"localized_at"`
+	NucleiTplID   string     `json:"nuclei_tpl_id,omitempty"`
+	NucleiTplAt   *time.Time `json:"nuclei_tpl_at"`
+	AnalysisError string     `json:"analysis_error,omitempty"`
 }
 
 // UpsertVulnIntel 按唯一键(源:源内ID)入库,返回是否为新记录(xmax=0 表示
@@ -77,7 +86,9 @@ SELECT v.id, v.title, COALESCE(v.description,''), COALESCE(v.severity,''), COALE
        COALESCE(v.disclosure,''), COALESCE(v.solutions,''), COALESCE(v.source,''),
        COALESCE(v.source_url,''), v.tags, v.refs, v.created_at, v.updated_at,
        v.github_poc, v.cvss_score, COALESCE(v.cvss_vector,''), v.cwes, v.affected,
-       v.lab_only, v.enriched_at
+       v.lab_only, v.enriched_at,
+       COALESCE(v.title_zh,''), v.analyzed_at, v.localized_at,
+       COALESCE(v.nuclei_tpl_id,''), v.nuclei_tpl_at, COALESCE(v.analysis_error,'')
 FROM vuln_intel v` + where + `
 ORDER BY v.created_at DESC, v.id DESC
 LIMIT ` + strconv.Itoa(size) + " OFFSET " + strconv.Itoa(page*size)
@@ -93,7 +104,9 @@ LIMIT ` + strconv.Itoa(size) + " OFFSET " + strconv.Itoa(page*size)
 			&v.Disclosure, &v.Solutions, &v.Source, &v.SourceURL, &v.Tags, &v.Refs,
 			&v.CreatedAt, &v.UpdatedAt,
 			&v.GithubPoc, &v.CvssScore, &v.CvssVector, &v.Cwes, &v.Affected,
-			&v.LabOnly, &v.EnrichedAt); err != nil {
+			&v.LabOnly, &v.EnrichedAt,
+			&v.TitleZh, &v.AnalyzedAt, &v.LocalizedAt,
+			&v.NucleiTplID, &v.NucleiTplAt, &v.AnalysisError); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, v)
@@ -109,15 +122,23 @@ SELECT v.id, v.title, COALESCE(v.description,''), COALESCE(v.severity,''), COALE
        COALESCE(v.disclosure,''), COALESCE(v.solutions,''), COALESCE(v.source,''),
        COALESCE(v.source_url,''), v.tags, v.refs, v.created_at, v.updated_at,
        v.github_poc, v.cvss_score, COALESCE(v.cvss_vector,''), v.cwes, v.affected,
-       v.lab_only, v.enriched_at
+       v.lab_only, v.enriched_at,
+       COALESCE(v.title_zh,''), v.analyzed_at, v.localized_at,
+       COALESCE(v.nuclei_tpl_id,''), v.nuclei_tpl_at, COALESCE(v.analysis_error,'')
 FROM vuln_intel v WHERE v.id=$1`, id,
 	).Scan(&v.ID, &v.Title, &v.Description, &v.Severity, &v.CVE,
 		&v.Disclosure, &v.Solutions, &v.Source, &v.SourceURL, &v.Tags, &v.Refs,
 		&v.CreatedAt, &v.UpdatedAt,
 		&v.GithubPoc, &v.CvssScore, &v.CvssVector, &v.Cwes, &v.Affected,
-		&v.LabOnly, &v.EnrichedAt)
+		&v.LabOnly, &v.EnrichedAt,
+		&v.TitleZh, &v.AnalyzedAt, &v.LocalizedAt,
+		&v.NucleiTplID, &v.NucleiTplAt, &v.AnalysisError)
 	if err != nil {
 		return nil, err
+	}
+	// 分析产物是可选载荷:旁表没有行(尚未分析)时不报错,详情页按空处理。
+	if a, aerr := d.GetIntelAnalysis(id); aerr == nil {
+		v.Analysis = a
 	}
 	return v, nil
 }

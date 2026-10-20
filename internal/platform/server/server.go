@@ -901,6 +901,7 @@ func (s *Server) Handler() http.Handler {
 	// capkit 会话(capkit 桥接工具开的 foothold;项目级 Key 只看本项目)
 	mux.HandleFunc("GET /api/capkit/sessions", s.capkitSessionList)
 	mux.HandleFunc("POST /api/capkit/sessions/open", s.capkitSessionOpen)
+	mux.HandleFunc("POST /api/capkit/sessions/from-connection", s.capkitSessionFromConnection)
 	mux.HandleFunc("POST /api/capkit/sessions/{id}/exec", s.capkitSessionExec)
 	mux.HandleFunc("POST /api/capkit/sessions/{id}/close", s.capkitSessionClose)
 	mux.HandleFunc("DELETE /api/llm/records", s.pgDeleteLLMRecords)
@@ -1031,6 +1032,7 @@ func (s *Server) Handler() http.Handler {
 	// 连接制台(图形化手工操作):SSH 命令执行 / DB 查询
 	mux.HandleFunc("POST /api/connections/{id}/ssh/exec", s.connSSHExec)
 	mux.HandleFunc("POST /api/connections/{id}/db/query", s.connDBQuery)
+	mux.HandleFunc("POST /api/connections/{id}/webshell/exec", s.connWebShellExec)
 	// 全交互 SSH 终端(WebSocket,同源 cookie 鉴权)
 	mux.HandleFunc("GET /api/connections/{id}/terminal", s.connSSHTerminal)
 	// Skill CRUD (文件系统)

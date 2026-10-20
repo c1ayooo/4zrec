@@ -135,6 +135,10 @@ func DefaultConnectionPort(kind string) int {
 		return 21
 	case "proxy":
 		return 1080
+	case "webshell":
+		// WebShell 的落点 URL 存在 extra.url,host/port 只是台账的展示字段;
+		// 默认 80 是为了让"没填端口"的行看起来正常,实际连接用 URL。
+		return 80
 	}
 	return 0
 }

@@ -188,6 +188,8 @@ var eventKindCatalog = []EventKindMeta{
 
 	{Kind: EventReconNewAssets, Label: "侦察新增资产", Category: "侦察", Default: false, Description: "周期采集发现新资产"},
 
+	{Kind: EventVulnIntelNew, Label: "高危漏洞情报", Category: "漏洞", Default: false, Description: "情报流新增高危/严重漏洞通告"},
+
 	{Kind: EventFingerprintSyncDone, Label: "指纹库更新完成", Category: "规则库", Default: false, Description: "指纹规则同步成功"},
 	{Kind: EventFingerprintSyncFailed, Label: "指纹库更新失败", Category: "规则库", Default: true, Description: "指纹规则同步失败"},
 	{Kind: EventNucleiUpdateDone, Label: "nuclei 更新完成", Category: "规则库", Default: false, Description: "nuclei 二进制/模板更新成功"},

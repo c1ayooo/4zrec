@@ -1337,6 +1337,14 @@ export const api = {
       error?: string;
       elapsed_ms: number;
     }>(`/connections/${id}/db/query`, { query }),
+  // WebShell 控制台：与 ssh/db 控制台一样是一次性执行；持续操作走终端会话。
+  connWebShellExec: (id: number, command: string) =>
+    post<{ ok: boolean; output?: string; error?: string; elapsed_ms: number }>(`/connections/${id}/webshell/exec`, {
+      command,
+    }),
+  // 用台账里的凭据开一个终端会话（已开过则复用，返回 reused=true）。
+  openSessionFromConnection: (connectionId: number) =>
+    post<{ id: string; reused: boolean }>("/capkit/sessions/from-connection", { connection_id: connectionId }),
   entJobs: (projectId?: number) =>
     get<{ jobs: EntJob[] }>(`/enterprise/jobs${projectId ? `?project_id=${projectId}` : ""}`).then((r) => arr(r.jobs)),
   entCandidates: (status = "", page = 1, projectId?: number) =>

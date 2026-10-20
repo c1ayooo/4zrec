@@ -7,6 +7,8 @@
 // 有交互式 stdin。输出按调用追加，长命令靠滚动，不伪造 prompt。
 import * as React from "react";
 
+import { useSearchParams } from "next/navigation";
+
 import { Loader2Icon, PlayIcon, PlusIcon, RefreshCwIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
@@ -60,6 +62,8 @@ function defaultCommand(kind?: string): string {
 }
 
 export default function SessionsPage() {
+  const searchParams = useSearchParams();
+  const wanted = searchParams.get("session") ?? "";
   const [sessions, setSessions] = React.useState<CapkitSession[]>([]);
   const [enabled, setEnabled] = React.useState(true);
   const [kinds, setKinds] = React.useState<CapkitKind[]>([]);
@@ -79,17 +83,30 @@ export default function SessionsPage() {
       setSessions(r.sessions ?? []);
       setEnabled(r.enabled);
       setKinds(r.kinds ?? []);
-      setSelected((cur) => (r.sessions?.some((s) => s.id === cur) ? cur : (r.sessions?.[0]?.id ?? "")));
+      const list = r.sessions ?? [];
+      setSelected((cur) => {
+        // 从台账点「开会话」跳过来时,?session= 指定要选中的那条。
+        if (wanted && list.some((s) => s.id === wanted)) return wanted;
+        return list.some((s) => s.id === cur) ? cur : (list[0]?.id ?? "");
+      });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "加载会话失败");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [wanted]);
 
   React.useEffect(() => {
     void load();
   }, [load]);
+
+  // 从台账跳进来时,命令框的默认值要跟着那条会话的类型走(数据库是 SQL,
+  // shell 是 id)。放在这里而不是 load 里,是因为它依赖 setState 后的列表。
+  React.useEffect(() => {
+    if (!wanted) return;
+    const target = sessions.find((s) => s.id === wanted);
+    if (target) setCommand(defaultCommand(target.kind));
+  }, [wanted, sessions]);
 
   const current = sessions.find((s) => s.id === selected);
   const activeLogs = current ? (logs[current.id] ?? []) : [];

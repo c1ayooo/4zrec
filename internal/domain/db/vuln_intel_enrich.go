@@ -87,6 +87,7 @@ type VulnIntelPOC struct {
 }
 
 // EnrichedVulnIntel 是带富化字段的完整情报记录(列表/详情接口)。
+// Analysis 只在详情接口(GetVulnIntel)填充,列表保持 nil 以免载荷膨胀。
 type EnrichedVulnIntel struct {
 	VulnIntel
 	GithubPoc  string     `json:"github_poc"`
@@ -96,4 +97,5 @@ type EnrichedVulnIntel struct {
 	Affected   string     `json:"affected"`
 	LabOnly    bool       `json:"lab_only"`
 	EnrichedAt *time.Time `json:"enriched_at"`
+	Analysis   *IntelAnalysis `json:"analysis,omitempty"`
 }
