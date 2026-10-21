@@ -93,7 +93,7 @@ function MethodBadge({ method }: { method: string }) {
   return (
     <span
       className={cn(
-        "inline-block rounded px-1.5 py-0.5 font-mono font-semibold text-[10px] leading-none",
+        "inline-block rounded px-1.5 py-0.5 font-mono font-semibold text-[11px] leading-none",
         METHOD_COLOR[normalized] ?? "bg-muted text-muted-foreground",
       )}
     >

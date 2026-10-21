@@ -80,7 +80,7 @@ function MethodBadge({ method }: { method: string }) {
   return (
     <span
       className={cn(
-        "inline-block rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold leading-none",
+        "inline-block rounded px-1.5 py-0.5 font-mono text-[11px] font-semibold leading-none",
         METHOD_COLOR[m] ?? "bg-muted text-muted-foreground",
       )}
     >
@@ -639,7 +639,7 @@ export default function AssetsPage() {
                     <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
                   </TableCell>
                   <TableCell className="text-xs">
-                    <Badge variant={isHttp ? "default" : "secondary"} className="font-mono text-[10px]">
+                    <Badge variant={isHttp ? "default" : "secondary"} className="font-mono text-[11px]">
                       {svc || "—"}
                     </Badge>
                   </TableCell>
@@ -910,12 +910,12 @@ function Chips({ items, mono, vulnKb }: { items: string[]; mono?: boolean; vulnK
       {clean.map((s, i) =>
         vulnKb ? (
           <Link key={i} href={`/function/vuln-kb?q=${encodeURIComponent(s)}`} title={`在漏洞库中检索 ${s}`}>
-            <Badge variant="outline" className={cn("text-[10px] transition-colors hover:border-primary/50 hover:text-primary", mono && "font-mono")}>
+            <Badge variant="outline" className={cn("text-[11px] transition-colors hover:border-primary/50 hover:text-primary", mono && "font-mono")}>
               {s}
             </Badge>
           </Link>
         ) : (
-          <Badge key={i} variant="outline" className={cn("text-[10px]", mono && "font-mono")}>
+          <Badge key={i} variant="outline" className={cn("text-[11px]", mono && "font-mono")}>
             {s}
           </Badge>
         ),

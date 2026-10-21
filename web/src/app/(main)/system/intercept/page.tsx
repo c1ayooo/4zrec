@@ -72,7 +72,7 @@ function fmtTokens(n: number): string {
 function JudgeStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border bg-muted/20 px-3 py-2">
-      <div className="text-[10px] text-muted-foreground">{label}</div>
+      <div className="text-[11px] text-muted-foreground">{label}</div>
       <div className="mt-0.5 text-lg font-semibold tabular-nums">{value}</div>
     </div>
   );
@@ -322,7 +322,7 @@ function JudgeCard() {
             </div>
             {usage.daily.length > 0 && (
               <div className="mt-4">
-                <p className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+                <p className="mb-2 text-[11px] uppercase tracking-wider text-muted-foreground">
                   近 30 天每日消耗(输入 + 输出)
                 </p>
                 <JudgeSparkbars daily={usage.daily} />
@@ -361,7 +361,7 @@ function JudgeCard() {
           <Card className="lg:col-span-2">
             <CardContent className="space-y-5 p-4">
               <div className="space-y-4">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">判定模型与策略</p>
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">判定模型与策略</p>
                 <Field label="审批模型">
                   <Select value={String(cfg.profile_id || 0)} onValueChange={(v) => patch({ profile_id: Number(v) })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -401,7 +401,7 @@ function JudgeCard() {
               <Separator />
 
               <div className="space-y-4">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">人工审批（模型判为「转人工」时）</p>
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">人工审批（模型判为「转人工」时）</p>
                 <Field label="审批等待超时（秒）">
                   <Input
                     type="number"
@@ -942,7 +942,7 @@ export default function InterceptPage() {
               toolGroups.map((group, gi) => (
                 <div key={group.label}>
                   {gi > 0 && <Separator className="mb-5" />}
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                     {group.label}
                   </p>
                   <div className="space-y-0.5">
@@ -957,7 +957,7 @@ export default function InterceptPage() {
                           <div className="flex items-center gap-1.5">
                             <span className="font-mono text-sm">{t.key}</span>
                             {(t.kind && t.kind !== "builtin") && (
-                              <Badge variant="outline" className="px-1 py-0 text-[10px]">{t.kind}</Badge>
+                              <Badge variant="outline" className="px-1 py-0 text-[11px]">{t.kind}</Badge>
                             )}
                           </div>
                           {t.description && (

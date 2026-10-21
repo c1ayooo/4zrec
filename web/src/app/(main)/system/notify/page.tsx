@@ -92,7 +92,7 @@ export default function NotifyPage() {
 
   function openAdd() {
     setEditing(null);
-    const base = emptyForm(meta?.kinds[0]?.kind ?? "dingtalk");
+    const base = emptyForm(meta?.kinds?.[0]?.kind ?? "dingtalk");
     base.eventKinds = meta?.default_event_kinds ?? [];
     setForm(base);
     setOpen(true);
@@ -286,8 +286,8 @@ export default function NotifyPage() {
   }
 
   const fields = CHANNEL_FIELDS[form.kind] ?? [];
-  const secretKeys = new Set(meta?.kinds.find((k) => k.kind === form.kind)?.secret_keys ?? []);
-  const defaultRate = meta?.kinds.find((k) => k.kind === form.kind)?.default_rate_per_min ?? 0;
+  const secretKeys = new Set(meta?.kinds?.find((k) => k.kind === form.kind)?.secret_keys ?? []);
+  const defaultRate = meta?.kinds?.find((k) => k.kind === form.kind)?.default_rate_per_min ?? 0;
 
   return (
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
@@ -313,7 +313,7 @@ export default function NotifyPage() {
         )}
       </div>
 
-      {meta && (
+      {meta?.stats && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <StatTile label="渠道" value={`${meta.stats.channels_on} / ${meta.stats.channels}`} hint="启用 / 总数" />
           <StatTile label="今日送达" value={String(meta.stats.sent_today)} />

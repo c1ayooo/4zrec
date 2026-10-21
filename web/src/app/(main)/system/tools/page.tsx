@@ -257,18 +257,18 @@ function ToolEditor({
               }
             >
               <div className="flex flex-wrap items-center gap-2">
-                {r.parentKey && <span className="text-muted-foreground font-mono text-[10px]">↳</span>}
+                {r.parentKey && <span className="text-muted-foreground font-mono text-[11px]">↳</span>}
                 <span className="font-mono text-sm">{r.name}</span>
-                <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+                <Badge variant="secondary" className="px-1.5 py-0 text-[11px]">
                   {r.type || "?"}
                 </Badge>
                 {r.required && (
-                  <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+                  <Badge variant="outline" className="px-1.5 py-0 text-[11px]">
                     必填
                   </Badge>
                 )}
                 {r.parentKey && (
-                  <span className="text-muted-foreground text-[10px]">items 子字段</span>
+                  <span className="text-muted-foreground text-[11px]">items 子字段</span>
                 )}
               </div>
               <div className="grid gap-2">
@@ -320,27 +320,27 @@ function ToolGridCard({ tool, onClick }: { tool: Tool; onClick: () => void }) {
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-mono text-sm font-medium">{tool.key}</span>
         {tool.system ? (
-          <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+          <Badge variant="secondary" className="px-1.5 py-0 text-[11px]">
             系统
           </Badge>
         ) : (
-          <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+          <Badge variant="outline" className="px-1.5 py-0 text-[11px]">
             自定义·{tool.kind}
           </Badge>
         )}
         {tool.deferred && (
-          <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+          <Badge variant="outline" className="px-1.5 py-0 text-[11px]">
             deferred
           </Badge>
         )}
         {!tool.enabled && (
-          <Badge variant="outline" className="text-destructive px-1.5 py-0 text-[10px]">
+          <Badge variant="outline" className="text-destructive px-1.5 py-0 text-[11px]">
             已停用
           </Badge>
         )}
         <Badge
           variant="secondary"
-          className="ml-auto px-1.5 py-0 text-[10px] tabular-nums"
+          className="ml-auto px-1.5 py-0 text-[11px] tabular-nums"
           title={`累计调用 ${tool.calls ?? 0} 次`}
         >
           调用 {tool.calls ?? 0}
@@ -351,10 +351,10 @@ function ToolGridCard({ tool, onClick }: { tool: Tool; onClick: () => void }) {
       </p>
       <div className="mt-auto flex flex-wrap gap-1 pt-1">
         {tool.agents.length === 0 && (
-          <span className="text-muted-foreground text-[10px]">（未绑定 Agent）</span>
+          <span className="text-muted-foreground text-[11px]">（未绑定 Agent）</span>
         )}
         {tool.agents.map((a) => (
-          <Badge key={a} variant="outline" className="px-1.5 py-0 text-[10px]">
+          <Badge key={a} variant="outline" className="px-1.5 py-0 text-[11px]">
             {a}
           </Badge>
         ))}

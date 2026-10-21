@@ -794,7 +794,7 @@ export default function SkillsPage() {
                       <span className="min-w-0 flex-1 truncate font-semibold" title={s.name}>{s.name}</span>
                       {s.calls > 0 && (
                         <span
-                          className="shrink-0 rounded bg-muted px-1 text-[10px] tabular-nums text-muted-foreground"
+                          className="shrink-0 rounded bg-muted px-1 text-[11px] tabular-nums text-muted-foreground"
                           title={`被调用 ${s.calls} 次 · 最近 ${fmtTime(s.last_used)}`}
                         >
                           {s.calls}
@@ -1060,7 +1060,7 @@ export default function SkillsPage() {
               <TabsTrigger value="mcp">
                 关联 MCP
                 {newMcps.length > 0 && (
-                  <span className="ml-1.5 rounded-full bg-primary px-1.5 py-0.5 text-[10px] leading-none text-primary-foreground">
+                  <span className="ml-1.5 rounded-full bg-primary px-1.5 py-0.5 text-[11px] leading-none text-primary-foreground">
                     {newMcps.length}
                   </span>
                 )}
@@ -1068,7 +1068,7 @@ export default function SkillsPage() {
               <TabsTrigger value="visibility">
                 可见性
                 {newVisibility.length > 0 && (
-                  <span className="ml-1.5 rounded-full bg-primary px-1.5 py-0.5 text-[10px] leading-none text-primary-foreground">
+                  <span className="ml-1.5 rounded-full bg-primary px-1.5 py-0.5 text-[11px] leading-none text-primary-foreground">
                     {newVisibility.length}
                   </span>
                 )}

@@ -248,7 +248,7 @@ export default function AssetInterceptPage() {
                     <TableCell className="text-sm text-muted-foreground">
                       <div className="flex items-center gap-1.5">
                         {rule.builtin && (
-                          <Badge variant="secondary" className="shrink-0 px-1 py-0 text-[10px]">
+                          <Badge variant="secondary" className="shrink-0 px-1 py-0 text-[11px]">
                             内置
                           </Badge>
                         )}
@@ -298,7 +298,7 @@ export default function AssetInterceptPage() {
                 <SelectContent>
                   {KIND_GROUPS.map((g) => (
                     <React.Fragment key={g}>
-                      <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                         {g}
                       </div>
                       {KIND_OPTIONS.filter((o) => o.group === g).map((o) => (

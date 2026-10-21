@@ -62,6 +62,8 @@ import type {
   FingerprintSource,
   FingerprintStatus,
   FingerprintSyncJob,
+  IntelAnalysis,
+  IntelDraft,
   IntelKey,
   IntentAsset,
   InterceptApprovalFilter,
@@ -142,6 +144,7 @@ import type {
   VulnKBEntry,
   VulnKBStats,
   VulnLibraryEntry,
+  VulnPipelineStatus,
   WorkspaceFile,
   WorkspaceListing,
 } from "@/lib/types";
@@ -206,17 +209,17 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
 // Token is appended as ?token= because SSE can't carry cookies cross-origin.
 // mockReport returns a canned Markdown report for the demo.
 function mockReport(_task?: string): string {
-  return `# 4zrec 渗透测试报告 — Acme Corp
+  return `# 4zrec 渗透测试报告 — Northstar Corp
 
 ## 概览
-- 范围：acme.com（含 www / admin / api / shop / vpn 子域）
+- 范围：northstar.com（含 www / admin / api / shop / vpn 子域）
 - 已确认发现：6 项（高危 3 · 中危 3 · 低危 2）
 - 引擎模式：exploring
 
 ## 关键发现
-1. **[高] 后台默认口令** admin.acme.com admin/admin123 → 可完全接管后台。
-2. **[高] SQL 注入** www.acme.com/search?q= → 可读取 acme_prod 库。
-3. **[高] IDOR** api.acme.com/v1/orders?id= → 可越权读取他人订单（含手机号/地址）。
+1. **[高] 后台默认口令** admin.northstar.com admin/admin123 → 可完全接管后台。
+2. **[高] SQL 注入** www.northstar.com/search?q= → 可读取 northstar_prod 库。
+3. **[高] IDOR** api.northstar.com/v1/orders?id= → 可越权读取他人订单（含手机号/地址）。
 4. **[中] 反射型 XSS**、**暴露 .git 源码**、**登录无速率限制**。
 
 ## 建议
@@ -1282,6 +1285,7 @@ export const api = {
     }>(`/fingerprint/rules?${q.toString()}`);
   },
   fingerprintStatus: () => get<FingerprintStatus>(`/fingerprint/status`),
+  fingerprintRuleDelete: (id: string) => del<{ ok: boolean }>(`/fingerprint/rules/${id}`),
   fingerprintSync: () => post<FingerprintSyncJob>(`/fingerprint/sync`, {}),
   fingerprintSyncStatus: () => get<FingerprintSyncJob>(`/fingerprint/sync/status`),
   spacemapSearch: (body: {
@@ -1630,6 +1634,25 @@ export const api = {
   vulnIntelEntry: (id: number) => get<{ entry: VulnIntelEntry }>(`/vulnintel/${id}`),
   vulnIntelRefresh: () => post<{ ok: boolean }>("/vulnintel/refresh"),
   vulnIntelStatus: () => get<VulnIntelStatus>("/vulnintel/status"),
+  /** 情报分析流水线开关与进度。 */
+  vulnIntelPipeline: () => get<{ pipeline: VulnPipelineStatus }>("/vulnintel/pipeline"),
+  setVulnIntelPipeline: (
+    body: Partial<Pick<VulnPipelineStatus, "analyze_enabled" | "auto_translate" | "auto_nuclei" | "notify_enabled">>,
+  ) => put<{ ok: boolean; pipeline: VulnPipelineStatus }>("/vulnintel/pipeline", body),
+  /** 手动对单条情报跑 AI 分析(后台执行,202 即返回;轮询详情看结果)。 */
+  vulnIntelAnalyze: (id: number) => post<{ ok: boolean }>(`/vulnintel/${id}/analyze`),
+  /** 生成单条情报的模板草稿(不写模板库,供预览)。 */
+  vulnIntelNucleiDraft: (id: number) =>
+    post<{ ok: boolean; template_id: string; yaml: string }>(`/vulnintel/${id}/nuclei/draft`),
+  /** 人工确认:把模板草稿写进项目模板库。 */
+  vulnIntelNucleiConfirm: (id: number) => post<{ ok: boolean; template_id: string }>(`/vulnintel/${id}/nuclei`),
+  /** 丢弃一条模板草稿。 */
+  vulnIntelNucleiDiscard: (id: number) => del<{ ok: boolean }>(`/vulnintel/${id}/nuclei`),
+  /** 待人工确认的模板草稿列表。 */
+  vulnIntelDrafts: (limit = 100) => get<{ drafts: IntelDraft[] }>(`/vulnintel/drafts?limit=${limit}`),
+  vulnIntelFingerprintDraft: (id: number) => post<{ ok: boolean; draft: string }>(`/vulnintel/${id}/fingerprint/draft`),
+  vulnIntelFingerprintConfirm: (id: number) => post<{ ok: boolean; rule_id: string }>(`/vulnintel/${id}/fingerprint`),
+  vulnIntelFingerprintDiscard: (id: number) => del<{ ok: boolean }>(`/vulnintel/${id}/fingerprint`),
 
   // ---- AI 报告生成(docx:确定性骨架 + LLM 叙述)----
   reportGenerate: (

@@ -869,7 +869,7 @@ export default function SystemSettingsPage() {
                     <SelectValue placeholder="选择来源" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="ddgs">DuckDuckGo（ddgs · 免费无 Key）</SelectItem>
+                    <SelectItem value="ddgs">DuckDuckGo（免费）</SelectItem>
                     <SelectItem value="brave-free">Brave（免费版 · 需 Key）</SelectItem>
                     <SelectItem value="tavily">Tavily（需 Key）</SelectItem>
                     <SelectItem value="deepseek">DeepSeek（官方）</SelectItem>

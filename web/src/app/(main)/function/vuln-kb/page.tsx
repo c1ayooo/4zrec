@@ -4,12 +4,17 @@ import * as React from "react";
 
 import {
   BookOpenTextIcon,
+  CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  FileCode2Icon,
+  FingerprintIcon,
   Loader2Icon,
   RefreshCwIcon,
   RssIcon,
   SearchIcon,
+  SparklesIcon,
+  Trash2Icon,
 } from "lucide-react";
 
 import { FeatureCallHistory } from "@/components/feature-call-history";
@@ -22,7 +27,17 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import type { VulnIntelEntry, VulnIntelPOC, VulnIntelStatus, VulnKBEntry, VulnLibraryEntry } from "@/lib/types";
+import type {
+  IntelAnalysis,
+  VulnIntelEntry,
+  VulnIntelPOC,
+  VulnIntelStatus,
+  VulnKBEntry,
+  VulnLibraryEntry,
+} from "@/lib/types";
+
+import { IntelDraftsTab } from "./_components/intel-drafts-tab";
+import { IntelPipelineTab } from "./_components/intel-pipeline-tab";
 
 const PAGE_SIZES = [25, 50, 100];
 const FP_MAX_LEN = 48;
@@ -107,17 +122,28 @@ function FieldRow({ label, value, mono }: { label: string; value: string; mono?:
 export default function VulnKbPage() {
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <BookOpenTextIcon className="size-5 text-muted-foreground" />
-        <h1 className="text-lg font-semibold">漏洞库</h1>
+      <div className="flex items-start gap-2.5">
+        <BookOpenTextIcon className="mt-0.5 size-5 text-muted-foreground" />
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">漏洞库</h1>
+          <p className="text-muted-foreground mt-1 text-sm">1day 库与公开情报流，按来源、产品和 CVE 检索。</p>
+        </div>
       </div>
       <Tabs defaultValue="library" className="space-y-4">
         <TabsList>
           <TabsTrigger value="library">漏洞列表</TabsTrigger>
+          <TabsTrigger value="drafts">产物待确认</TabsTrigger>
+          <TabsTrigger value="pipeline">流水线</TabsTrigger>
           <TabsTrigger value="history">调用历史</TabsTrigger>
         </TabsList>
         <TabsContent value="library">
           <LibraryTab />
+        </TabsContent>
+        <TabsContent value="drafts">
+          <IntelDraftsTab />
+        </TabsContent>
+        <TabsContent value="pipeline">
+          <IntelPipelineTab />
         </TabsContent>
         <TabsContent value="history">
           <FeatureCallHistory feature="vulnkb" />
@@ -151,6 +177,11 @@ function LibraryTab() {
   const [kbDetail, setKbDetail] = React.useState<VulnKBEntry | null>(null);
   const [intelDetail, setIntelDetail] = React.useState<VulnIntelEntry | null>(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
+  // detailNonce 让详情重新拉取(分析/模板是后台任务,完成后要刷新)。
+  const [detailNonce, setDetailNonce] = React.useState(0);
+  const [analyzing, setAnalyzing] = React.useState(false);
+  const [tplBusy, setTplBusy] = React.useState(false);
+  const [actionError, setActionError] = React.useState("");
 
   React.useEffect(() => {
     const t = setTimeout(() => setQueryQ(query.trim()), 300);
@@ -185,12 +216,14 @@ function LibraryTab() {
       .catch(() => setStatus(null));
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: detailNonce 是显式的重取信号，不在 effect 体内直接读取。
   React.useEffect(() => {
     if (!selected) {
       setKbDetail(null);
       setIntelDetail(null);
       return;
     }
+    setActionError("");
     let cancelled = false;
     setKbDetail(null);
     setIntelDetail(null);
@@ -216,9 +249,124 @@ function LibraryTab() {
     return () => {
       cancelled = true;
     };
-  }, [selected]);
+  }, [selected, detailNonce]);
 
   const totalPages = Math.max(1, Math.ceil(total / size));
+
+  // 分析是后台任务(LLM 调用可能几十秒),POST 只负责派发,轮询详情等结果。
+  const runAnalyze = async () => {
+    if (!selected || selected.source !== "intel") return;
+    const id = selected.id;
+    setAnalyzing(true);
+    setActionError("");
+    try {
+      await api.vulnIntelAnalyze(id);
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const r = await api.vulnIntelEntry(id);
+        if (r.entry?.analyzed_at || r.entry?.analysis_error) {
+          setIntelDetail(r.entry);
+          break;
+        }
+      }
+      load();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  // 两步走:先出草稿,人工看过 YAML 再确认入库。
+  const runDraft = async () => {
+    if (!selected || selected.source !== "intel") return;
+    const id = selected.id;
+    setTplBusy(true);
+    setActionError("");
+    try {
+      await api.vulnIntelNucleiDraft(id);
+      setDetailNonce((n) => n + 1);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTplBusy(false);
+    }
+  };
+
+  const runConfirm = async () => {
+    if (!selected || selected.source !== "intel") return;
+    const id = selected.id;
+    setTplBusy(true);
+    setActionError("");
+    try {
+      await api.vulnIntelNucleiConfirm(id);
+      setDetailNonce((n) => n + 1);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTplBusy(false);
+    }
+  };
+
+  const runDiscard = async () => {
+    if (!selected || selected.source !== "intel") return;
+    const id = selected.id;
+    setTplBusy(true);
+    setActionError("");
+    try {
+      await api.vulnIntelNucleiDiscard(id);
+      setDetailNonce((n) => n + 1);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTplBusy(false);
+    }
+  };
+
+  const runFpDraft = async () => {
+    if (!selected || selected.source !== "intel") return;
+    const id = selected.id;
+    setTplBusy(true);
+    setActionError("");
+    try {
+      await api.vulnIntelFingerprintDraft(id);
+      setDetailNonce((n) => n + 1);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTplBusy(false);
+    }
+  };
+
+  const runFpConfirm = async () => {
+    if (!selected || selected.source !== "intel") return;
+    const id = selected.id;
+    setTplBusy(true);
+    setActionError("");
+    try {
+      await api.vulnIntelFingerprintConfirm(id);
+      setDetailNonce((n) => n + 1);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTplBusy(false);
+    }
+  };
+
+  const runFpDiscard = async () => {
+    if (!selected || selected.source !== "intel") return;
+    const id = selected.id;
+    setTplBusy(true);
+    setActionError("");
+    try {
+      await api.vulnIntelFingerprintDiscard(id);
+      setDetailNonce((n) => n + 1);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTplBusy(false);
+    }
+  };
 
   const refresh = async () => {
     setRefreshing(true);
@@ -230,7 +378,9 @@ function LibraryTab() {
         api
           .vulnIntelStatus()
           .then((r) => setStatus(r))
-          .catch(() => {});
+          .catch(() => {
+            // 状态条刷新失败不阻塞列表；保留上一次的轮询状态。
+          });
       }, 8000);
     } catch {
       /* 失败静默,状态区会体现 */
@@ -240,6 +390,7 @@ function LibraryTab() {
   };
 
   const isIntel = selected?.source === "intel";
+  const sourceCount = status?.sources ?? status?.result?.Sources;
   const detailBits = isIntel
     ? [
         intelDetail?.severity ?? selected?.severity,
@@ -258,8 +409,8 @@ function LibraryTab() {
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <RssIcon className="size-3.5" />
           {status
-            ? `${status.sources} 个公开源自动轮询${status.result?.New !== undefined ? ` · 上轮新增 ${status.result.New}` : ""}`
-            : "9 个公开情报源自动轮询"}
+            ? `${sourceCount && sourceCount > 0 ? `${sourceCount} 个公开源自动轮询` : "公开源自动轮询"}${status.result?.New !== undefined ? ` · 上轮新增 ${status.result.New}` : ""}`
+            : "公开情报源自动轮询"}
         </p>
         <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing}>
           {refreshing ? (
@@ -296,35 +447,41 @@ function LibraryTab() {
       </Card>
 
       <Card>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[9%]">来源</TableHead>
-              <TableHead>漏洞</TableHead>
-              <TableHead className="w-[16%]">产品 / 等级</TableHead>
-              <TableHead className="w-[16%]">类型 / 来源</TableHead>
-              <TableHead className="w-[12%]">CVE</TableHead>
-              <TableHead className="w-[18%]">指纹 / 披露</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
+        {loading ? (
+          <div className="text-muted-foreground flex h-40 items-center justify-center gap-2 text-sm">
+            <Loader2Icon className="size-4 animate-spin" />
+            加载中…
+          </div>
+        ) : entries.length === 0 ? (
+          <div className="px-6 py-10 text-center">
+            <div className="mx-auto flex max-w-xl flex-col items-center gap-3">
+              <p className="text-muted-foreground text-sm">
+                {total === 0 && !queryQ && !source
+                  ? "漏洞库为空——把 1day 库目录(vulnkb/)放到服务目录后重启，或立即抓取公开情报。"
+                  : "没有匹配的记录，调整关键词或来源后再试。"}
+              </p>
+              {total === 0 && !queryQ && !source ? (
+                <Button size="sm" variant="outline" onClick={refresh} disabled={refreshing}>
+                  {refreshing ? <Loader2Icon className="size-4 animate-spin" /> : <RefreshCwIcon className="size-4" />}
+                  立即抓取情报
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
-                  <Loader2Icon className="mr-2 inline size-4 animate-spin" />
-                  加载中…
-                </TableCell>
+                <TableHead className="w-[9%]">来源</TableHead>
+                <TableHead>漏洞</TableHead>
+                <TableHead className="w-[16%]">产品 / 等级</TableHead>
+                <TableHead className="w-[16%]">类型 / 来源</TableHead>
+                <TableHead className="w-[12%]">CVE</TableHead>
+                <TableHead className="w-[18%]">指纹 / 披露</TableHead>
               </TableRow>
-            ) : entries.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
-                  {total === 0 && !queryQ && !source
-                    ? "漏洞库为空——把 1day 库目录(vulnkb/)放到服务目录后重启，或点「立即抓取情报」拉取情报"
-                    : "无匹配记录"}
-                </TableCell>
-              </TableRow>
-            ) : (
-              entries.map((e) => {
+            </TableHeader>
+            <TableBody>
+              {entries.map((e) => {
                 const intel = e.source === "intel";
                 return (
                   <TableRow key={`${e.source}-${e.id}`} className="cursor-pointer" onClick={() => setSelected(e)}>
@@ -362,17 +519,17 @@ function LibraryTab() {
                     </TableCell>
                     <TableCell className="font-mono text-xs">{e.cve || "—"}</TableCell>
                     <TableCell
-                      className="max-w-0 truncate font-mono text-xs text-muted-foreground"
+                      className="text-muted-foreground max-w-0 truncate font-mono text-xs"
                       title={intel ? e.disclosure : e.fingerprint}
                     >
                       {intel ? e.disclosure || "—" : e.fingerprint ? truncate(e.fingerprint, FP_MAX_LEN) : "—"}
                     </TableCell>
                   </TableRow>
                 );
-              })
-            )}
-          </TableBody>
-        </Table>
+              })}
+            </TableBody>
+          </Table>
+        )}
       </Card>
 
       <div className="flex items-center justify-between">
@@ -432,7 +589,19 @@ function LibraryTab() {
               </div>
             ) : isIntel ? (
               intelDetail ? (
-                <IntelDetail entry={intelDetail} />
+                <IntelDetail
+                  entry={intelDetail}
+                  analyzing={analyzing}
+                  tplBusy={tplBusy}
+                  actionError={actionError}
+                  onAnalyze={runAnalyze}
+                  onDraft={runDraft}
+                  onConfirm={runConfirm}
+                  onDiscard={runDiscard}
+                  onFpDraft={runFpDraft}
+                  onFpConfirm={runFpConfirm}
+                  onFpDiscard={runFpDiscard}
+                />
               ) : (
                 <p className="py-8 text-center text-sm text-muted-foreground">加载失败</p>
               )
@@ -458,14 +627,214 @@ function KbDetail({ entry }: { entry: VulnKBEntry }) {
       <FieldRow label="响应特征" value={entry.response_sig} mono />
       <FieldRow label="预期" value={entry.expected} />
       <FieldRow label="原始文档" value={entry.body ?? ""} mono />
-      <p className="text-right font-mono text-[10px] text-muted-foreground">{entry.source_path}</p>
+      <p className="text-right font-mono text-[11px] text-muted-foreground">{entry.source_path}</p>
     </>
   );
 }
 
-function IntelDetail({ entry }: { entry: VulnIntelEntry }) {
+// pocOriginLabel 说明 PoC 的来源:模型生成 / 上游仓库(只有链接)/ 无。
+// parseFpDraft 解析后端存的指纹草稿 JSON(展示用;解析不了就返回 null)。
+function parseFpDraft(
+  raw: string | undefined,
+): { name: string; category: string; expression: string; reason?: string } | null {
+  if (!raw) return null;
+  try {
+    const obj = JSON.parse(raw);
+    if (obj && typeof obj === "object" && typeof obj.expression === "string") {
+      return {
+        name: String(obj.name ?? ""),
+        category: String(obj.category ?? ""),
+        expression: obj.expression,
+        reason: obj.reason ? String(obj.reason) : undefined,
+      };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function pocOriginLabel(origin: string): string {
+  if (origin === "ai") return "AI 生成";
+  if (origin === "upstream") return "上游仓库已有";
+  return "无";
+}
+
+function IntelDetail({
+  entry,
+  analyzing,
+  tplBusy,
+  actionError,
+  onAnalyze,
+  onDraft,
+  onConfirm,
+  onDiscard,
+  onFpDraft,
+  onFpConfirm,
+  onFpDiscard,
+}: {
+  entry: VulnIntelEntry;
+  analyzing: boolean;
+  tplBusy: boolean;
+  actionError: string;
+  onAnalyze: () => void;
+  onDraft: () => void;
+  onConfirm: () => void;
+  onDiscard: () => void;
+  onFpDraft: () => void;
+  onFpConfirm: () => void;
+  onFpDiscard: () => void;
+}) {
+  const a: IntelAnalysis | null | undefined = entry.analysis;
+  const analyzed = Boolean(entry.analyzed_at);
+  const confirmed = Boolean(entry.nuclei_tpl_id);
+  const hasDraft = Boolean(a?.nuclei_template);
+  const fpConfirmed = Boolean(entry.fingerprint_id);
+  const hasFpDraft = Boolean(a?.fingerprint);
+  const fpDraft = React.useMemo(() => parseFpDraft(a?.fingerprint), [a?.fingerprint]);
+
   return (
     <>
+      {/* 流水线操作区:分析 → 出模板草稿 → 人工确认入库。 */}
+      <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-2.5">
+        <Button size="sm" variant="outline" onClick={onAnalyze} disabled={analyzing}>
+          {analyzing ? (
+            <Loader2Icon className="mr-1 size-3.5 animate-spin" />
+          ) : (
+            <SparklesIcon className="mr-1 size-3.5" />
+          )}
+          {analyzing ? "分析中…" : analyzed ? "重新分析" : "AI 分析"}
+        </Button>
+        <Button size="sm" variant="outline" onClick={onDraft} disabled={tplBusy}>
+          {tplBusy ? (
+            <Loader2Icon className="mr-1 size-3.5 animate-spin" />
+          ) : (
+            <FileCode2Icon className="mr-1 size-3.5" />
+          )}
+          {hasDraft && !confirmed ? "重新生成模板草稿" : "生成模板草稿"}
+        </Button>
+        {hasDraft && !confirmed ? (
+          <>
+            <Button size="sm" onClick={onConfirm} disabled={tplBusy}>
+              <CheckIcon className="mr-1 size-3.5" />
+              确认入库
+            </Button>
+            <Button size="sm" variant="ghost" onClick={onDiscard} disabled={tplBusy}>
+              <Trash2Icon className="mr-1 size-3.5" />
+              丢弃草稿
+            </Button>
+          </>
+        ) : null}
+        <Button size="sm" variant="outline" onClick={onFpDraft} disabled={tplBusy}>
+          {tplBusy ? (
+            <Loader2Icon className="mr-1 size-3.5 animate-spin" />
+          ) : (
+            <FingerprintIcon className="mr-1 size-3.5" />
+          )}
+          {hasFpDraft && !fpConfirmed ? "重新生成指纹草稿" : "生成指纹草稿"}
+        </Button>
+        {hasFpDraft && !fpConfirmed ? (
+          <>
+            <Button size="sm" onClick={onFpConfirm} disabled={tplBusy}>
+              <CheckIcon className="mr-1 size-3.5" />
+              指纹入库
+            </Button>
+            <Button size="sm" variant="ghost" onClick={onFpDiscard} disabled={tplBusy}>
+              <Trash2Icon className="mr-1 size-3.5" />
+              丢弃
+            </Button>
+          </>
+        ) : null}
+        <span className="text-[11px] text-muted-foreground">
+          {analyzed ? `已分析${a?.model ? ` · ${a.model}` : ""}` : "尚未分析"}
+        </span>
+      </div>
+
+      {actionError ? (
+        <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+          {actionError}
+        </p>
+      ) : null}
+      {entry.analysis_error ? (
+        <p className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+          上次分析失败：{entry.analysis_error}（下一轮会自动重试，也可点上方按钮立即重试）
+        </p>
+      ) : null}
+
+      {entry.title_zh && entry.title_zh !== entry.title ? <FieldRow label="原文标题" value={entry.title} /> : null}
+
+      {a?.description_zh || a?.principle || a?.attack_scope ? (
+        <>
+          <FieldRow label="中文简介" value={a?.description_zh ?? ""} />
+          <FieldRow label="漏洞原理" value={a?.principle ?? ""} />
+          <FieldRow label="攻击范围" value={a?.attack_scope ?? ""} />
+        </>
+      ) : null}
+
+      {a?.poc_code ? (
+        <div className="grid gap-1">
+          <span className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+            验证 PoC
+            <Badge variant="outline" className="text-[11px]">
+              {a.poc_lang || "python"} · {pocOriginLabel(a.poc_origin)}
+            </Badge>
+          </span>
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-md border bg-muted/50 p-2 font-mono text-xs">
+            {a.poc_code}
+          </pre>
+          {a.poc_note ? <p className="text-[11px] text-amber-600 dark:text-amber-400">{a.poc_note}</p> : null}
+        </div>
+      ) : a && a.poc_origin === "upstream" ? (
+        <p className="text-xs text-muted-foreground">上游仓库已有 PoC（见下方仓库列表），未另行生成代码。</p>
+      ) : a?.poc_note ? (
+        <p className="text-xs text-muted-foreground">
+          未生成 PoC：{a.poc_note}（情报没有给出可核验的入口/参数时不会硬凑脚本）
+        </p>
+      ) : null}
+
+      {hasDraft || confirmed ? (
+        <div className="grid gap-1">
+          <span className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
+            {confirmed ? "nuclei 模板（已入库）" : "nuclei 模板草稿（待确认）"}
+            {confirmed ? (
+              <Badge variant="outline" className="font-mono text-[11px]">
+                {entry.nuclei_tpl_id}
+              </Badge>
+            ) : (
+              <Badge className="bg-amber-500/15 text-[11px] text-amber-600 dark:text-amber-400">未写入模板库</Badge>
+            )}
+          </span>
+          {a?.nuclei_template ? (
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-md border bg-muted/50 p-2 font-mono text-xs">
+              {a.nuclei_template}
+            </pre>
+          ) : null}
+        </div>
+      ) : null}
+
+      {hasFpDraft || fpConfirmed ? (
+        <div className="grid gap-1">
+          <span className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
+            {fpConfirmed ? "资产指纹（已入库）" : "资产指纹草稿（待确认）"}
+            {fpConfirmed ? (
+              <Badge variant="outline" className="font-mono text-[11px]">
+                {entry.fingerprint_id}
+              </Badge>
+            ) : (
+              <Badge className="bg-amber-500/15 text-[11px] text-amber-600 dark:text-amber-400">未写入指纹库</Badge>
+            )}
+          </span>
+          {fpDraft ? (
+            <>
+              <FieldRow label="规则名" value={fpDraft.name} />
+              <FieldRow label="分类" value={fpDraft.category} mono />
+              <FieldRow label="匹配表达式" value={fpDraft.expression} mono />
+              {fpDraft.reason ? <FieldRow label="判定依据" value={fpDraft.reason} /> : null}
+            </>
+          ) : null}
+        </div>
+      ) : null}
+
       <FieldRow label="描述" value={entry.description ?? ""} />
       <FieldRow label="处置建议" value={entry.solutions ?? ""} />
       <FieldRow label="披露时间" value={entry.disclosure} />
@@ -477,7 +846,7 @@ function IntelDetail({ entry }: { entry: VulnIntelEntry }) {
           <span className="text-xs font-medium text-muted-foreground">受影响包</span>
           <div className="flex flex-wrap gap-1">
             {parseJSONArr(entry.affected).map((a, i) => (
-              <Badge key={i} variant="outline" className="font-mono text-[10px]">
+              <Badge key={i} variant="outline" className="font-mono text-[11px]">
                 {a}
               </Badge>
             ))}
@@ -514,7 +883,7 @@ function IntelDetail({ entry }: { entry: VulnIntelEntry }) {
               </div>
               {r.description ? <p className="mt-1 line-clamp-2 text-muted-foreground">{r.description}</p> : null}
               {r.triage_reasons?.length ? (
-                <p className="mt-1 text-[10px] text-muted-foreground/70">{r.triage_reasons.join(" · ")}</p>
+                <p className="mt-1 text-[11px] text-muted-foreground/70">{r.triage_reasons.join(" · ")}</p>
               ) : null}
             </div>
           ))}

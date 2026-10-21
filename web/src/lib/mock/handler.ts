@@ -146,7 +146,7 @@ const mockEvidenceBodies: Record<string, { req: string; resp: string }> = {
   "x-16": { req: '{"cmd":"id"}', resp: '{"status":"ok","out":"uid=33(www-data) gid=33(www-data)"}' },
   "x-17": { req: "", resp: "<html><title>Jenkins Script Console</title>..." },
   "x-18": { req: "script=println 'whoami'.execute().text", resp: "nt authority\\system" },
-  "x-19": { req: "[psexec] acme/svc_deploy@10.10.10.10", resp: "[*] Got SYSTEM on DC01" },
+  "x-19": { req: "[psexec] northstar/svc_deploy@10.10.10.10", resp: "[*] Got SYSTEM on DC01" },
 };
 
 // 运行期状态:finding id → 绑定列表(可增删改序,demo 内存态)。首次访问按种子初始化。
@@ -1811,12 +1811,12 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   }
   if (seg[0] === "tasks" && seg[2] === "intent-assets" && seg.length === 3 && m === "GET") {
     let mappings: Array<{ intentID: string; assetID: number; summary: string }> = [];
-    if (seg[1] === "t-acme-web") {
+    if (seg[1] === "t-northstar-web") {
       mappings = [
         { intentID: "i3", assetID: 6, summary: "后台功能枚举意图从前序子域发现中选定" },
         { intentID: "i5", assetID: 3, summary: "订单接口测试意图从 API 任务目标中选定" },
       ];
-    } else if (seg[1] === "t-acme-api") {
+    } else if (seg[1] === "t-northstar-api") {
       mappings = [{ intentID: "i5", assetID: 3, summary: "订单接口测试意图从 API 任务目标中选定" }];
     }
     const sourceTaskID = mockTaskAssetID(seg[1]) ?? 0;

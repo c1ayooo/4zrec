@@ -299,7 +299,7 @@ export function FeatureCallHistory({ feature }: { feature: FeatureCallFeature })
                     <TableRow key={c.id} className="cursor-pointer" onClick={() => void openDetail(c)}>
                       <TableCell className="text-muted-foreground text-xs tabular-nums">{fmtTime(c.ts)}</TableCell>
                       <TableCell>
-                        <Badge variant="outline" className="text-[10px]">
+                        <Badge variant="outline" className="text-[11px]">
                           {SOURCE_LABELS[c.source] ?? c.source}
                         </Badge>
                       </TableCell>
@@ -309,9 +309,9 @@ export function FeatureCallHistory({ feature }: { feature: FeatureCallFeature })
                           {c.actor || "—"}
                         </div>
                         {c.task_id ? (
-                          <div className="text-muted-foreground text-[10px]">task #{c.task_id}</div>
+                          <div className="text-muted-foreground text-[11px]">task #{c.task_id}</div>
                         ) : c.session_id ? (
-                          <div className="text-muted-foreground truncate text-[10px]">{c.session_id}</div>
+                          <div className="text-muted-foreground truncate text-[11px]">{c.session_id}</div>
                         ) : null}
                       </TableCell>
                       <TableCell className="max-w-0">
@@ -319,7 +319,7 @@ export function FeatureCallHistory({ feature }: { feature: FeatureCallFeature })
                           {c.query || c.ref_id || "—"}
                         </div>
                         {c.ref_type ? (
-                          <div className="text-muted-foreground truncate text-[10px]">
+                          <div className="text-muted-foreground truncate text-[11px]">
                             {c.ref_type}
                             {c.ref_id ? ` · ${c.ref_id}` : ""}
                           </div>
@@ -334,7 +334,7 @@ export function FeatureCallHistory({ feature }: { feature: FeatureCallFeature })
                         {fmtDuration(c.duration_ms)}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline" className={`text-[10px] ${statusTone(c.status)}`}>
+                        <Badge variant="outline" className={`text-[11px] ${statusTone(c.status)}`}>
                           {STATUS_LABELS[c.status] ?? c.status}
                         </Badge>
                       </TableCell>
@@ -394,7 +394,7 @@ export function FeatureCallHistory({ feature }: { feature: FeatureCallFeature })
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div>
                     <span className="text-muted-foreground">状态：</span>
-                    <Badge variant="outline" className={`text-[10px] ${statusTone(shown.status)}`}>
+                    <Badge variant="outline" className={`text-[11px] ${statusTone(shown.status)}`}>
                       {STATUS_LABELS[shown.status] ?? shown.status}
                     </Badge>
                   </div>

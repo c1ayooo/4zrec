@@ -1,28 +1,30 @@
 // Centralised status → color/label semantics, reused across the whole app.
 // Spec §8.3: 意图 / 覆盖 / 任务 / 严重度 each have a consistent color set.
 
-export type Tone = "neutral" | "blue" | "green" | "amber" | "red" | "rose" | "violet" | "slate";
+export type Tone = "neutral" | "blue" | "green" | "amber" | "red" | "rose" | "sky" | "slate";
 
+// Pale tint + same-hue ink, per the app-screen rules. Ink tones are one step
+// darker than the usual 500/600 so every label clears 4.5:1 on white.
 export const toneClasses: Record<Tone, string> = {
   neutral: "bg-muted text-muted-foreground border-transparent",
-  blue: "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20",
-  green: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
-  amber: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20",
-  red: "bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/20",
-  // rose 用作「严重」——实心高强调,视觉上明显高于「高危」的软红描边。
-  rose: "bg-rose-600 text-white border-rose-600 dark:bg-rose-600 dark:text-white",
-  violet: "bg-violet-500/15 text-violet-600 dark:text-violet-400 border-violet-500/20",
-  slate: "bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/20",
+  blue: "bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20",
+  green: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20",
+  amber: "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/25",
+  red: "bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/20",
+  // 「严重」只比「高危」重一档：深红描边与更深的字，不再用实心红块。
+  rose: "bg-red-700/10 text-red-800 dark:text-red-300 border-red-700/30 dark:border-red-400/30",
+  sky: "bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/20",
+  slate: "bg-slate-500/10 text-slate-700 dark:text-slate-300 border-slate-500/20",
 };
 
 export const toneDot: Record<Tone, string> = {
   neutral: "bg-muted-foreground",
-  blue: "bg-blue-500",
-  green: "bg-emerald-500",
-  amber: "bg-amber-500",
-  red: "bg-red-500",
-  rose: "bg-white",
-  violet: "bg-violet-500",
+  blue: "bg-blue-600",
+  green: "bg-emerald-600",
+  amber: "bg-amber-600",
+  red: "bg-red-600",
+  rose: "bg-red-700",
+  sky: "bg-sky-600",
   slate: "bg-slate-500",
 };
 
@@ -39,7 +41,7 @@ const intent: Record<string, StatusMeta> = {
   // blocked = 模型/API/网络故障重试用尽，这条意图基本没真正探成（非目标拦截）。
   blocked: { label: "执行出错", tone: "red" },
   // exhausted = 达到步数/时间预算被中途掐断、只写回部分结果（非方向已探尽）。
-  exhausted: { label: "预算耗尽", tone: "violet" },
+  exhausted: { label: "预算耗尽", tone: "sky" },
   // stopped = 历史软删除状态（保留,历史数据）。
   stopped: { label: "已停止", tone: "slate" },
   // deleted = 用户假删除了该意图（保留节点与血缘，删除原因见 delete_reason 字段）。
@@ -72,7 +74,7 @@ const finding: Record<string, StatusMeta> = {
   false_positive: { label: "误报", tone: "slate" },
   ignored: { label: "忽略", tone: "neutral" },
   duplicate: { label: "重复", tone: "neutral" },
-  risk_accepted: { label: "风险接受", tone: "violet" },
+  risk_accepted: { label: "风险接受", tone: "sky" },
 };
 
 const engine: Record<string, StatusMeta> = {

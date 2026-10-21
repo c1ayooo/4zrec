@@ -2114,6 +2114,80 @@ export interface VulnIntelEntry {
   affected: string;
   lab_only: boolean;
   enriched_at: string | null;
+  /** AI 分析流水线状态位;详情接口额外带 analysis(长文本)。 */
+  title_zh?: string;
+  analyzed_at: string | null;
+  localized_at: string | null;
+  nuclei_tpl_id?: string;
+  /** 已入库的指纹规则 id(空 = 只有草稿或未生成)。 */
+  fingerprint_id?: string;
+  fingerprint_at?: string | null;
+  nuclei_tpl_at: string | null;
+  analysis_error?: string;
+  analysis?: IntelAnalysis | null;
+}
+
+/** AI 分析产物(中文简介 / 漏洞原理 / 攻击范围 / PoC / 生成的 nuclei 模板)。 */
+export interface IntelAnalysis {
+  vuln_intel_id: number;
+  principle: string;
+  attack_scope: string;
+  description_zh: string;
+  poc_code: string;
+  poc_lang: string;
+  /** ai(模型生成) / upstream(源里已有) / none */
+  poc_origin: string;
+  /** 未生成/不能直接用 PoC 的原因(要素不全、参数为推测等)。 */
+  poc_note?: string;
+  nuclei_template: string;
+  /** 指纹规则草稿(JSON 文本)。 */
+  fingerprint?: string;
+  fingerprint_id?: string;
+  model: string;
+  updated_at: string;
+}
+
+/** 情报分析流水线的开关与进度。 */
+export interface VulnPipelineStatus {
+  analyze_enabled: boolean;
+  auto_translate: boolean;
+  auto_nuclei: boolean;
+  auto_fingerprint: boolean;
+  notify_enabled: boolean;
+  llm_ready: boolean;
+  running: boolean;
+  last_run: string;
+  last_done: number;
+  last_failed: number;
+  pending: number;
+  analyzed: number;
+  /** 待人工确认的模板草稿数。 */
+  drafts: number;
+}
+
+/** 一条待人工确认的流水线产物草稿(模板与指纹各自独立确认)。 */
+export interface IntelDraft {
+  vuln_intel_id: number;
+  title: string;
+  title_zh?: string;
+  severity?: string;
+  cve?: string;
+  source?: string;
+  /** nuclei 模板草稿 YAML(空 = 没生成)。 */
+  nuclei_yaml: string;
+  nuclei_tpl_id: string;
+  /** 模板 matcher 是否可用;不可用时 nuclei_issue 说明原因。 */
+  nuclei_usable: boolean;
+  nuclei_issue?: string;
+  /** 指纹规则草稿(JSON 文本)。 */
+  fingerprint: string;
+  fingerprint_id: string;
+  fingerprint_name?: string;
+  fingerprint_category?: string;
+  fingerprint_expression?: string;
+  fingerprint_usable: boolean;
+  fingerprint_issue?: string;
+  updated_at: string;
 }
 
 /** github_poc 数组里的一项。 */

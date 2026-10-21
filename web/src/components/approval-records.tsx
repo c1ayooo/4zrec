@@ -293,7 +293,7 @@ function TargetChip({
       )}
     >
       <Checkbox id={id} checked={checked} onCheckedChange={onToggle} />
-      <span className="text-[10px] text-muted-foreground">{target.kind}</span>
+      <span className="text-[11px] text-muted-foreground">{target.kind}</span>
       {target.value}
     </label>
   );

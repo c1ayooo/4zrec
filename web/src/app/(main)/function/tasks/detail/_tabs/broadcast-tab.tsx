@@ -81,8 +81,8 @@ const KIND_META: Record<string, KindMeta> = {
   hint: {
     label: "提示",
     icon: LightbulbIcon,
-    dot: "bg-violet-500",
-    chip: "bg-violet-500/15 text-violet-600 dark:text-violet-400",
+    dot: "bg-sky-500",
+    chip: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
   },
   digest: {
     label: "压缩",
@@ -116,7 +116,7 @@ const STATE_META: Record<string, Record<string, { label: string; tone: Tone }>> 
     dismissed: { label: "已排除", tone: "slate" },
   },
   hint: {
-    active: { label: "待采纳", tone: "violet" },
+    active: { label: "待采纳", tone: "sky" },
     consumed: { label: "已采纳", tone: "slate" },
   },
   digest: {
@@ -230,7 +230,7 @@ function AssetList({ assets, dense = false }: { assets: FindingAsset[]; dense?: 
               )}
               title={`${typeLabel} · ${a.label}`}
             >
-              <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">{typeLabel}</span>
+              <span className="shrink-0 rounded bg-muted px-1 text-[11px] text-muted-foreground">{typeLabel}</span>
               <code className="truncate font-mono text-xs">{a.label}</code>
             </li>
           );
@@ -385,7 +385,7 @@ function BroadcastRow({
                 <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">P{node.priority}</span>
               )}
               {fresh && (
-                <span className="rounded bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground">
+                <span className="rounded bg-primary px-1.5 py-0.5 text-[11px] font-semibold text-primary-foreground">
                   新
                 </span>
               )}

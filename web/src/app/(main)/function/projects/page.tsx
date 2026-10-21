@@ -762,7 +762,7 @@ export default function ProjectsPage() {
                       />
                       <span className="truncate font-mono text-xs">{c.domain}</span>
                       {c.llm_reason && (
-                        <Badge variant="outline" className="shrink-0 text-[10px] font-normal text-blue-600">
+                        <Badge variant="outline" className="shrink-0 text-[11px] font-normal text-blue-600">
                           LLM
                         </Badge>
                       )}

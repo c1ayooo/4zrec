@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { FingerprintIcon, Loader2Icon, RefreshCwIcon, SearchIcon, UploadCloudIcon } from "lucide-react";
+import { FingerprintIcon, Loader2Icon, RefreshCwIcon, SearchIcon, Trash2Icon, UploadCloudIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { FeatureCallHistory } from "@/components/feature-call-history";
@@ -29,6 +29,21 @@ export default function FingerprintPage() {
   const [status, setStatus] = React.useState<FingerprintStatus | null>(null);
   const [syncJob, setSyncJob] = React.useState<FingerprintSyncJob | null>(null);
   const [syncing, setSyncing] = React.useState(false);
+  const [deleting, setDeleting] = React.useState<string | null>(null);
+
+  // removeRule 只允许删 custom 来源(上游来源的规则由 24h 同步维护,删了下轮
+  // 还会回来)。漏洞情报确认入库的指纹就是 custom。
+  const removeRule = async (id: string) => {
+    setDeleting(id);
+    try {
+      await api.fingerprintRuleDelete(id);
+      await load();
+    } catch (err) {
+      toast.error(String(err instanceof Error ? err.message : err));
+    } finally {
+      setDeleting(null);
+    }
+  };
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -212,6 +227,7 @@ export default function FingerprintPage() {
                         <th className="px-4 py-2 font-medium">类别</th>
                         <th className="px-4 py-2 font-medium">匹配表达式</th>
                         <th className="px-4 py-2 font-medium">状态</th>
+                        <th className="px-4 py-2 font-medium" />
                       </tr>
                     </thead>
                     <tbody>
@@ -222,6 +238,22 @@ export default function FingerprintPage() {
                           <td className="max-w-96 truncate px-4 py-2 font-mono text-xs">{r.expression}</td>
                           <td className="px-4 py-2">
                             {r.enabled ? <Badge variant="default">启用</Badge> : <Badge variant="outline">停用</Badge>}
+                          </td>
+                          <td className="px-4 py-2">
+                            {r.source === "custom" ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled={deleting === r.id}
+                                onClick={() => removeRule(r.id)}
+                              >
+                                {deleting === r.id ? (
+                                  <Loader2Icon className="size-3.5 animate-spin" />
+                                ) : (
+                                  <Trash2Icon className="size-3.5" />
+                                )}
+                              </Button>
+                            ) : null}
                           </td>
                         </tr>
                       ))}

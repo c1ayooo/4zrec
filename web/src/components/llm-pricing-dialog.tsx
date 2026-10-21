@@ -158,7 +158,7 @@ export function LLMPricingDialog({
           </div>
         ) : (
           <div className="max-h-[55vh] overflow-auto rounded-lg border">
-            <div className="grid grid-cols-[1.4fr_repeat(4,minmax(0,0.85fr))_64px_36px] gap-2 border-b bg-muted/40 px-3 py-2 text-[10px] text-muted-foreground">
+            <div className="grid grid-cols-[1.4fr_repeat(4,minmax(0,0.85fr))_64px_36px] gap-2 border-b bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground">
               <span>模型 / 通配</span>
               <span>输入(未命中)</span>
               <span>输出</span>
@@ -215,7 +215,7 @@ export function LLMPricingDialog({
             <PlusIcon data-icon="inline-start" />
             新增规则
           </Button>
-          <p className="text-muted-foreground text-[10px]">
+          <p className="text-muted-foreground text-[11px]">
             只对在线账本（llm_usage）计价；历史归档任务没有 model 维度，费用不含它们。
           </p>
         </div>

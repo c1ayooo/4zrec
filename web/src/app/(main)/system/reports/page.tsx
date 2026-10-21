@@ -651,7 +651,7 @@ export default function ReportsPage() {
                             className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50 cursor-pointer"
                           >
                             <Checkbox checked={selFindings.has(key)} onCheckedChange={() => toggleFinding(key)} />
-                            <Badge variant="outline" className="shrink-0 uppercase text-[10px]">
+                            <Badge variant="outline" className="shrink-0 uppercase text-[11px]">
                               {f.severity}
                             </Badge>
                             <span className="truncate">{f.enr_name || f.vulnclass || f.summary}</span>
