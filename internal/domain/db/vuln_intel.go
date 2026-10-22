@@ -32,11 +32,21 @@ type VulnIntel struct {
 	NucleiTplID   string     `json:"nuclei_tpl_id,omitempty"`
 	NucleiTplAt   *time.Time `json:"nuclei_tpl_at"`
 	AnalysisError string     `json:"analysis_error,omitempty"`
+	// FingerprintID 是人工确认后落进指纹规则库的规则 id(空 = 只有草稿或未生成)。
+	FingerprintID string     `json:"fingerprint_id,omitempty"`
+	FingerprintAt *time.Time `json:"fingerprint_at"`
 }
 
 // UpsertVulnIntel 按唯一键(源:源内ID)入库,返回是否为新记录(xmax=0 表示
 // 本次 INSERT 而非 DO UPDATE 命中)。
 func (d *DB) UpsertVulnIntel(v VulnIntel) (bool, error) {
+	_, inserted, err := d.UpsertVulnIntelID(v)
+	return inserted, err
+}
+
+// UpsertVulnIntelID 与 UpsertVulnIntel 语义相同，额外返回记录 id。
+// capkit 的 IntelStore 端口要求写入后返回 id（供后续检索与确认引用）。
+func (d *DB) UpsertVulnIntelID(v VulnIntel) (int64, bool, error) {
 	var id int64
 	var inserted bool
 	err := d.QueryRow(`
@@ -52,9 +62,9 @@ RETURNING id, (xmax = 0)`,
 		v.Solutions, v.Source, v.SourceURL, v.Tags, v.Refs,
 	).Scan(&id, &inserted)
 	if err != nil {
-		return false, err
+		return 0, false, err
 	}
-	return inserted, nil
+	return id, inserted, nil
 }
 
 // ListVulnIntel 分页列出情报(含富化字段),按入库时间倒序。severity 精确
@@ -88,7 +98,8 @@ SELECT v.id, v.title, COALESCE(v.description,''), COALESCE(v.severity,''), COALE
        v.github_poc, v.cvss_score, COALESCE(v.cvss_vector,''), v.cwes, v.affected,
        v.lab_only, v.enriched_at,
        COALESCE(v.title_zh,''), v.analyzed_at, v.localized_at,
-       COALESCE(v.nuclei_tpl_id,''), v.nuclei_tpl_at, COALESCE(v.analysis_error,'')
+       COALESCE(v.nuclei_tpl_id,''), v.nuclei_tpl_at, COALESCE(v.analysis_error,''),
+       COALESCE(v.fingerprint_id,''), v.fingerprint_at
 FROM vuln_intel v` + where + `
 ORDER BY v.created_at DESC, v.id DESC
 LIMIT ` + strconv.Itoa(size) + " OFFSET " + strconv.Itoa(page*size)
@@ -106,7 +117,8 @@ LIMIT ` + strconv.Itoa(size) + " OFFSET " + strconv.Itoa(page*size)
 			&v.GithubPoc, &v.CvssScore, &v.CvssVector, &v.Cwes, &v.Affected,
 			&v.LabOnly, &v.EnrichedAt,
 			&v.TitleZh, &v.AnalyzedAt, &v.LocalizedAt,
-			&v.NucleiTplID, &v.NucleiTplAt, &v.AnalysisError); err != nil {
+			&v.NucleiTplID, &v.NucleiTplAt, &v.AnalysisError,
+			&v.FingerprintID, &v.FingerprintAt); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, v)
@@ -124,7 +136,8 @@ SELECT v.id, v.title, COALESCE(v.description,''), COALESCE(v.severity,''), COALE
        v.github_poc, v.cvss_score, COALESCE(v.cvss_vector,''), v.cwes, v.affected,
        v.lab_only, v.enriched_at,
        COALESCE(v.title_zh,''), v.analyzed_at, v.localized_at,
-       COALESCE(v.nuclei_tpl_id,''), v.nuclei_tpl_at, COALESCE(v.analysis_error,'')
+       COALESCE(v.nuclei_tpl_id,''), v.nuclei_tpl_at, COALESCE(v.analysis_error,''),
+       COALESCE(v.fingerprint_id,''), v.fingerprint_at
 FROM vuln_intel v WHERE v.id=$1`, id,
 	).Scan(&v.ID, &v.Title, &v.Description, &v.Severity, &v.CVE,
 		&v.Disclosure, &v.Solutions, &v.Source, &v.SourceURL, &v.Tags, &v.Refs,
@@ -132,7 +145,8 @@ FROM vuln_intel v WHERE v.id=$1`, id,
 		&v.GithubPoc, &v.CvssScore, &v.CvssVector, &v.Cwes, &v.Affected,
 		&v.LabOnly, &v.EnrichedAt,
 		&v.TitleZh, &v.AnalyzedAt, &v.LocalizedAt,
-		&v.NucleiTplID, &v.NucleiTplAt, &v.AnalysisError)
+		&v.NucleiTplID, &v.NucleiTplAt, &v.AnalysisError,
+		&v.FingerprintID, &v.FingerprintAt)
 	if err != nil {
 		return nil, err
 	}

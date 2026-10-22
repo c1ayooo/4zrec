@@ -151,9 +151,24 @@ func (s *Server) toolCredVerifyDB() actool.CoreTool {
 				b.WriteString("(服务可达且无需认证——未授权访问;未写入连接台账)\n")
 			}
 			if res.Alive && res.Authed && strings.TrimSpace(in.Password) != "" {
+				// kind 与端口都归一化:probe 接受 postgresql 别名,而台账的
+				// CHECK 只认 postgres;端口缺省留 0 会让台账出现一条
+				// "3306 的 postgres"这种错位行(同主机同用户会跟真行互相覆盖)。
+				kind := strings.ToLower(strings.TrimSpace(in.Type))
+				if kind == "postgresql" {
+					kind = "postgres"
+				}
+				port := in.Port
+				if port <= 0 {
+					port = creds.DefaultDBPort(in.Type)
+				}
+				extra := json.RawMessage(nil)
+				if dbName := strings.TrimSpace(in.Database); dbName != "" {
+					extra, _ = json.Marshal(map[string]any{"database": dbName})
+				}
 				note := s.autoCaptureConnection(ctx, &db.Connection{
-					Kind: strings.ToLower(strings.TrimSpace(in.Type)), Host: in.Host, Port: in.Port,
-					Username: in.Username, Secret: in.Password, Status: "alive",
+					Kind: kind, Host: in.Host, Port: port,
+					Username: in.Username, Secret: in.Password, Extra: extra, Status: "alive",
 					Note: "credential_verify_db 验证成功",
 				})
 				if note != "" {

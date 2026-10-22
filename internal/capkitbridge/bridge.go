@@ -24,11 +24,14 @@ import (
 
 	capkit "github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/gates"
+	"github.com/c1ayooo/capkit/kits/bindingkit"
 	"github.com/c1ayooo/capkit/kits/exploitkit"
 	"github.com/c1ayooo/capkit/kits/identitykit"
+	"github.com/c1ayooo/capkit/kits/pockit"
 	"github.com/c1ayooo/capkit/kits/sessionkit"
 	"github.com/c1ayooo/capkit/kits/shellkit"
 	shellsession "github.com/c1ayooo/capkit/kits/shellkit/session"
+	"github.com/c1ayooo/capkit/kits/vulnintelkit"
 	capruntime "github.com/c1ayooo/capkit/runtime"
 
 	actool "github.com/c1ayooo/4zrec/internal/toolface/tools"
@@ -78,6 +81,22 @@ type Options struct {
 	// remember state that only a result reveals — a confirmed injection point
 	// being the case it exists for.
 	OnResult func(ctx context.Context, tool string, input json.RawMessage, res capkit.Result)
+	// Fetcher reaches external data sources (advisory feeds, rule updates).
+	// Nil leaves vulnintelkit unregistered: its sources are all external feeds.
+	Fetcher capkit.Fetcher
+	// Intel is the host's vulnerability-intel store. Nil leaves vulnintelkit
+	// unregistered — the kit never opens a database of its own.
+	Intel capkit.IntelStore
+	// Completer is the host's model port. Nil leaves pockit unregistered: the
+	// generation tools have nothing to call.
+	Completer capkit.Completer
+	// Artifacts receives published drafts (poc_publish). Nil leaves pockit
+	// unregistered, because its confirmation step has nowhere to write.
+	Artifacts capkit.ArtifactStore
+	// ExtraIntel are advisory sources the host fetches itself and wants polled
+	// through capkit's loop. AVD lives here: its anti-automation page needs a
+	// JavaScript engine, which the host already ships for other work.
+	ExtraIntel []capkit.IntelSource
 }
 
 // Bridge holds a capkit runtime with the host ports bound.
@@ -197,10 +216,39 @@ func New(opts Options) (*Bridge, error) {
 	}); err != nil {
 		return nil, err
 	}
+	// The intel and generation kits are registered only when their ports are
+	// present. Registering them without would make runtime.New fail closed on
+	// the whole bridge — a missing model profile must not cost the host its
+	// session tools.
+	if opts.Fetcher != nil && opts.Intel != nil {
+		if err := reg.Add(capkit.Spec{
+			Manifest: vulnintelkit.Manifest(),
+			New:      vulnintelkit.NewCapability,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	if opts.Completer != nil && opts.Artifacts != nil {
+		if err := reg.Add(capkit.Spec{
+			Manifest: pockit.Manifest(),
+			New:      pockit.NewCapability,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	// bindingkit needs no port: the binding table travels with the call.
+	if err := reg.Add(capkit.Spec{
+		Manifest: bindingkit.Manifest(),
+		New:      bindingkit.NewCapability,
+	}); err != nil {
+		return nil, err
+	}
 
 	rt, err := capruntime.New(capruntime.Config{
 		Scope: opts.Scope, Approval: approval, Limiter: limiter, Audit: audit,
 		HTTP: opts.HTTP, Evidence: opts.Evidence, Sessions: mgr,
+		Fetcher: opts.Fetcher, Intel: opts.Intel, Completer: opts.Completer,
+		Artifacts: opts.Artifacts, ExtraIntel: opts.ExtraIntel,
 	}, reg)
 	if err != nil {
 		return nil, err

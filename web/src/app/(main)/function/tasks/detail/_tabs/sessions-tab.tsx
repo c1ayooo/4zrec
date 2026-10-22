@@ -45,6 +45,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupButton } from "@/components/ui/input-group";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
@@ -60,9 +61,11 @@ import type {
   ChatAttachment,
   IntentAsset,
   InterceptApprovalRow,
+  LLMProfile,
   Session,
   SessionStatus,
   SessionTokenUsage,
+  Task,
   TaskLLMResolution,
   TaskLLMResolutions,
   TaskNode,
@@ -75,6 +78,167 @@ import { cn } from "@/lib/utils";
 // so fall back to the model id rather than rendering an empty badge.
 function resolutionLabel(r: TaskLLMResolution): string {
   return r.name || r.model || "未命名配置";
+}
+
+// SessionLLMBadge 会话头部的 LLM 徽标：悬停看模型，点开可直接切换当前配置。
+// 任务进行中也可切换——自下一次 LLM 调用生效，无需暂停任务。切换走任务级
+// 配置链（保持链序、移动游标；链为空时就地 pin 一条链），完整链编辑仍在
+// 任务头部的「任务 LLM 配置链」弹层。Agent 显式绑定了配置(source=
+// agent_binding)时只读——绑定优先于任务链，在这里改不会生效。
+function SessionLLMBadge({
+  taskId,
+  resolution,
+  onSwitched,
+}: {
+  taskId: string;
+  resolution: TaskLLMResolution;
+  onSwitched: () => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const [profiles, setProfiles] = React.useState<LLMProfile[] | null>(null);
+  const [task, setTask] = React.useState<Task | null>(null);
+  const [switching, setSwitching] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!open || profiles) return;
+    let alive = true;
+    api
+      .llmProfiles()
+      .then((list) => {
+        if (alive) setProfiles(list);
+      })
+      .catch(() => {
+        if (alive) setProfiles([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [open, profiles]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    setTask(null);
+    api
+      .task(taskId)
+      .then((t) => {
+        if (alive) setTask(t);
+      })
+      .catch(() => {
+        if (alive) setTask(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [open, taskId]);
+
+  const chainIDs = task?.llm_profile_ids?.length
+    ? task.llm_profile_ids.map(Number)
+    : task?.llm_profile_id
+      ? [Number(task.llm_profile_id)]
+      : [];
+  const activeID = task?.active_llm_profile_id ? Number(task.active_llm_profile_id) : chainIDs[0];
+  const agentBound = resolution.source === "agent_binding";
+  const currentLabel = resolution.available ? resolutionLabel(resolution) : "模型不可用";
+
+  async function pick(id: number) {
+    if (switching) return;
+    setSwitching(true);
+    try {
+      const ids = chainIDs.includes(id) ? chainIDs : [...chainIDs, id];
+      const result = await api.updateTaskLLMProfiles(taskId, ids, id);
+      if (result.switch_event) {
+        toast.info(result.switch_event.summary, { id: `task-${taskId}-llm-${result.switch_event.seq}` });
+      } else {
+        toast.success(
+          result.reopened_intents > 0
+            ? `已切换 LLM，并恢复 ${result.reopened_intents} 条额度阻塞意图`
+            : "已切换 LLM，自下一次调用生效",
+        );
+      }
+      setOpen(false);
+      onSwitched();
+    } catch (e) {
+      toast.error(`切换 LLM 失败：${(e as Error).message}`);
+    } finally {
+      setSwitching(false);
+    }
+  }
+
+  const hoverTitle = resolution.available
+    ? [resolutionLabel(resolution), resolution.model].filter(Boolean).join(" / ") + (agentBound ? "" : "（点击切换）")
+    : (resolution.reason ?? "没有可用的 LLM 配置") + (agentBound ? "" : "（点击切换）");
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Badge
+          variant="outline"
+          className="max-w-28 shrink-0 font-normal"
+          title={hoverTitle}
+          aria-label={resolution.available ? `当前配置：${currentLabel}（点击切换）` : "模型不可用（点击切换）"}
+        >
+          <span className="truncate">{currentLabel}</span>
+          {!agentBound && <ChevronDownIcon className="size-3 shrink-0 opacity-60" />}
+        </Badge>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-72 p-2">
+        <p className="text-muted-foreground px-2 py-1 text-[11px] font-medium">
+          切换 LLM 配置{agentBound ? "（该 Agent 已独立绑定）" : ""}
+        </p>
+        <div className="max-h-72 overflow-y-auto">
+          {profiles === null || task === null ? (
+            <div className="flex items-center justify-center py-4">
+              <Spinner className="size-4" />
+            </div>
+          ) : agentBound ? (
+            <p className="text-muted-foreground px-2 py-3 text-xs leading-relaxed">
+              当前角色由 Agent 设置绑定了独立 LLM 配置，绑定优先于任务链。请到「系统 → Agent」修改该绑定。
+            </p>
+          ) : (
+            profiles.map((p) => {
+              // 当前项:显式解析出的 profile 优先;跟随任务链时对 active 游标;
+              // 完全跟随全局(无链)时高亮激活配置。
+              const isCurrent =
+                resolution.profile_id === Number(p.id) ||
+                (!resolution.profile_id &&
+                  ((chainIDs.length > 0 && activeID === Number(p.id)) || (chainIDs.length === 0 && p.is_default)));
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  disabled={switching}
+                  onClick={() => void pick(Number(p.id))}
+                  className={cn(
+                    "flex w-full flex-col rounded px-2 py-1.5 text-left hover:bg-accent disabled:opacity-50",
+                    isCurrent && "bg-accent",
+                  )}
+                >
+                  <span className="flex min-w-0 items-center gap-1.5 text-sm">
+                    <span className="truncate">{p.name}</span>
+                    {p.is_default && (
+                      <Badge variant="secondary" className="px-1 py-0 text-[10px]">
+                        激活
+                      </Badge>
+                    )}
+                  </span>
+                  <span className="text-muted-foreground truncate text-[11px]">
+                    {p.format} · {p.model}
+                  </span>
+                </button>
+              );
+            })
+          )}
+        </div>
+        {!agentBound && (
+          <p className="text-muted-foreground border-t px-2 pt-2 pb-1 text-[11px] leading-relaxed">
+            任务运行中切换即时排队：自下一次 LLM 调用生效，无需暂停。完整配置链（顺序/备用/故障转移）在任务头部的 「LLM
+            配置链」编辑。
+          </p>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 // fmtBytes renders a human file size for attachment chips (mirrors transcript.tsx).
@@ -841,6 +1005,16 @@ export function SessionsTab({ taskId }: { taskId: string }) {
       alive = false;
       clearInterval(timer);
     };
+  }, [taskId]);
+
+  // 会话页切换 LLM 后立即刷新三角色的解析结果(不等 10s 轮询)。
+  const refreshLLMResolutions = React.useCallback(() => {
+    api
+      .taskLLMResolution(taskId)
+      .then(setLLMResolutions)
+      .catch(() => {
+        // 下一次轮询会兜底。
+      });
   }, [taskId]);
 
   React.useEffect(() => {
@@ -1757,26 +1931,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
               })()}
               <SideQuestionButton side={side} />
               {activeResolution && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Badge
-                      variant="outline"
-                      className="max-w-28 shrink-0 font-normal"
-                      aria-label={
-                        activeResolution.available ? `当前配置：${resolutionLabel(activeResolution)}` : "模型不可用"
-                      }
-                    >
-                      <span className="truncate">
-                        {activeResolution.available ? resolutionLabel(activeResolution) : "模型不可用"}
-                      </span>
-                    </Badge>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" className="max-w-xs [overflow-wrap:anywhere]">
-                    {activeResolution.available
-                      ? [resolutionLabel(activeResolution), activeResolution.model].filter(Boolean).join(" / ")
-                      : activeResolution.reason || "没有可用的 LLM 配置"}
-                  </TooltipContent>
-                </Tooltip>
+                <SessionLLMBadge taskId={taskId} resolution={activeResolution} onSwitched={refreshLLMResolutions} />
               )}
               {activeAssets && activeAssets.length > 0 && <WorkerAssetBadge assets={activeAssets} />}
               {active.inherited && active.source_task_id && (

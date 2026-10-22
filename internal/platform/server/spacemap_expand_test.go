@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/c1ayooo/4zrec/internal/domain/db"
+	"github.com/c1ayooo/4zrec/internal/toolface/intercept"
 	actool "github.com/c1ayooo/4zrec/internal/toolface/tools"
 )
 
@@ -67,26 +69,40 @@ func TestIcpExpandQueryAndAuthorize(t *testing.T) {
 		t.Fatalf("候选域名缺失:\n%s", out)
 	}
 
-	// 2) 授权段:权限层必须 Ask(人工确认),不得静默放行。
+	// 2) 授权段权限语义(2026-10-18 收紧后):
+	//    a. 无任务/会话项目上下文 → 直接拒绝(不能借 authorize 自批任意项目);
+	//    b. 有项目上下文 → 必须 Ask(人工确认),不得静默放行。
 	ain, _ := json.Marshal(map[string]any{
 		"authorize": true, "project_id": 0,
 		"domains": []string{fmt.Sprintf("icp-%d.example", stamp)},
 	})
-	if d := tool.CheckPermissions(context.Background(), ain, actool.Context{}); d.Behavior != actool.Ask {
-		t.Fatalf("authorize 必须经人工确认,得到 %v", d.Behavior)
+	if d := tool.CheckPermissions(context.Background(), ain, actool.Context{}); d.Behavior != actool.Deny {
+		t.Fatalf("无项目上下文的 authorize 必须拒绝,得到 %v", d.Behavior)
 	}
 
-	// 3) 授权执行:写入项目范围并认领(建项目→授权→范围规则存在)。
+	// 3) 授权执行:写入项目范围并认领(建项目→挂任务上下文→授权→范围规则存在)。
 	p, err := m.pg.Projects().CreateProject(fmt.Sprintf("icp扩查测试%d", stamp), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer m.pg.Projects().DeleteProject(p.ID)
+	task, err := m.pg.CreateTask("icp扩查授权段", "test", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.pg.Exec(`UPDATE tasks SET project_id=$1 WHERE id=$2`, p.ID, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = m.pg.Exec(`DELETE FROM tasks WHERE id=$1`, task.ID) }()
+	taskCtx := intercept.WithTaskContext(context.Background(), strconv.FormatInt(task.ID, 10), "test", nil)
+	if d := tool.CheckPermissions(taskCtx, ain, actool.Context{}); d.Behavior != actool.Ask {
+		t.Fatalf("authorize 必须经人工确认,得到 %v", d.Behavior)
+	}
 	ain2, _ := json.Marshal(map[string]any{
 		"authorize": true, "project_id": p.ID,
 		"domains": []string{fmt.Sprintf("icp-%d.example", stamp)},
 	})
-	res2, err := tool.Call(context.Background(), ain2, nil)
+	res2, err := tool.Call(taskCtx, ain2, nil)
 	if err != nil || res2.IsError {
 		t.Fatalf("授权段失败: err=%v res=%+v", err, res2.Flatten())
 	}

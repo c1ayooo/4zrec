@@ -954,11 +954,12 @@ function ChatView({
         uploading={uploading}
       />
       <div className="flex flex-wrap items-center justify-between gap-2">
+        {/* 运行中也允许切换：下一次发送即用新配置，不必等本轮跑完。 */}
         <LLMProfileRow
           profiles={profiles}
           selected={currentProfileId}
           onChange={changeProfile}
-          disabled={running || sending}
+          disabled={sending}
           rightSlot={<TodoPopover seq={latestTodoSeq} fetchDetail={fetchDetail} />}
         />
         <ProjectRow

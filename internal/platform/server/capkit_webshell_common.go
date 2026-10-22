@@ -33,6 +33,7 @@ type webshellConfig struct {
 	Method    string
 	ProxyURL  string
 	ShellType string
+	Protocol  string
 	Timeout   time.Duration
 }
 
@@ -46,6 +47,7 @@ func webshellConfigOf(c *db.Connection) webshellConfig {
 		Method    string `json:"method"`
 		Proxy     string `json:"proxy"`
 		ShellType string `json:"shell_type"`
+		Protocol  string `json:"protocol"`
 	}
 	if c.Extra != nil {
 		_ = jsonUnmarshalSafe(c.Extra, &extra)
@@ -58,6 +60,7 @@ func webshellConfigOf(c *db.Connection) webshellConfig {
 		Method:    strings.TrimSpace(extra.Method),
 		ProxyURL:  strings.TrimSpace(extra.Proxy),
 		ShellType: strings.TrimSpace(extra.ShellType),
+		Protocol:  strings.TrimSpace(extra.Protocol),
 	}
 	if conf.CmdParam == "" {
 		conf.CmdParam = "cmd"
@@ -80,6 +83,9 @@ func (conf webshellConfig) webshellOptions() map[string]string {
 	}
 	if conf.ShellType != "" {
 		opts["shell_type"] = conf.ShellType
+	}
+	if conf.Protocol != "" {
+		opts["protocol"] = conf.Protocol
 	}
 	if conf.ProxyURL != "" {
 		opts["proxy"] = conf.ProxyURL

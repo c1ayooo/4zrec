@@ -278,6 +278,49 @@ export interface AssetProbeResult {
   error?: string;
 }
 
+// ---- 4zreark 资产同步 ----
+
+/** 4zreark MCP list_projects 返回的项目。 */
+export interface AssetSyncSourceProject {
+  id: number;
+  code: string;
+  name: string;
+  asset_count?: number;
+  lost_count?: number;
+  record_count?: number;
+  collection_paused?: boolean;
+}
+
+export interface AssetSyncRequest {
+  base_url: string;
+  api_key: string;
+  source_project_id?: number;
+  target_project_id?: number;
+  catalog?: "all" | "verified";
+  limit?: number;
+  dry_run?: boolean;
+}
+
+export interface AssetSyncSample {
+  host: string;
+  url: string;
+  status_code?: number;
+  title?: string;
+  ip?: string;
+}
+
+export interface AssetSyncResult {
+  total: number;
+  fetched: number;
+  would_import: number;
+  imported: number;
+  assigned: number;
+  skipped: number;
+  errors: string[];
+  sample: AssetSyncSample[];
+  dry_run: boolean;
+}
+
 export interface IntentAsset {
   intent_id: number | string;
   asset_id: number;

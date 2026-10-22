@@ -22,8 +22,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c1ayooo/4zrec/internal/domain/db"
 	"github.com/c1ayooo/4zrec/internal/capability/vuln/vulnintel/triage"
+	"github.com/c1ayooo/4zrec/internal/domain/db"
 )
 
 const (
@@ -72,10 +72,10 @@ type nvdMeta struct {
 
 func newEnricher(pg *db.DB) *enricher {
 	return &enricher{
-		pg:       pg,
-		hc:       &http.Client{Timeout: httpTimeoutShort},
+		pg:        pg,
+		hc:        &http.Client{Timeout: httpTimeoutShort},
 		epssCache: map[string]epssEntry{},
-		nvdCache: map[string]nvdMeta{},
+		nvdCache:  map[string]nvdMeta{},
 	}
 }
 
@@ -315,9 +315,9 @@ func (e *enricher) searchPOC(ctx context.Context, cve string) ([]ghRepo, error) 
 }
 
 type ghAdvisory struct {
-	Summary string `json:"summary"`
+	Summary  string `json:"summary"`
 	Severity string `json:"severity"`
-	CVSS struct {
+	CVSS     struct {
 		VectorString string  `json:"vector_string"`
 		Score        float64 `json:"score"`
 	} `json:"cvss"`
@@ -409,13 +409,13 @@ func (e *enricher) enrichVuln(ctx context.Context, v db.VulnIntel) error {
 	labOnly := false
 	for _, r := range repos {
 		meta := triage.CVEMeta{
-			CVEID:         cve,
-			CVSSVector:    cvssVector,
-			CVSSScore:     cvssScore,
-			CWE:           cwes,
-			Description:   v.Description,
-			InKEV:         &inKEV,
-			EPSS:          &epss.Score,
+			CVEID:          cve,
+			CVSSVector:     cvssVector,
+			CVSSScore:      cvssScore,
+			CWE:            cwes,
+			Description:    v.Description,
+			InKEV:          &inKEV,
+			EPSS:           &epss.Score,
 			EPSSPercentile: &epss.Percentile,
 		}
 		isFork := r.IsFork
@@ -490,7 +490,7 @@ func (e *enricher) enrichPending() {
 		done++
 	}
 	if done > 0 || failed > 0 {
-	log.Printf("[vulnintel] 富化批次完成: 成功 %d, 失败 %d(失败条目下轮重试)", done, failed)
+		log.Printf("[vulnintel] 富化批次完成: 成功 %d, 失败 %d(失败条目下轮重试)", done, failed)
 	}
 }
 

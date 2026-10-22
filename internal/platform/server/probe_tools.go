@@ -190,6 +190,11 @@ func (s *Server) toolHTTPProbe() actool.CoreTool {
 				if trafficID != "" {
 					fmt.Fprintf(&b, "  ↳ 完整报文已存证 traffic_id=%s（可 bind_finding_traffic 绑定）\n", trafficID)
 				}
+				// 直接调用已有 shell 的场景(URL 带口令参数 + 命令参数):
+				// 识别成功后写连接台账,后续可在控制台/会话里直接复用。
+				if note := s.captureProbeWebshell(ctx, sp.Method, sp.URL, sp.Body, res.StatusCode, res.RespBody); note != "" {
+					fmt.Fprintf(&b, "  ↳ %s\n", note)
+				}
 				if len(res.Redirects) > 0 {
 					for _, h := range res.Redirects {
 						fmt.Fprintf(&b, "  ↳ #%d %s → %s [%d]%s\n", h.Index, h.FromURL, h.ToURL, h.Status, crossTag(h.CrossDomain))

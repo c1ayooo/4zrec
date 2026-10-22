@@ -72,6 +72,17 @@ func (s *Server) buildCapkitBridge() (*capkitbridge.Bridge, error) {
 		ExtraOpeners: dbOpeners(),
 		Flows:        identitykit.NewAuthFlowRegistry(),
 		Deployer:     deployer,
+		// 情报与生成能力。外部情报源走 fetcher 端口：不受目标范围约束，但
+		// 同样经过限速与审计；情报库与模型由宿主提供——kit 不碰数据库，也
+		// 不持有模型凭据。缺哪个端口就少注册哪个能力，不影响其余工具。
+		Fetcher:   httpx.NewFetcher(limiter, audit),
+		Intel:     capkitIntelStore{pg: s.m.pg},
+		Completer: capkitCompleter{fn: s.vulnPipelineComplete},
+		Artifacts: newCapkitArtifacts(""),
+		// AVD needs a JavaScript engine to clear its anti-automation page, so it
+		// stays host-side and joins capkit's poll loop through this port rather
+		// than duplicating the loop for one source.
+		ExtraIntel: []capkit.IntelSource{newAVDIntelSource()},
 		Context: func(ctx context.Context) capkit.CallContext {
 			return s.capkitCallContext(ctx)
 		},

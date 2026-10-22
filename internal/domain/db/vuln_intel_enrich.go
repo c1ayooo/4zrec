@@ -90,12 +90,12 @@ type VulnIntelPOC struct {
 // Analysis 只在详情接口(GetVulnIntel)填充,列表保持 nil 以免载荷膨胀。
 type EnrichedVulnIntel struct {
 	VulnIntel
-	GithubPoc  string     `json:"github_poc"`
-	CvssScore  *float64   `json:"cvss_score"`
-	CvssVector string     `json:"cvss_vector"`
-	Cwes       string     `json:"cwes"`
-	Affected   string     `json:"affected"`
-	LabOnly    bool       `json:"lab_only"`
-	EnrichedAt *time.Time `json:"enriched_at"`
+	GithubPoc  string         `json:"github_poc"`
+	CvssScore  *float64       `json:"cvss_score"`
+	CvssVector string         `json:"cvss_vector"`
+	Cwes       string         `json:"cwes"`
+	Affected   string         `json:"affected"`
+	LabOnly    bool           `json:"lab_only"`
+	EnrichedAt *time.Time     `json:"enriched_at"`
 	Analysis   *IntelAnalysis `json:"analysis,omitempty"`
 }

@@ -16,7 +16,7 @@ type seedRuleFile struct {
 		Name       string `yaml:"name"`
 		Category   string `yaml:"category"`
 		Expression string `yaml:"expression"`
-		Enabled    *bool `yaml:"enabled"`
+		Enabled    *bool  `yaml:"enabled"`
 		Note       string `yaml:"note"`
 	} `yaml:"rules"`
 }

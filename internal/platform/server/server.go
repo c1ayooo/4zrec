@@ -309,6 +309,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	s.startTaskArchiveWorker()
 	s.wireInterceptReviewer() // LLM 兜底审批:未命中拦截规则的命令交给模型判定
 	s.wireReport(skillDir)    // 报告子系统:LLM 补全注入 + skill 骨架落盘
+	s.wireVulnPipeline()      // 情报分析流水线:分析/中文化/模板化三个注入钩子
 	return s
 }
 
@@ -585,6 +586,13 @@ func (s *Server) effectiveProfileForAgent(agentKey string, pinID *int64) *int64 
 // picked a valid profile still got rejected with "LLM 未配置" when no global
 // config was active.
 func (s *Server) resolveChatAgent(c *db.Conversation) *agent.ChatAgent {
+	// LLM 自动切换(对话路径):会话自己 pin 的配置已失效时先改绑到可用配置,
+	// 让「下一次发送」直接跑在活配置上,而不是每轮静默回落全局。
+	if c != nil && c.ID > 0 && c.LLMProfileID != nil {
+		if bad, reason := s.conversationProfileUnavailable(*c.LLMProfileID); bad {
+			s.autoSwitchConversationLLM(c, reason)
+		}
+	}
 	ca := s.chatAgentRef()
 	if eff := s.effectiveProfileForAgent(c.AgentKey, c.LLMProfileID); eff != nil {
 		if pa := s.chatAgentForProfile(*eff); pa != nil {
@@ -592,6 +600,71 @@ func (s *Server) resolveChatAgent(c *db.Conversation) *agent.ChatAgent {
 		}
 	}
 	return ca
+}
+
+// conversationProfileUnavailable 报告会话 pin 的 LLM 配置当前是否已不可用:
+// 配置被删/无 Key/构建失败,或熔断冷却中。返回原因供留痕。
+func (s *Server) conversationProfileUnavailable(id int64) (bool, string) {
+	if _, _, ok := s.providerForProfile(id); !ok {
+		return true, "配置已删除、缺少 API Key 或参数无效"
+	}
+	if s.llmHealth.IsOpen(id) {
+		return true, "配置熔断冷却中（近期连续失败）"
+	}
+	return false, ""
+}
+
+// conversationFailoverProfile 按轮询链序(激活配置在前,其余 priority DESC,
+// 排除 pool_exclude)找第一个可用配置;cur 与熔断中的跳过。找不到返回 nil。
+func (s *Server) conversationFailoverProfile(cur int64) *db.LLMProfile {
+	if s.m == nil || s.m.pg == nil {
+		return nil
+	}
+	profs, err := s.m.pg.PoolProfiles()
+	if err != nil {
+		return nil
+	}
+	for _, p := range profs {
+		if p.ID == cur || s.llmHealth.IsOpen(p.ID) {
+			continue
+		}
+		if _, _, ok := s.providerForProfile(p.ID); ok {
+			return p
+		}
+	}
+	return nil
+}
+
+// autoSwitchConversationLLM 把会话 pin 的失效配置自动改绑到可用配置:
+// 落库(前端「更换」处立即可见)+ 会话留痕一条 llm_switch 系统事件。
+// Agent 自身的绑定(agents.llm_profile_id)是运维的显式选择,不在这里改;
+// 找不到可用备选时保持原样,由调用侧按原有语义回落/报错。
+func (s *Server) autoSwitchConversationLLM(c *db.Conversation, cause string) bool {
+	if s.m == nil || s.m.pg == nil || c == nil || c.ID <= 0 || c.LLMProfileID == nil {
+		return false
+	}
+	cur := *c.LLMProfileID
+	next := s.conversationFailoverProfile(cur)
+	if next == nil {
+		return false
+	}
+	if err := s.m.pg.UpdateConversationProfile(c.ID, &next.ID); err != nil {
+		log.Printf("[conv %d] LLM 自动切换落库失败: %v", c.ID, err)
+		return false
+	}
+	prevName := fmt.Sprintf("配置 #%d", cur)
+	if p, err := s.m.pg.ProfileByID(cur); err == nil && p != nil {
+		prevName = p.Name
+	}
+	log.Printf("[conv %d] LLM 自动切换: %s → %s(%s / %s) 原因: %s",
+		c.ID, prevName, next.Name, next.Format, next.Model, cause)
+	_, _ = s.m.pg.AppendConvActivity(c.ID, db.Activity{
+		Worker:  "system",
+		Kind:    "llm_switch",
+		Summary: fmt.Sprintf("LLM 自动切换：%s → %s（原因：%s）", prevName, next.Name, cause),
+	})
+	c.LLMProfileID = &next.ID
+	return true
 }
 
 // chatUnavailableReason explains why no ChatAgent could be resolved, so the user
@@ -807,6 +880,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/assets/pending", s.listPendingAssets)
 	mux.HandleFunc("POST /api/assets/authz", s.setAssetAuthz)
 	mux.HandleFunc("POST /api/assets/probe", s.assetsProbe) // 待审批资产轻量探活/归属线索
+	// 从 4zreark MCP 同步站点资产（预览 + 导入）
+	mux.HandleFunc("POST /api/assets/sync/projects", s.assetSyncProjects)
+	mux.HandleFunc("POST /api/assets/sync", s.assetSync)
 	// 项目管理(授权根:范围/归属)
 	mux.HandleFunc("GET /api/projects", s.listProjects)
 	mux.HandleFunc("POST /api/projects", s.createProject)
@@ -878,6 +954,20 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/vulnintel/{id}", s.pgGetVulnIntel)
 	mux.HandleFunc("POST /api/vulnintel/refresh", s.pgVulnIntelRefresh)
 	mux.HandleFunc("GET /api/vulnintel/status", s.pgVulnIntelStatus)
+	// 情报分析流水线(AI 分析 → 中文化 → nuclei 模板化)。路径字面量优先于
+	// 上面的 {id} 通配,不会互相遮蔽。
+	mux.HandleFunc("GET /api/vulnintel/pipeline", s.pgVulnIntelPipeline)
+	mux.HandleFunc("PUT /api/vulnintel/pipeline", s.pgVulnIntelPipelinePut)
+	mux.HandleFunc("POST /api/vulnintel/{id}/analyze", s.pgVulnIntelAnalyze)
+	// 模板两步走:先出草稿(draft),人工预览后再确认入库(nuclei)。
+	mux.HandleFunc("POST /api/vulnintel/{id}/nuclei/draft", s.pgVulnIntelNucleiDraft)
+	mux.HandleFunc("POST /api/vulnintel/{id}/nuclei", s.pgVulnIntelNuclei)
+	mux.HandleFunc("DELETE /api/vulnintel/{id}/nuclei", s.pgVulnIntelDiscardDraft)
+	mux.HandleFunc("POST /api/vulnintel/{id}/fingerprint/draft", s.pgVulnIntelFingerprintDraft)
+	mux.HandleFunc("POST /api/vulnintel/{id}/fingerprint", s.pgVulnIntelFingerprint)
+	mux.HandleFunc("DELETE /api/vulnintel/{id}/fingerprint", s.pgVulnIntelDiscardFingerprint)
+	// 路径字面量优先于 {id} 通配:草稿列表与逐条操作不会互相遮蔽。
+	mux.HandleFunc("GET /api/vulnintel/drafts", s.pgVulnIntelDrafts)
 
 	// ---- 报告生成(AI 叙述 + 确定性渲染;GET /api/report 是基线 markdown 报告,已在上方注册)----
 	mux.HandleFunc("POST /api/report/generate", s.generateReport)
@@ -1022,6 +1112,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/spacemap/search", s.spacemapSearch)
 	// 指纹规则库(只读展示,规则由 24h 上游自动同步维护)
 	mux.HandleFunc("GET /api/fingerprint/rules", s.fingerprintRulesList)
+	mux.HandleFunc("DELETE /api/fingerprint/rules/{id}", s.fingerprintRuleDelete)
 	mux.HandleFunc("GET /api/fingerprint/status", s.fingerprintStatus)
 	mux.HandleFunc("POST /api/fingerprint/sync", s.startFingerprintSync)
 	mux.HandleFunc("GET /api/fingerprint/sync/status", s.fingerprintSyncStatus)

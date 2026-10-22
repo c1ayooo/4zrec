@@ -212,3 +212,40 @@ func (s *Server) fingerprintSyncStatus(w http.ResponseWriter, r *http.Request) {
 	s.fingerprintSyncMu.Unlock()
 	writeJSON(w, 200, out)
 }
+
+// DELETE /api/fingerprint/rules/{id} —— 删除一条自定义规则(上游来源的规则由
+// 同步任务维护,不允许手工删)。漏洞情报确认入库的指纹就是 custom 来源,撤下
+// 它们走这里;删除后立即失效匹配缓存,下一次 fingerprint_scan 不再命中。
+func (s *Server) fingerprintRuleDelete(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeErr(w, 400, "missing id")
+		return
+	}
+	store, err := fingerprint.NewStore(pg.DB)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if err := store.DeleteCustomRule(r.Context(), id); err != nil {
+		s.recordFeatureCall(r.Context(), db.FeatureCall{
+			Feature: FeatureFingerprint, Action: "delete", Source: "web", Status: "error",
+			RefType: "fingerprint_rule", RefID: id, Summary: "删除自定义指纹规则", Error: err.Error(),
+			DurationMS: int(time.Since(start).Milliseconds()),
+		})
+		writeErr(w, 400, err.Error())
+		return
+	}
+	fingerprint.CacheInvalidate()
+	s.recordFeatureCall(r.Context(), db.FeatureCall{
+		Feature: FeatureFingerprint, Action: "delete", Source: "web",
+		RefType: "fingerprint_rule", RefID: id, Summary: "删除自定义指纹规则",
+		DurationMS: int(time.Since(start).Milliseconds()),
+	})
+	writeJSON(w, 200, map[string]any{"ok": true})
+}

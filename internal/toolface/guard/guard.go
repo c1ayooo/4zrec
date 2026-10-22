@@ -84,6 +84,9 @@ func (g *Guard) preToolUse(ctx context.Context, ev askernel.Event) askernel.Resu
 		}
 		_ = json.Unmarshal(ev.Input, &in)
 		cmd = in.Text
+	case "http_probe", "WebFetch":
+		// 审计落一条可读的目标描述(完整结构化提取见 fenceToolTargets)。
+		cmd = fenceCommandText(ev.ToolName, ev.Input)
 	}
 	// HTTP 工具优先级：简单 curl/wget 会丢掉完整报文证据，强制走 http_probe。
 	if reason := httpProbePolicyViolation(ctx, ev.ToolName, cmd); reason != "" {

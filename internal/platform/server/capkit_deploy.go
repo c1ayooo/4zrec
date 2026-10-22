@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/url"
 	"path"
 	"strings"
@@ -78,10 +79,19 @@ func (p *confirmedPoints) lookup(raw string) (injectionPoint, bool) {
 }
 
 // observeCapkitResult records a point as soon as a probe or execute call proves
-// it. Recording from the probe matters: an agent that confirms and then deploys
-// should not have to run a throwaway command first.
-func (s *Server) observeCapkitResult(_ context.Context, tool string, input json.RawMessage, res capkit.Result) {
-	if s.capkitPoints == nil || !res.OK {
+// it, and captures a verified foothold (deployed WebShell or opened session)
+// into the connection ledger. Recording from the probe matters: an agent that
+// confirms and then deploys should not have to run a throwaway command first.
+func (s *Server) observeCapkitResult(ctx context.Context, tool string, input json.RawMessage, result capkit.Result) {
+	if !result.OK {
+		return
+	}
+	// 连接台账:投递成功/会话建起来就意味着凭据已验证。与注入点记录独立,
+	// 没有 capkitPoints 时也要落库。
+	if note := s.captureCapkitTool(ctx, tool, input, result); note != "" {
+		log.Printf("[connections] %s: %s", tool, note)
+	}
+	if s.capkitPoints == nil {
 		return
 	}
 	var in struct {
@@ -100,7 +110,7 @@ func (s *Server) observeCapkitResult(_ context.Context, tool string, input json.
 		// not with a command slot. Only a confirmed finding with a payload is
 		// usable, and the separator is what generalizes — the marker itself must
 		// not be reused as {{cmd}}.
-		for _, f := range res.Findings {
+		for _, f := range result.Findings {
 			if f.Confirmed && f.Payload != "" {
 				in.Point.Template = deriveCmdTemplate(f.Payload)
 				s.capkitPoints.record(in.Point)

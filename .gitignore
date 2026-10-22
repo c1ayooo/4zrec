@@ -70,3 +70,6 @@ Thumbs.db
 /Dockerfile.bench.v2
 # ZCode 本地会话产物（计划/上下文，仅本机）
 .zcode/
+
+# 前端 taste/ui-ux 审计的截图对比缓存（本地产物，不提交）
+web/.taste-skill/

@@ -25,6 +25,7 @@ const (
 	settingAnalyzeEnabled = "vulnintel.analyze_enabled"
 	settingAutoTranslate  = "vulnintel.auto_translate"
 	settingAutoNuclei     = "vulnintel.auto_nuclei"
+	settingAutoFinger     = "vulnintel.auto_fingerprint"
 	settingNotifyEnabled  = "vulnintel.notify_enabled"
 )
 
@@ -85,6 +86,7 @@ type PipelineStatus struct {
 	AnalyzeEnabled bool      `json:"analyze_enabled"`
 	AutoTranslate  bool      `json:"auto_translate"`
 	AutoNuclei     bool      `json:"auto_nuclei"`
+	AutoFingerprint bool     `json:"auto_fingerprint"`
 	NotifyEnabled  bool      `json:"notify_enabled"`
 	LLMReady       bool      `json:"llm_ready"`
 	Running        bool      `json:"running"`
@@ -93,29 +95,33 @@ type PipelineStatus struct {
 	LastFailed     int       `json:"last_failed"`
 	Pending        int       `json:"pending"`
 	Analyzed       int       `json:"analyzed"`
+	Drafts         int       `json:"drafts"`
 }
 
 // Manager 持有全部抓取器并驱动轮询、富化与分析流水线。
 type Manager struct {
-	pg       *db.DB
-	grabbers []grab.Grabber
+	pg        *db.DB
+	grabbers  []grab.Grabber
 	refreshCh chan struct{}
-	enr      *enricher
-	mu       sync.Mutex
-	lastPoll time.Time
-	lastRes  PollResult
-	polling  bool
+	enr       *enricher
+	mu        sync.Mutex
+	lastPoll  time.Time
+	lastRes   PollResult
+	polling   bool
 
-	// 分析流水线。三个钩子由宿主(server 层)注入,能力包不感知 LLM 提供方、
-	// nuclei 管理器与 IM 通知实现——沿用 server Manager 的 taskStatusHook 范式。
+	// 分析流水线。四个钩子由宿主(server 层)注入,能力包不感知 LLM 提供方、
+	// nuclei 管理器、指纹规则库与 IM 通知实现——沿用 server Manager 的
+	// taskStatusHook 范式。
 	llm      LLM
 	tplSink  TemplateSink
+	fpSink   FingerprintSink
 	notifyFn func(newHigh int, titles []string)
 
 	pipelineRunning  bool
 	lastPipeline     time.Time
 	lastPipelineDone int
 	lastPipelineFail int
+	analyzing        map[int64]bool // 单条分析去重:页面按钮与定时 worker 可能同时触发
 }
 
 // NewManager 装配全部 9 源。
@@ -176,6 +182,9 @@ func (m *Manager) notifyHook() func(int, []string) {
 func (m *Manager) analyzeEnabled() bool { return boolSetting(m.pg, settingAnalyzeEnabled, true) }
 func (m *Manager) autoTranslate() bool  { return boolSetting(m.pg, settingAutoTranslate, true) }
 func (m *Manager) autoNuclei() bool     { return boolSetting(m.pg, settingAutoNuclei, false) }
+// autoFingerprint 默认开:指纹草稿不落库(只进待确认列表),风险比模板草稿还
+// 低,而用途(给资产归类)比模板更靠前 —— 分析完顺手产出,人工再挑。
+func (m *Manager) autoFingerprint() bool { return boolSetting(m.pg, settingAutoFinger, true) }
 func (m *Manager) notifyEnabled() bool  { return boolSetting(m.pg, settingNotifyEnabled, true) }
 
 // Start 启动轮询循环:立即跑一轮,此后按间隔;refresh 通道随时插队。
@@ -246,6 +255,7 @@ func (m *Manager) PipelineStatus() PipelineStatus {
 	st.AnalyzeEnabled = m.analyzeEnabled()
 	st.AutoTranslate = m.autoTranslate()
 	st.AutoNuclei = m.autoNuclei()
+	st.AutoFingerprint = m.autoFingerprint()
 	st.NotifyEnabled = m.notifyEnabled()
 	if n, err := m.pg.IntelAnalysisPendingCount(); err == nil {
 		st.Pending = n
@@ -253,12 +263,31 @@ func (m *Manager) PipelineStatus() PipelineStatus {
 	if n, err := m.pg.IntelAnalyzedCount(); err == nil {
 		st.Analyzed = n
 	}
+	if n, err := m.pg.IntelDraftCount(); err == nil {
+		st.Drafts = n
+	}
 	return st
 }
 
 // AnalyzeIntel 立即对单条情报跑完整分析链(分析 → 中文化 → 可选模板化)。
-// 供详情页「AI 分析」按钮与人工重试使用。
+// 供详情页「AI 分析」按钮与人工重试使用。同一条情报的分析不并发执行。
 func (m *Manager) AnalyzeIntel(ctx context.Context, id int64) error {
+	m.mu.Lock()
+	if m.analyzing == nil {
+		m.analyzing = map[int64]bool{}
+	}
+	if m.analyzing[id] {
+		m.mu.Unlock()
+		return nil // 已在跑,直接复用那一次
+	}
+	m.analyzing[id] = true
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		delete(m.analyzing, id)
+		m.mu.Unlock()
+	}()
+
 	v, err := m.pg.GetVulnIntel(id)
 	if err != nil {
 		return err

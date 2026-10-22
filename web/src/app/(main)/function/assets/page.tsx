@@ -65,6 +65,8 @@ import { assetProvenance } from "@/lib/asset-provenance";
 import type { Asset, Project } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+import { AssetSyncDialog } from "./_components/asset-sync-dialog";
+
 const METHOD_COLOR: Record<string, string> = {
   GET: "bg-emerald-100 text-emerald-700",
   POST: "bg-blue-100 text-blue-700",
@@ -152,7 +154,6 @@ export default function AssetsPage() {
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
 
-
   // Projects + per-type counts (tab badges) — loaded on demand, no background polling.
   const loadMeta = React.useCallback(() => {
     api
@@ -221,7 +222,6 @@ export default function AssetsPage() {
       setDeleteOpen(false);
     }
   };
-
 
   React.useEffect(() => {
     loadMeta();
@@ -388,6 +388,13 @@ export default function AssetsPage() {
               <Trash2Icon className="size-3.5" /> 删除已选 ({selected.size})
             </Button>
           )}
+          <AssetSyncDialog
+            projects={projects}
+            onSynced={() => {
+              refresh();
+              setTab("service");
+            }}
+          />
           <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
             <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} /> 刷新
           </Button>
@@ -406,7 +413,6 @@ export default function AssetsPage() {
             ))}
           </TabsList>
         </div>
-
 
         {/* 根域名 */}
         <TabsContent value="root_domain" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
@@ -679,9 +685,8 @@ export default function AssetsPage() {
                       })
                     )}
                   </TableCell>
-                  
 
-<TableCell className="w-8 pl-0">
+                  <TableCell className="w-8 pl-0">
                     <Button
                       variant="ghost"
                       size="icon"
@@ -780,7 +785,6 @@ export default function AssetsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
     </div>
   );
 }
@@ -910,7 +914,13 @@ function Chips({ items, mono, vulnKb }: { items: string[]; mono?: boolean; vulnK
       {clean.map((s, i) =>
         vulnKb ? (
           <Link key={i} href={`/function/vuln-kb?q=${encodeURIComponent(s)}`} title={`在漏洞库中检索 ${s}`}>
-            <Badge variant="outline" className={cn("text-[11px] transition-colors hover:border-primary/50 hover:text-primary", mono && "font-mono")}>
+            <Badge
+              variant="outline"
+              className={cn(
+                "text-[11px] transition-colors hover:border-primary/50 hover:text-primary",
+                mono && "font-mono",
+              )}
+            >
               {s}
             </Badge>
           </Link>
@@ -923,6 +933,5 @@ function Chips({ items, mono, vulnKb }: { items: string[]; mono?: boolean; vulnK
     </div>
   );
 }
-
 
 // 后端返回的 warnings 说的是既有数据问题（不是本次提交的行有错），保存本身已经

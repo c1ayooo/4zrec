@@ -552,6 +552,8 @@ func (s *Server) runConversationTurn(ctx context.Context, cancel context.CancelC
 		finishReason = s.chatUnavailableReason()
 		return
 	}
+	// 本轮实际生效的 profile id(agent 绑定优先于会话 pin),供失败后的自动切换。
+	effProfile := s.effectiveProfileForAgent(c.AgentKey, c.LLMProfileID)
 	pg := s.m.pg
 	maxTurns := s.agentMaxTurns(c.AgentKey)
 	maxDuration := time.Duration(s.agentRunSeconds(c.AgentKey)) * time.Second
@@ -572,6 +574,15 @@ func (s *Server) runConversationTurn(ctx context.Context, cancel context.CancelC
 		if ctx.Err() == nil {
 			_, _ = pg.AppendConvActivity(c.ID, db.Activity{Worker: c.AgentKey, Kind: "text", IsError: true,
 				Summary: "（出错：" + err.Error() + "）", Detail: err.Error()})
+			// LLM 自动切换:额度耗尽是该配置的终态——先熔断;若生效配置正是本
+			// 会话自己 pin 的(而非 Agent 绑定),自动改绑到可用配置,下一条消息
+			// 即可继续,会话里留一条 llm_switch 系统事件。
+			if effProfile != nil && isQuotaExhaustedError(err) {
+				s.llmHealth.Trip(*effProfile, err.Error(), true)
+				if c.LLMProfileID != nil && *c.LLMProfileID == *effProfile {
+					s.autoSwitchConversationLLM(c, "额度已耗尽")
+				}
+			}
 		}
 	} else {
 		finishStatus, finishReason = "completed", ""

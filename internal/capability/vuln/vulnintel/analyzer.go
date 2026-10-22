@@ -46,8 +46,19 @@ const sysAnalysis = `你是资深漏洞分析专家，熟悉漏洞披露通告�
 铁律：
 - 只依据给定情报与公开的漏洞原理作答。**不要臆造**厂商、版本号、接口路径、参数名等具体信息；无法确定的字段留空字符串，不要编造。
 - CVE 编号、组件名、函数名、接口路径一律保留原文，不要翻译、不要改写大小写。
-- PoC 必须是可直接运行的 Python 3 脚本：目标地址用顶部占位变量（如 TARGET），依赖仅限标准库或 requests，只做无损的验证性请求（判断漏洞是否存在），**不得包含破坏性、持久化或横向移动操作**。无法可靠构造时 poc 字段置 null。
-- 输出字段：title_zh(中文标题，简短)、description_zh(中文简介，2-4 句)、principle(漏洞原理，说明成因与触发条件)、attack_scope(攻击范围，说明影响的产品/版本/前置条件)、poc(对象 {"language","code"} 或 null)。`
+- 不要输出整段 PoC 代码。只输出构造验证请求所需的要素（poc_spec），平台会据此拼装脚本。
+
+poc_spec 的字段与要求：
+- constructible: 情报里是否给出了**足够构造一次可运行验证**的信息。给出具体入口路径与判定特征才是 true；只有产品名、只有版本号、只有原理描述时一律 false。
+- path: 漏洞入口路径（以 / 开头，如 /admin/admin.php、/wp-admin/admin-ajax.php）。**必须逐字出现在给定情报里**，不得猜测或补全；找不到就 constructible=false 并说明。
+- method: GET 或 POST。
+- params: [{"name":"参数名","value":"验证载荷"}]，至少一个。参数名优先取情报原文里出现的；情报没写参数名时可以给出该接口的常见参数名，但值必须是**无损**的探测载荷（如 1、test、单引号、sleep 之外的简单标记），不得包含破坏性操作。
+- marker: 响应中能判定"命中"的特征字符串（如报错关键字、版本号、默认页标题），**必须能在情报原文里找到出处**；没有就留空。
+- match_status: 期望的状态码（0 表示不校验）。
+- evidence: 一句话说明判定依据。
+- 情报不足以构造可运行验证时：constructible=false，reason 写明缺什么（例如"情报未给出插件入口与参数名"），其余字段留空。
+
+- 输出字段：title_zh(中文标题，简短)、description_zh(中文简介，2-4 句)、principle(漏洞原理，说明成因与触发条件)、attack_scope(攻击范围，说明影响的产品/版本/前置条件)、poc_spec(上述对象)。`
 
 const userAnalysis = `请分析以下漏洞情报。
 
@@ -62,18 +73,15 @@ CVE：%s
 已知 PoC 仓库（若为空表示暂无公开 PoC）：%s
 
 只输出如下 JSON：
-{"title_zh":"","description_zh":"","principle":"","attack_scope":"","poc":{"language":"python","code":""}}`
+{"title_zh":"","description_zh":"","principle":"","attack_scope":"","poc_spec":{"constructible":false,"reason":"","method":"GET","path":"","params":[],"body_format":"form","marker":"","match_status":0,"evidence":""}}`
 
 // intelAnalysisOut 是模型返回的分析结果。
 type intelAnalysisOut struct {
-	TitleZh       string `json:"title_zh"`
-	DescriptionZh string `json:"description_zh"`
-	Principle     string `json:"principle"`
-	AttackScope   string `json:"attack_scope"`
-	Poc           *struct {
-		Language string `json:"language"`
-		Code     string `json:"code"`
-	} `json:"poc"`
+	TitleZh       string   `json:"title_zh"`
+	DescriptionZh string   `json:"description_zh"`
+	Principle     string   `json:"principle"`
+	AttackScope   string   `json:"attack_scope"`
+	PocSpec       *pocSpec `json:"poc_spec"`
 }
 
 // analyzeItem 对一条情报跑完整分析并落库。失败返回错误由调用方记录(单条
@@ -114,19 +122,29 @@ func (m *Manager) analyzeItem(ctx context.Context, v db.EnrichedVulnIntel) error
 	if llm.Model != nil {
 		st.Model = llm.Model()
 	}
-	// PoC 归属:模型生成 > 上游仓库(只有链接,无代码) > 无。
-	switch {
-	case out.Poc != nil && strings.TrimSpace(out.Poc.Code) != "":
-		st.PocCode = strings.TrimSpace(out.Poc.Code)
-		st.PocLang = strings.TrimSpace(out.Poc.Language)
-		if st.PocLang == "" {
+	// PoC:由模型给出的验证要素确定性拼装。要素填不全、或入口/特征在情报原文里
+	// 找不到出处时不产出脚本 —— 只有格式、跑不通的 PoC 比没有更糟。
+	corpus := intelCorpus(v, nil)
+	if out.PocSpec != nil {
+		code, note, perr := buildPoCScript(v, corpus, *out.PocSpec)
+		if perr != nil {
+			st.PocNote = perr.Error()
+		} else {
+			st.PocCode = code
 			st.PocLang = "python"
+			st.PocOrigin = pocOriginAI
+			st.PocNote = note
 		}
-		st.PocOrigin = pocOriginAI
-	case hasUpstreamPoc(v.GithubPoc):
-		st.PocOrigin = pocOriginUpstream
-	default:
-		st.PocOrigin = pocOriginNone
+	} else {
+		st.PocNote = "模型未给出可用的验证要素，未生成 PoC"
+	}
+	// 归属:自建 PoC > 上游仓库(只有链接,无代码) > 无。
+	if st.PocCode == "" {
+		if hasUpstreamPoc(v.GithubPoc) {
+			st.PocOrigin = pocOriginUpstream
+		} else {
+			st.PocOrigin = pocOriginNone
+		}
 	}
 	return m.pg.SaveIntelAnalysisStage(st)
 }
@@ -162,15 +180,26 @@ func (m *Manager) analyzeOne(ctx context.Context, v db.EnrichedVulnIntel) error 
 	if err := m.analyzeItem(ctx, v); err != nil {
 		return err
 	}
-	// 分析已产出中文标题;若模型没给(例如原文本身是中文),仍走一次轻量中文化兜底。
-	if m.autoTranslate() && v.TitleZh == "" {
-		if err := m.localizeItem(ctx, v); err != nil {
-			log.Printf("[vulnintel] 中文化 %d: %v", v.ID, err)
+	// 分析已产出中文标题;只有当落库后仍然没有时才走中文化兜底。这里必须
+	// 重新读一次 —— v.TitleZh 是分析前的旧值,拿它判断会对每条都白跑一次
+	// 翻译调用。
+	if m.autoTranslate() {
+		if cur, err := m.pg.GetVulnIntel(v.ID); err == nil && strings.TrimSpace(cur.TitleZh) == "" {
+			if err := m.localizeItem(ctx, *cur); err != nil {
+				log.Printf("[vulnintel] 中文化 %d: %v", v.ID, err)
+			}
 		}
 	}
+	// 自动生成只产草稿:模板 matcher 与指纹表达式都由模型补全,是否写进模板库/
+	// 指纹库由人确认。两件事互相独立,一边失败不影响另一边。
 	if m.autoNuclei() {
-		if _, err := m.SaveIntelTemplate(ctx, v); err != nil {
-			log.Printf("[vulnintel] 模板生成 %d: %v", v.ID, err)
+		if _, _, err := m.GenerateTemplateDraft(ctx, v); err != nil {
+			log.Printf("[vulnintel] 模板草稿生成 %d: %v", v.ID, err)
+		}
+	}
+	if m.autoFingerprint() {
+		if _, err := m.GenerateFingerprintDraft(ctx, v); err != nil {
+			logFingerprintErr(v.ID, err)
 		}
 	}
 	return nil

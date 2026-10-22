@@ -179,8 +179,27 @@ func (s *Store) EnabledRules(ctx context.Context) ([]CompiledRule, error) {
 	return out, rows.Err()
 }
 
-// ActiveRules 匹配用的当前规则集:store 有规则走 store(带编译缓存),
-// store 为空(首次同步未完成)回退内置快照——保证任何时刻都有规则可用。
+// UpstreamSynced 报告规则库是否已经完成过至少一次上游同步。写入
+// fingerprint_sources 只在一次成功导入的事务里发生,所以「来源表有记录」就等于
+// 「库里已经有一整套上游规则」,而「有记录」不能用「规则表非空」代替。
+func (s *Store) UpstreamSynced(ctx context.Context) bool {
+	var n int64
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM fingerprint_sources`).Scan(&n); err != nil {
+		// 查不出来时按「未同步」处理:宁可多编译一份内置快照,也不要因为一次
+		// 查询失败让匹配规则集突然缩水。
+		return false
+	}
+	return n > 0
+}
+
+// ActiveRules 匹配用的当前规则集:上游同步过就用 store(带编译缓存),
+// 否则用内置快照叠加库里已有的规则。
+//
+// 回退条件必须是「上游从未同步」,而不是「规则表为空」:首次同步完成前人工
+// 确认入库一条 source='custom' 的指纹(漏洞情报流水线走的就是这条路)会让规则表
+// 从 0 条变成 1 条,若按条数判断,内置的 7,587 条会因为这一条规则全部失效。
+// 未同步时叠加而不是替换,是为了让那条人工规则立刻生效,同时又不动内置集。
 func ActiveRules(db *sql.DB) []CompiledRule {
 	if db == nil {
 		return DefaultRules()
@@ -193,11 +212,36 @@ func ActiveRules(db *sql.DB) []CompiledRule {
 		return rules
 	}
 	rules, err := s.EnabledRules(ctx)
-	if err != nil || len(rules) == 0 {
+	if err != nil {
 		return DefaultRules()
+	}
+	if !s.UpstreamSynced(ctx) {
+		merged := mergeWithDefaults(rules)
+		CachePut(sig, merged)
+		return merged
 	}
 	CachePut(sig, rules)
 	return rules
+}
+
+// mergeWithDefaults 把库里的规则叠加到内置快照之后,按 名称+表达式 去重(库里
+// 的同名规则覆盖内置的)。返回新切片,不改动 DefaultRules() 的共享切片——
+// 那个切片是进程内常驻的,原地 append 会污染后续所有调用。
+func mergeWithDefaults(rules []CompiledRule) []CompiledRule {
+	if len(rules) == 0 {
+		return DefaultRules()
+	}
+	seen := make(map[string]bool, len(rules))
+	for _, r := range rules {
+		seen[r.Name+"\x00"+r.Expression] = true
+	}
+	out := make([]CompiledRule, 0, len(rules)+len(DefaultRules()))
+	for _, r := range DefaultRules() {
+		if !seen[r.Name+"\x00"+r.Expression] {
+			out = append(out, r)
+		}
+	}
+	return append(out, rules...)
 }
 
 // ---- Updater ----

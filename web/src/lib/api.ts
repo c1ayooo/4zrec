@@ -18,6 +18,9 @@ import type {
   AssetInterceptRule,
   AssetInterceptRuleInput,
   AssetProbeResult,
+  AssetSyncRequest,
+  AssetSyncResult,
+  AssetSyncSourceProject,
   Audit,
   BatchCategoryItem,
   BatchControlItem,
@@ -552,6 +555,10 @@ export const api = {
     get<Record<string, number>>(`/assets/counts${taskId ? `?task_id=${encodeURIComponent(taskId)}` : ""}`),
   deleteAssets: (ids: number[]) =>
     http<{ deleted: number }>("/assets", { method: "DELETE", body: JSON.stringify({ ids }) }),
+  // 从 4zreark 的 MCP 接口读取站点资产；dry_run 只预览不写库。
+  assetSyncProjects: (payload: { base_url: string; api_key: string }) =>
+    post<{ projects: AssetSyncSourceProject[] }>("/assets/sync/projects", payload),
+  assetSync: (payload: AssetSyncRequest) => post<AssetSyncResult>("/assets/sync", payload),
   // task-scoped view of the same endpoint — server-side paginated like `assets`
   taskAssets: (taskId: string, type = "", limit = 50, offset = 0) =>
     get<{ count: number; total: number; assets: Asset[] }>(

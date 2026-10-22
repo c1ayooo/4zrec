@@ -974,7 +974,7 @@ CREATE INDEX IF NOT EXISTS idx_recon_runs_schedule ON recon_runs(schedule_id) WH
 -- 连接台账：SSH/数据库/协议(SMB/WinRM/LDAP/VNC/FTP)凭据统一存储。
 -- 设计口径(用户拍板)：明文存储(不做 vault 加密)；必须绑定项目(project_id NOT NULL);
 -- worker 任务中发现/验证成功的凭据自动落库(source=discovered),手工录入 source=manual。
--- 同项目同 kind 同 host:port 同用户唯一(重录合并 secret)。
+-- 唯一键按类型分开，见表后面的两个部分唯一索引。
 CREATE TABLE IF NOT EXISTS connections (
     id            BIGSERIAL PRIMARY KEY,
     project_id    BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -989,8 +989,7 @@ CREATE TABLE IF NOT EXISTS connections (
     last_checked_at TIMESTAMPTZ,
     note          TEXT NOT NULL DEFAULT '',
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (project_id, kind, host, port, username)
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_connections_project ON connections(project_id);
 CREATE INDEX IF NOT EXISTS idx_connections_kind ON connections(kind);
@@ -1000,6 +999,17 @@ CREATE INDEX IF NOT EXISTS idx_connections_kind ON connections(kind);
 ALTER TABLE connections DROP CONSTRAINT IF EXISTS connections_kind_check;
 ALTER TABLE connections ADD CONSTRAINT connections_kind_check
     CHECK (kind IN ('ssh','postgres','mysql','redis','mongodb','elasticsearch','smb','winrm','ldap','vnc','ftp','proxy','tunnel','webshell'));
+
+-- 唯一键按类型分开：普通凭据的身份是 (kind,host,port,username)；WebShell 的
+-- 身份是落点 URL(extra.url)——同一台机器同一端口上可以并存多个 shell，用普通
+-- 键会把它们合并成一条。老库上的整体唯一约束必须显式删除。
+ALTER TABLE connections DROP CONSTRAINT IF EXISTS connections_project_id_kind_host_port_username_key;
+DROP INDEX IF EXISTS idx_connections_nonshell_key;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_connections_nonshell_key
+    ON connections (project_id, kind, host, port, username) WHERE kind <> 'webshell';
+DROP INDEX IF EXISTS idx_connections_webshell_url_key;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_connections_webshell_url_key
+    ON connections (project_id, kind, (extra->>'url')) WHERE kind = 'webshell';
 
 -- Skill 调用账本（见 db/skill_usage.go）。一次 Skill() 调用一行，只记维度不记正文。
 -- 刻意不设外键：任务/会话删除后统计仍要保留（与 llm_usage 同理），skill 本身也只是
@@ -1599,6 +1609,9 @@ ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS localized_at TIMESTAMPTZ;
 ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS nuclei_tpl_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS nuclei_tpl_at TIMESTAMPTZ;
 ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS analysis_error TEXT NOT NULL DEFAULT '';
+-- 指纹规则 id:模板与指纹各自独立确认,确认后分别记 id 供前端区分草稿/已入库。
+ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS fingerprint_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE vuln_intel ADD COLUMN IF NOT EXISTS fingerprint_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_vuln_intel_analyzed ON vuln_intel(analyzed_at NULLS FIRST);
 
 -- AI 分析产物(1:1 旁表)。与 finding_enrichment 同思路:不改原表 payload,
@@ -1612,10 +1625,19 @@ CREATE TABLE IF NOT EXISTS vuln_intel_analysis (
     poc_lang       TEXT NOT NULL DEFAULT '',
     -- poc_origin: ai(模型生成) / upstream(源里已有,原样保留) / none(无 PoC)
     poc_origin     TEXT NOT NULL DEFAULT 'none',
+    -- poc_note:为什么没有/为什么不能直接用(模型要素不全、参数为推测等)
+    poc_note       TEXT NOT NULL DEFAULT '',
     nuclei_tpl     TEXT NOT NULL DEFAULT '',
+    -- 指纹草稿(code:yaml 与 expression 两行,null 表示不适用)。与 nuclei_tpl
+    -- 一样只存草稿,人工确认后才写 fingerprint_rules 并记 fingerprint_id。
+    fingerprint    TEXT NOT NULL DEFAULT '',
+    fingerprint_id TEXT NOT NULL DEFAULT '',
     model          TEXT NOT NULL DEFAULT '',
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE vuln_intel_analysis ADD COLUMN IF NOT EXISTS fingerprint TEXT NOT NULL DEFAULT '';
+ALTER TABLE vuln_intel_analysis ADD COLUMN IF NOT EXISTS poc_note TEXT NOT NULL DEFAULT '';
+ALTER TABLE vuln_intel_analysis ADD COLUMN IF NOT EXISTS fingerprint_id TEXT NOT NULL DEFAULT '';
 
 -- 漏洞就地复现记录(agent report_finding 时写入的结构化配方,报告确定性渲染用)。
 ALTER TABLE findings ADD COLUMN IF NOT EXISTS reproduction JSONB;

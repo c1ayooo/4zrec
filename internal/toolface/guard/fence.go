@@ -21,8 +21,9 @@ import (
 // IP/域名,未经 insert_assets 登记、未经人工批准)。本闸门在 guard.PreToolUse
 // 这个对话/任务共享的单咽喉上:
 //
-//  1. 从出网类工具(Bash/shell_open/shell_send/WebFetch)的输入提取字面目标
-//     (IP/域名/URL host);
+//  1. 从出网类工具(Bash/shell_open/shell_send/WebFetch/http_probe)的输入提取
+//     目标对象(IP/域名/URL host):Bash 走「命令对象」解析,http_probe 按字段
+//     结构化取 URL(见 fenceToolTargets/fence_http.go);
 //  2. 命中全局/任务黑名单 → 硬阻断(平台管控文案);
 //  3. 目标已获授权(项目范围命中,或库中 authz='approved' 的资产)→ 放行;
 //  4. 其余 → 合成 ask 审批(复用 intercept.HandleAsk:pending 记录 + 内联卡片 +
@@ -162,8 +163,44 @@ func fenceCommandText(toolName string, input []byte) string {
 		return str("text")
 	case "WebFetch":
 		return str("url")
+	case "http_probe":
+		// 审计展示用:单发取 url,批量取首个请求的 url(http_probe 的目标提取
+		// 在 fenceToolTargets 里按字段结构化进行,不走命令文本)。
+		if u := str("url"); u != "" {
+			return u
+		}
+		if reqs, ok := in["requests"].([]any); ok && len(reqs) > 0 {
+			if first, ok := reqs[0].(map[string]any); ok {
+				if u, ok := first["url"].(string); ok {
+					return u
+				}
+			}
+		}
+		if tmpl, ok := in["template"].(map[string]any); ok {
+			if u, ok := tmpl["url"].(string); ok {
+				return u
+			}
+		}
+		return ""
 	}
 	return ""
+}
+
+// fenceToolTargets 按工具提取围栏对象:Bash/shell 的「命令对象」、WebFetch 的
+// URL、http_probe 的结构化 URL(url / requests[].url / template×matrix/range)。
+// http_probe 的 proxy/headers/body/extract 等字段不是测试目标,绝不参与提取
+// (见 fence_http.go)。返回空且非 Opaque 时,该调用不参与围栏。
+func fenceToolTargets(toolName string, input []byte, workDir string) fenceTargets {
+	switch toolName {
+	case "Bash", "shell_open", "WebFetch":
+		return ExtractFenceTargetsWithDir(fenceCommandText(toolName, input), workDir)
+	case "shell_send":
+		// 往已授权的交互会话里输入的内容:只用字面目标提取,不按未知命令判 Opaque。
+		return extractFenceTargetsLegacy(fenceCommandText(toolName, input))
+	case "http_probe":
+		return extractHTTPProbeTargets(input)
+	}
+	return fenceTargets{}
 }
 
 // validFenceIPv4 校验四组 octet ≤255;loopback/未指定地址不是渗透目标。
@@ -488,24 +525,14 @@ func (f *AssetFence) evaluate(ctx context.Context, toolName string, input []byte
 	if f == nil || f.dbh == nil {
 		return fenceDecision{Allow: true}
 	}
-	cmd := fenceCommandText(toolName, input)
-	if strings.TrimSpace(cmd) == "" {
-		return fenceDecision{Allow: true}
-	}
 	projectID := f.resolveProject(ctx)
 	if projectID <= 0 {
 		return fenceDecision{Allow: true}
 	}
-	// 按“命令对象”解析：已知命令取其目标操作数；解释器/未知命令若无法静态
-	// 确定对象则 Opaque，交给人工审批——不能因为没提取到字面目标就放行。
-	// shell_send 是往一个已经授权的交互会话里输入内容（密码/REPL 命令），
-	// 不能把任意一行都当新命令判 Opaque；只用字面目标提取兜住显式 URL/IP。
-	var targets fenceTargets
-	if toolName == "shell_send" {
-		targets = extractFenceTargetsLegacy(cmd)
-	} else {
-		targets = ExtractFenceTargetsWithDir(cmd, intercept.ReviewWorkingDirectory(ctx))
-	}
+	// 按「对象」解析:Bash 取命令目标操作数;http_probe 按字段结构化取 URL
+	// (proxy/headers/body 不参与);解释器/未知命令无法静态确定对象则 Opaque,
+	// 交给人工审批——不能因为没提取到字面目标就放行。
+	targets := fenceToolTargets(toolName, input, intercept.ReviewWorkingDirectory(ctx))
 	if targets.empty() && !targets.Opaque {
 		return fenceDecision{Allow: true}
 	}
@@ -629,7 +656,7 @@ func (f *AssetFence) PendingTargets(p db.InterceptPending) (domains, ips []strin
 	if !strings.Contains(p.Reason, "【资产围栏】") {
 		return nil, nil
 	}
-	targets := ExtractFenceTargets(fenceCommandText(p.ToolName, p.ToolInput))
+	targets := fenceToolTargets(p.ToolName, p.ToolInput, "")
 	return targets.Domains, targets.IPs
 }
 
@@ -655,7 +682,7 @@ func (f *AssetFence) AskAuthorized(p db.InterceptPending) bool {
 	if projectID <= 0 {
 		return false
 	}
-	targets := ExtractFenceTargets(fenceCommandText(p.ToolName, p.ToolInput))
+	targets := fenceToolTargets(p.ToolName, p.ToolInput, "")
 	if targets.empty() {
 		return false
 	}

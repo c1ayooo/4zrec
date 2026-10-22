@@ -20,7 +20,6 @@ import (
 	"golang.org/x/text/encoding/charmap"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/encoding/traditionalchinese"
-
 )
 
 const (
@@ -147,7 +146,6 @@ func ProbeHTTPObservation(ctx context.Context, target string, client *http.Clien
 	}
 	return Observation{}, fmt.Errorf("探测失败: %w", lastErr)
 }
-
 
 // charsetPattern 从 Content-Type 或 <meta> 标签取 charset 参数值。
 var charsetFromHeaderRE = regexp.MustCompile(`(?i)charset\s*=\s*"?([a-z0-9_-]+)"?`)

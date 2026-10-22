@@ -2,6 +2,56 @@
 
 本项目的重要变更记录在此文件中，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.5.1] - 2026-10-22
+
+### 漏洞情报流水线：AI 分析 → 模板/指纹/PoC 草稿 → 人工确认
+
+- **分析产出改为「要素」而非整段 PoC**：情报分析不再让模型直接写 Python 脚本（实测端点/参数/判定特征全是编的），改为只产出 `poc_spec`（入口路径/方法/参数/响应判定特征），且要求 path 与 marker 必须能在情报原文找到出处；情报不足以构造可运行验证时老实报 `constructible=false`，不再产出只有格式的脚本。脚本由代码确定性拼装（标准库 urllib，带 py_compile 实编译测试）。
+- **模板/指纹自动生成只产草稿**：`vuln_intel` 新增指纹草稿与 `poc_note`/`fingerprint_id` 等列；nuclei 模板与指纹规则各自独立确认，自动产物先落草稿列表，人工确认后才写进模板库（带 author 校验、索引热加载）/指纹库（`source='custom'`，不会被上游同步清理），均可一键丢弃。草稿计数进状态接口。
+- **流水线服务端接线**：LLM 钩子取激活 profile（低温有界、进 llmrec 录制）、模板落盘走 nuclei 自定义模板目录、指纹落库走 fingerprint_rules、高危情报汇总 IM 推送；缺 LLM/模板库/指纹库时逐项降级不阻塞。`vulnintel.auto_fingerprint` 默认开。新 API：`GET/PUT /api/vulnintel/pipeline`、`POST /api/vulnintel/{id}/analyze`、`{id}/nuclei/draft`（生成/入库/丢弃）、`{id}/fingerprint/draft`（生成/入库/丢弃）。
+- **同条分析去重与内容门槛**：页面按钮与定时 worker 并发触发同一情报分析只跑一次；裸 CVE 列表项（仅编号+等级、无描述）不进待分析队列。
+- **情报富化补全**：NVD 元数据（CVSS 向量/评分、CWE、KEV、EPSS）带缓存批量富化，失败条目下轮重试。
+
+### capkit 接入（阶段 0/1）：三 kit 并存试运行
+
+- **依赖升级 `capkit v0.4.12 → v0.5.0`**（本次同步发布的 capkit 带来 vulnintelkit/pockit/bindingkit 三个 kit；4zrec 仓库的本地 `replace` 已移除）。方案与阶段台账见 `docs/capkit-swap-plan.md`。
+- **按端口条件注册**：有 Fetcher+Intel 才注册 vulnintelkit、有 Completer+Artifacts 才注册 pockit、bindingkit 无条件——没配模型的环境不会连带丢会话工具。
+- **适配层**：capkit 的 IntelStore 写穿到 `vuln_intel` 表；Completer 复用报告子系统的 LLM 调用；ArtifactStore 落 `data/intel-drafts`（拒绝绝对路径/`..`/逃逸根目录）。5 条桥接集成测试覆盖工具暴露与端口缺失降级。
+- 本地流水线与 capkit 工具**并存**互不影响，为后续切换做数据比对。
+
+### 指纹规则库与绑定门禁
+
+- **custom 来源规则**：人工确认的情报指纹走 `source='custom'` 入库，上游 24h 同步只清理自己的三个来源，不会误删。
+- **ActiveRules 回退条件修正**：改为「上游从未同步」才回退内置快照（此前「规则表为空」的判定会让首次同步前入库的 custom 规则在匹配时被忽略）；同步后用 store 规则集（带编译缓存）。
+- **模板↔产品绑定判定强化**：显式绑定表先行（exact → alias → 有界包含，capkit binding 语义），否则查询词必须整词/词边界前缀命中已识别技术——防「AJ-Report数据大屏系统 vs AJ-Report」这类名义差异误配，也防模糊词把模板放行到错误产品上。
+
+### 资产同步：从 4zreark 导入站点资产
+
+- 新增 `POST /api/assets/sync/projects`、`POST /api/assets/sync`：从 4zreark 的无状态 MCP 接口（list_projects/list_assets）读取站点资产，映射成本项目 service 资产；支持 `dry_run` 预览、上限与错误封顶；API key 只存在于单次请求，不落库不写日志。
+- 资产页新增「同步」对话框：填 4zreark 地址与 API key，选源项目 → 目标项目，可先预览再导入。
+
+### 资产围栏：http_probe 纳入围栏，对象按字段提取
+
+- **`http_probe` 进入资产围栏**：此前围栏只认 Bash/shell 工具的命令文本，结构化 HTTP 工具完全绕过执行侧闸门（仅工具内 RoE 静默拒绝，不产生审批、批准即授权不生效）。现在 http_probe 的目标按字段结构化提取——只有真正发起请求的 URL（`url` / `requests[].url` / `template.url` × `matrix`/`range` 代入，与工具展开语义一致）是围栏对象。
+- **不再误提取请求元数据**：`proxy` 出站代理、`headers`（Host/Referer/Authorization 等）、`body`、`cookie`、`extract`、`save_to_file` 等字段里的域名/URL 一律不是测试目标，不参与提取。
+- **串行链变量 fail-closed**：`extract` 回填的 `{var}` 落在 URL host 位时目标运行时才确定，围栏按 Opaque 走人工审批，不静默放行；变量只在路径/查询位时照常提取 host。
+- 审批记录对 http_probe 持久化结构化目标并复用逐目标勾选授权（批准即授权、联动放行）；Bash/shell_open/shell_send/WebFetch 的提取口径不变。
+
+### LLM 自动切换与进行中切换
+
+- **对话自动切换**：会话 pin 的 LLM 配置失效（被删/缺 Key/参数无效）或熔断冷却中时，发消息前自动改绑到轮询链上下一个可用配置，会话内留一条「LLM 自动切换」系统事件；配置因额度耗尽而失败时先熔断再切换。Agent 级显式绑定不自动改（运维显式选择），找不到备选时保持原样按原语义报错。
+- **任务详情「会话」页切换 LLM**：会话头部的 LLM 徽标从只读变为可点——弹层列出全部配置（当前项高亮、激活配置标注），运行中选择即时按任务链切换（保持链序、移动游标；链为空就 pin 一条），下一次 LLM 调用生效，无需暂停任务；Agent 独立绑定时展示只读指引。完整链编辑仍在任务头部「LLM 配置链」。
+- **对话页运行中可切换**：会话运行/回复过程中不再禁用「更换 LLM」，切换立即保存、下一轮生效（此前必须等本轮跑完）。
+
+### 连接台账：各类凭据自动落库
+
+- **WebShell 自动落库**：`webshell_deploy` 投递成功、`session_open(kind=webshell)` 建连成功、`http_probe` 直接调用已有 shell（URL/表单同时带命令参数与口令参数，且响应确实是该命令的输出）三条路径都会写台账；落点 URL、命令/口令参数名、`shell_type`、`protocol` 一并落进 `extra`，登记后即可在控制台执行、直接开成终端会话。
+- **`session_open` 全类型落库**：ssh / webshell / mysql / postgres / smb / winrm 建连成功即登记（`source=discovered`，`status=alive`），数据库名等附加信息写 `extra`；`cli` 是本机会话、目标不是项目资产，不登记。
+- **`webshell` 唯一键改为落点 URL**：`connections` 拆成两个部分唯一索引——普通凭据按 `(project_id,kind,host,port,username)`，webshell 按 `(project_id,kind,extra->>'url')`；同一台机器同一端口上的多个 shell 不再互相覆盖合并。URL 落库前统一规范化（补 scheme、scheme/host 小写、去 fragment），同一落点的不同写法命中同一行。
+- **`credential_register` 支持 webshell 与 `extra`**：`kind=webshell` 传 `url`（也可直接塞进 `host`）+ `cmd_param` / `pass_param` / `method` / `shell_type` / `protocol`，落点推导 host/port；其它类型的 `extra`（`database` / `domain` / `share` / `sslmode` 等）原样落库。
+- **`credential_verify_db` 落库修正**：`postgresql` 别名归一为 `postgres`、端口缺省时补默认端口，不再出现「kind=postgres、port=3306」这类错位行与错误合并；连接库名写进 `extra.database`。
+- **`shell_type` / `protocol` 贯通**：台账行的 webshell 会话与控制台执行都会带上这两个参数（此前登记时 `shell_type` 被前端硬写成 `php`，`protocol` 丢失）。
+
 ## [0.5.0] - 2026-10-18
 
 ### 指纹驱动定向验证

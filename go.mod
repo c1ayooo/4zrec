@@ -4,7 +4,7 @@ go 1.26.3
 
 require (
 	github.com/PuerkitoBio/goquery v1.8.1
-	github.com/c1ayooo/capkit v0.4.12
+	github.com/c1ayooo/capkit v0.5.0
 	github.com/cloudwego/eino v0.9.21
 	github.com/cloudwego/eino-ext/components/model/claude v0.1.26
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.13

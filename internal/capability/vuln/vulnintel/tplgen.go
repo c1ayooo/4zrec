@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/c1ayooo/4zrec/internal/capability/vuln/nuclei"
 	"github.com/c1ayooo/4zrec/internal/domain/db"
@@ -64,33 +65,35 @@ type tplHTTP struct {
 }
 
 type tplMatcher struct {
-	Type    string   `yaml:"type"`
-	Part    string   `yaml:"part,omitempty"`
-	Words   []string `yaml:"words,omitempty"`
-	Regex   []string `yaml:"regex,omitempty"`
-	Status  []int    `yaml:"status,omitempty"`
-	Condition string `yaml:"condition,omitempty"`
+	Type      string   `yaml:"type"`
+	Part      string   `yaml:"part,omitempty"`
+	Words     []string `yaml:"words,omitempty"`
+	Regex     []string `yaml:"regex,omitempty"`
+	Status    []int    `yaml:"status,omitempty"`
+	Condition string   `yaml:"condition,omitempty"`
 }
 
 // GenerateNucleiTemplate 生成模板 YAML(不落盘)。返回模板 id 与 YAML 文本。
+//
+// matcher 必须能在目标的真实响应里出现:模型给的 words/regex 是主来源,情报
+// 自带的组件名是兜底。**CVE 编号不能当 matcher** —— 目标页面不会把 CVE 编号
+// 打印出来,以它为唯一 matcher 的模板永远匹配不到东西。凑不出可核验特征时
+// 直接报错,不产出空转模板。
 func (m *Manager) GenerateNucleiTemplate(ctx context.Context, v db.EnrichedVulnIntel) (string, string, error) {
 	analysis := v.Analysis
-	if analysis == nil {
+	if analysis == nil && m.pg != nil {
 		if a, err := m.pg.GetIntelAnalysis(v.ID); err == nil {
 			analysis = a
 		}
 	}
 
 	cve := normalizeCVE(v.CVE, v.Title, v.Description, v.Tags)
-	words := matchWords(v, cve)
-	if len(words) == 0 {
-		return "", "", fmt.Errorf("情报缺少可用于匹配的特征（CVE / 组件名 / 路径），无法生成可靠模板")
-	}
 
-	// LLM 只补充「请求路径」这类代码推断不出的指标;失败不影响确定性骨架。
+	// LLM 补请求路径与响应特征;失败不影响后续判定,但会成为报错原因的一部分。
+	ind, indErr := m.suggestIndicators(ctx, v, analysis)
 	method, path := "GET", "/"
-	if ind, err := m.suggestIndicators(ctx, v, analysis); err == nil && ind != nil {
-		if p := strings.TrimSpace(ind.Path); strings.HasPrefix(p, "/") {
+	if ind != nil {
+		if p := strings.TrimSpace(ind.Path); strings.HasPrefix(p, "/") && len(p) > 1 {
 			path = p
 		}
 		if mm := strings.ToUpper(strings.TrimSpace(ind.Method)); mm == "GET" || mm == "POST" {
@@ -98,24 +101,62 @@ func (m *Manager) GenerateNucleiTemplate(ctx context.Context, v db.EnrichedVulnI
 		}
 	}
 
+	corpus := intelCorpus(v, analysis)
+	var words, regexes []string
+	if ind != nil {
+		for _, w := range ind.Words {
+			if usableMatcherWord(corpus, w) {
+				words = appendUnique(words, strings.TrimSpace(w))
+			}
+		}
+		for _, p := range ind.Regex {
+			if usableMatcherRegex(corpus, p) {
+				regexes = appendUnique(regexes, strings.TrimSpace(p))
+			}
+		}
+	}
+	// 兜底:情报自带的组件名/受影响包(模型没给或给的都不可用时)。
+	for _, w := range intelMarkers(v) {
+		if len(words)+len(regexes) >= 4 {
+			break
+		}
+		if usableMatcherWord(corpus, w) {
+			words = appendUnique(words, w)
+		}
+	}
+	if len(words) == 0 && len(regexes) == 0 {
+		reason := "情报里没有能在目标响应中核验的特征（具体路径/版本号/页面标记）"
+		if indErr != nil {
+			reason = fmt.Sprintf("模型未给出可核验的响应特征（%v）", indErr)
+		}
+		return "", "", fmt.Errorf("无法生成可用模板：%s。只有 CVE 编号的 matcher 永远匹配不到目标", reason)
+	}
+	if len(words) > 6 {
+		words = words[:6]
+	}
+
+	matchers := []tplMatcher{}
+	if len(words) > 0 {
+		matchers = append(matchers, tplMatcher{Type: "word", Part: "body", Words: words})
+	}
+	if len(regexes) > 0 {
+		matchers = append(matchers, tplMatcher{Type: "regex", Part: "body", Regex: regexes})
+	}
+
 	doc := tplDoc{
 		ID: templateID(v.ID, cve),
 		Info: tplInfo{
-			Name:     templateName(v),
-			Author:   templateAuthor,
-			Severity: nucleiSeverity(v.Severity),
-			Tags:     templateTags(cve),
+			Name:        templateName(v),
+			Author:      templateAuthor,
+			Severity:    nucleiSeverity(v.Severity),
+			Tags:        templateTags(cve),
 			Description: templateDescription(v, analysis),
 		},
 		HTTP: []tplHTTP{{
 			Method:            method,
 			Path:              []string{path},
 			MatchersCondition: "or",
-			Matchers: []tplMatcher{{
-				Type:  "word",
-				Part:  "body",
-				Words: words,
-			}},
+			Matchers:          matchers,
 		}},
 	}
 	if cve != "" {
@@ -130,16 +171,78 @@ func (m *Manager) GenerateNucleiTemplate(ctx context.Context, v db.EnrichedVulnI
 	if _, err := nuclei.ParseTemplateYAML(out); err != nil {
 		return "", "", fmt.Errorf("生成的模板未通过校验: %w", err)
 	}
+	if err := CheckNucleiTemplate(string(out)); err != nil {
+		return "", "", err
+	}
 	return doc.ID, string(out), nil
 }
 
-// SaveIntelTemplate 生成并落盘一条情报的模板(手动触发路径)。落盘成功才记录
-// 模板 id;落盘失败时仍保留 YAML 产物,便于人工排查。
-func (m *Manager) SaveIntelTemplate(ctx context.Context, v db.EnrichedVulnIntel) (string, error) {
+// CheckNucleiTemplate 判断一份模板是否有「能在响应里出现」的 matcher。历史草稿
+// 里有一批只拿 CVE 编号当 body word 的模板(语法合法但永远匹配不到),确认入库
+// 前用这个把它们拦下来重新生成。
+func CheckNucleiTemplate(yamlText string) error {
+	var doc tplDoc
+	if err := yaml.Unmarshal([]byte(yamlText), &doc); err != nil {
+		return fmt.Errorf("模板解析失败: %w", err)
+	}
+	for _, req := range doc.HTTP {
+		for _, mt := range req.Matchers {
+			switch mt.Type {
+			case "word":
+				for _, w := range mt.Words {
+					if usableMatcherWordNoGrounding(w) {
+						return nil
+					}
+				}
+			case "regex":
+				for _, p := range mt.Regex {
+					if usableMatcherRegexNoGrounding(p) {
+						return nil
+					}
+				}
+			}
+		}
+	}
+	return fmt.Errorf("模板没有能在目标响应中核验的 matcher（只有 CVE 编号或泛词），请重新生成")
+}
+
+// GenerateTemplateDraft 为一条情报生成 nuclei 模板**草稿**并落库,但不写进
+// 项目模板库。matcher 由模型补全,是否入库由人决定 —— 自动入库会直接污染
+// 扫描结果。返回模板 id 与 YAML 文本。
+func (m *Manager) GenerateTemplateDraft(ctx context.Context, v db.EnrichedVulnIntel) (string, string, error) {
 	id, yamlText, err := m.GenerateNucleiTemplate(ctx, v)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
+	if err := m.pg.SaveIntelAnalysisStage(db.VulnIntelAnalysisStage{
+		VulnIntelID: v.ID, NucleiTemplate: yamlText, Templated: true,
+	}); err != nil {
+		return "", "", err
+	}
+	return id, yamlText, nil
+}
+
+// ConfirmTemplate 把一条情报的模板草稿写入项目模板库(人工确认这一步),
+// 并记下模板 id。草稿不存在时先生成一份再入库。
+func (m *Manager) ConfirmTemplate(ctx context.Context, v db.EnrichedVulnIntel) (string, error) {
+	yamlText, id := "", ""
+	if a, err := m.pg.GetIntelAnalysis(v.ID); err == nil && a != nil {
+		yamlText = a.NucleiTemplate
+	}
+	if yamlText != "" {
+		// 草稿里的 id 是生成时定下的,解析出来复用,保证入库的 id 与草稿一致。
+		if meta, err := nuclei.ParseTemplateYAML([]byte(yamlText)); err == nil {
+			id = meta.ID
+		}
+	}
+	if id == "" {
+		genID, genYAML, err := m.GenerateNucleiTemplate(ctx, v)
+		if err != nil {
+			return "", err
+		}
+		id, yamlText = genID, genYAML
+	}
+
 	sink := m.templateSink()
 	if sink == nil {
 		return "", fmt.Errorf("模板库未就绪，无法保存")
@@ -148,11 +251,24 @@ func (m *Manager) SaveIntelTemplate(ctx context.Context, v db.EnrichedVulnIntel)
 		return "", fmt.Errorf("写入模板库失败: %w", err)
 	}
 	if err := m.pg.SaveIntelAnalysisStage(db.VulnIntelAnalysisStage{
-		VulnIntelID: v.ID, NucleiTemplate: yamlText, Templated: true,
+		VulnIntelID: v.ID, NucleiTemplate: yamlText, NucleiTplID: id, Templated: true,
 	}); err != nil {
 		return "", err
 	}
 	return id, nil
+}
+
+// DiscardTemplate 丢弃一条未入库的模板草稿。已入库的模板不在这里撤销——
+// 撤下模板要走模板库的删除接口,否则索引热加载与扫描链路会不同步。
+func (m *Manager) DiscardTemplate(id int64) error {
+	v, err := m.pg.GetVulnIntel(id)
+	if err != nil {
+		return err
+	}
+	if v.NucleiTplID != "" {
+		return fmt.Errorf("模板 %s 已入库，请到 nuclei 模板页删除", v.NucleiTplID)
+	}
+	return m.pg.ClearIntelNucleiDraft(id)
 }
 
 // suggestIndicators 让模型给出最小可用的 http 探测指标。返回 nil 表示无建议。
@@ -257,14 +373,9 @@ func templateDescription(v db.EnrichedVulnIntel, a *db.IntelAnalysis) string {
 	return b.String()
 }
 
-// matchWords 汇总可用于 body 匹配的具体特征:CVE 编号、受影响包名、非通用的
-// 标签。泛化标签(rce/xss/ssrf 等)会匹配到无关响应,直接排除。
-func matchWords(v db.EnrichedVulnIntel, cve string) []string {
-	generic := map[string]bool{
-		"rce": true, "xss": true, "ssrf": true, "sqli": true, "csrf": true,
-		"lfi": true, "rfi": true, "xxe": true, "dos": true, "poc": true,
-		"cve": true, "vuln": true, "exploit": true, "unauth": true, "bypass": true,
-	}
+// intelMarkers 从情报自带字段里取可用的组件名:受影响包末段与非泛化标签。
+// 故意**不包含 CVE 编号** —— 编号不是响应特征,拿它当 matcher 永远命中不了。
+func intelMarkers(v db.EnrichedVulnIntel) []string {
 	seen := map[string]bool{}
 	out := []string{}
 	add := func(s string) {
@@ -272,14 +383,11 @@ func matchWords(v db.EnrichedVulnIntel, cve string) []string {
 		if s == "" || len([]rune(s)) < 3 || seen[strings.ToLower(s)] {
 			return
 		}
-		if generic[strings.ToLower(s)] {
-			return
+		if genericMatcherWord[strings.ToLower(s)] {
+			return // 泛化标签(rce/poc/xss)当 matcher 只会误报
 		}
 		seen[strings.ToLower(s)] = true
 		out = append(out, s)
-	}
-	if cve != "" {
-		add(cve)
 	}
 	// 受影响包名(GHSA 形如 ecosystem/name)取末段作为组件名。
 	for _, pkg := range parseList(v.Affected) {
@@ -293,6 +401,153 @@ func matchWords(v db.EnrichedVulnIntel, cve string) []string {
 		out = out[:6]
 	}
 	return out
+}
+
+// genericMatcherWord 是在任何响应里都可能出现的词:泛化漏洞类型、状态词、
+// 情报站自己的标记(如「有Poc」)。这些当 matcher 只会制造误报。
+var genericMatcherWord = map[string]bool{
+	"rce": true, "xss": true, "ssrf": true, "sqli": true, "csrf": true,
+	"lfi": true, "rfi": true, "xxe": true, "dos": true, "poc": true,
+	"cve": true, "vuln": true, "exploit": true, "unauth": true, "bypass": true,
+	"html": true, "error": true, "success": true, "true": true, "false": true,
+	"index": true, "admin": true, "login": true, "welcome": true, "ok": true,
+	"有poc": true, "有修复方案": true, "修复方案": true, "漏洞": true, "情报": true,
+}
+
+var reCVEWord = regexp.MustCompile(`(?i)CVE-\d{4}-\d{4,}`)
+
+// intelCorpus 汇总可用于「接地校验」的情报正文:模型建议的特征必须能在这里
+// 找到至少一个词元,才算情报里真实出现过,而不是模型编的。
+func intelCorpus(v db.EnrichedVulnIntel, a *db.IntelAnalysis) string {
+	parts := []string{v.Title, v.Description, v.Solutions, v.CVE, v.Tags, v.Affected}
+	if a != nil {
+		parts = append(parts, a.DescriptionZh, a.Principle, a.AttackScope)
+	}
+	return strings.ToLower(strings.Join(parts, "\n"))
+}
+
+// usableMatcherWord 判断一个词能不能当 body matcher:长度够、不是泛词、不是
+// CVE 编号、且至少一个词元在情报正文里出现过。
+func usableMatcherWord(corpus, s string) bool {
+	s = strings.TrimSpace(s)
+	if !usableMatcherWordNoGrounding(s) {
+		return false
+	}
+	return grounded(corpus, s)
+}
+
+func usableMatcherWordNoGrounding(s string) bool {
+	s = strings.TrimSpace(s)
+	if len([]rune(s)) < 4 {
+		return false
+	}
+	if reCVEWord.MatchString(s) || genericMatcherWord[strings.ToLower(s)] {
+		return false
+	}
+	if isDigits(s) {
+		return false
+	}
+	return true
+}
+
+// usableMatcherRegex 判断正则能不能当 matcher:能编译、不匹配空串(太宽)、
+// 且含有一段在情报正文里出现过的字面量。
+func usableMatcherRegex(corpus, p string) bool {
+	p = strings.TrimSpace(p)
+	if !usableMatcherRegexNoGrounding(p) {
+		return false
+	}
+	return patternGrounded(corpus, p)
+}
+
+func usableMatcherRegexNoGrounding(p string) bool {
+	p = strings.TrimSpace(p)
+	if len(p) < 6 {
+		return false
+	}
+	re, err := regexp.Compile("(?i)" + p)
+	if err != nil || re.MatchString("") {
+		return false
+	}
+	return true
+}
+
+// grounded 判断 s 中至少一个 ≥3 字符的词元出现在 corpus 里。
+func grounded(corpus, s string) bool {
+	for _, tok := range textTokens(s) {
+		if strings.Contains(corpus, tok) {
+			return true
+		}
+	}
+	return false
+}
+
+// patternGrounded 对正则做同样的接地校验:取正则里的字面量片段(≥4 字符的
+// 字母数字串),至少一个要出现在情报正文里。
+func patternGrounded(corpus, pattern string) bool {
+	var cur []rune
+	flush := func() bool {
+		if len(cur) < 4 {
+			cur = cur[:0]
+			return false
+		}
+		tok := strings.ToLower(string(cur))
+		cur = cur[:0]
+		return strings.Contains(corpus, tok)
+	}
+	for _, r := range pattern {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			cur = append(cur, r)
+			continue
+		}
+		if flush() {
+			return true
+		}
+	}
+	return flush()
+}
+
+// textTokens 按非字母数字切分,返回小写词元。
+func textTokens(s string) []string {
+	var out []string
+	var cur []rune
+	flush := func() {
+		if len(cur) >= 3 {
+			out = append(out, strings.ToLower(string(cur)))
+		}
+		cur = cur[:0]
+	}
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			cur = append(cur, r)
+			continue
+		}
+		flush()
+	}
+	flush()
+	return out
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func appendUnique(list []string, s string) []string {
+	s = strings.TrimSpace(s)
+	for _, e := range list {
+		if strings.EqualFold(e, s) {
+			return list
+		}
+	}
+	return append(list, s)
 }
 
 func templateTags(cve string) []string {

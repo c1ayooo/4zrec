@@ -1666,6 +1666,51 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   }
 
   // ── assets ──
+  if (path === "/assets/sync/projects" && m === "POST") {
+    return {
+      projects: [
+        {
+          id: 1,
+          code: "demo",
+          name: "演示项目",
+          asset_count: 26,
+          lost_count: 1,
+          record_count: 88,
+          collection_paused: false,
+        },
+        {
+          id: 2,
+          code: "edge",
+          name: "边缘资产",
+          asset_count: 9,
+          lost_count: 0,
+          record_count: 21,
+          collection_paused: false,
+        },
+      ],
+    };
+  }
+  if (path === "/assets/sync" && m === "POST") {
+    const dryRun = b.dry_run === true;
+    const requested = Number(b.limit ?? 500) || 500;
+    const count = Math.min(26, requested);
+    const target = Number(b.target_project_id ?? 0) || 0;
+    return {
+      total: 26,
+      fetched: count,
+      would_import: count,
+      imported: dryRun ? 0 : count,
+      assigned: dryRun || target <= 0 ? 0 : count,
+      skipped: 0,
+      errors: [],
+      sample: [
+        { host: "www.northstar.com", url: "https://www.northstar.com", status_code: 200, title: "Northstar" },
+        { host: "api.northstar.com", url: "https://api.northstar.com", status_code: 200, title: "Northstar API" },
+        { host: "shop.northstar.com", url: "https://shop.northstar.com", status_code: 403, title: "Shop" },
+      ],
+      dry_run: dryRun,
+    };
+  }
   if (path === "/assets/counts") return mockAssetCounts(q.get("task_id"));
   if (path === "/assets" && m === "GET") {
     const type = q.get("type") ?? "";

@@ -80,8 +80,11 @@ func (m *Manager) localizeItem(ctx context.Context, v db.EnrichedVulnIntel) erro
 	})
 }
 
-// needsLocalization 判断文本是否以非中文为主(需要翻译)。以「汉字占全部字母
-// 的比例 < 30%」为界,避免把中英混排的技术描述误判为需要翻译。
+// needsLocalization 判断文本是否以非中文为主(需要翻译)。
+//
+// 判据:字母数达到一定量、且汉字「按信息密度折算」(1 个汉字≈3 个拉丁字母)后
+// 仍不及拉丁字母量。这样中英混排的技术描述(如「某系统反序列化漏洞 in Java」)
+// 不会被误判为需要翻译 —— 它已经有中文了,再翻一遍是白花 token。
 func needsLocalization(s string) bool {
 	cjk, latin := 0, 0
 	for _, r := range s {
@@ -92,9 +95,8 @@ func needsLocalization(s string) bool {
 			latin++
 		}
 	}
-	total := cjk + latin
-	if total < 8 {
+	if latin < 8 {
 		return false // 太短(多为纯编号/代号),不做判断
 	}
-	return float64(cjk)/float64(total) < 0.3
+	return cjk*3 < latin
 }

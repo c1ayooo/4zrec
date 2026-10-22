@@ -144,6 +144,7 @@ func sessionOpenInputFor(c *db.Connection) (json.RawMessage, error) {
 		Method    string            `json:"method"`
 		Proxy     string            `json:"proxy"`
 		ShellType string            `json:"shell_type"`
+		Protocol  string            `json:"protocol"`
 		Database  string            `json:"database"`
 		SSLMode   string            `json:"sslmode"`
 		Extra     map[string]string `json:"-"`
@@ -171,6 +172,9 @@ func sessionOpenInputFor(c *db.Connection) (json.RawMessage, error) {
 		}
 		if extra.ShellType != "" {
 			opts["shell_type"] = extra.ShellType
+		}
+		if extra.Protocol != "" {
+			opts["protocol"] = extra.Protocol
 		}
 		if extra.Proxy != "" {
 			opts["proxy"] = extra.Proxy

@@ -1,12 +1,14 @@
 // connections.go 连接台账 CRUD:SSH/数据库/协议凭据统一存储(明文,不做 vault——
-// 用户口径)。必须绑定项目;同项目同 kind 同 host:port 同用户唯一(重录合并
-// secret/extra/note)。source=discovered 为 worker 任务中自动落库。
+// 用户口径)。必须绑定项目;普通凭据同项目同 kind 同 host:port 同用户唯一,
+// WebShell 以落点 URL(extra.url)为身份(同机同端口可并存多个 shell)。
+// 重录合并 secret/extra/note。source=discovered 为 worker 任务中自动落库。
 package db
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -33,25 +35,115 @@ type Connection struct {
 const connectionCols = `c.id, c.project_id, COALESCE(p.name,''), c.kind, c.host, c.port, c.username,
 	c.secret, c.extra, c.source, c.status, c.last_checked_at, c.note, c.created_at, c.updated_at`
 
-// UpsertConnection 幂等入库:同键重录合并(secret 非空才覆盖、extra/note 非空才覆盖、
-// source 升级为 discovered 时不降级为 manual)。返回行 id 与是否新建。
-func (d *DB) UpsertConnection(ctx context.Context, c *Connection) (int64, bool, error) {
-	if c.Extra == nil {
-		c.Extra = json.RawMessage("{}")
-	}
-	var id int64
-	var created bool
-	err := d.QueryRowContext(ctx, `
+// 普通凭据的 upsert:身份是 (kind, host, port, username)。
+const upsertConnectionSQL = `
 INSERT INTO connections(project_id, kind, host, port, username, secret, extra, source, status, note)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-ON CONFLICT (project_id, kind, host, port, username) DO UPDATE SET
+ON CONFLICT (project_id, kind, host, port, username) WHERE kind <> 'webshell' DO UPDATE SET
   secret  = CASE WHEN EXCLUDED.secret <> '' THEN EXCLUDED.secret ELSE connections.secret END,
   extra   = CASE WHEN EXCLUDED.extra <> '{}'::jsonb THEN EXCLUDED.extra ELSE connections.extra END,
   note    = CASE WHEN EXCLUDED.note <> '' THEN EXCLUDED.note ELSE connections.note END,
   source  = CASE WHEN connections.source = 'manual' AND EXCLUDED.source = 'discovered' THEN 'manual' ELSE EXCLUDED.source END,
   status  = CASE WHEN EXCLUDED.status <> 'unknown' THEN EXCLUDED.status ELSE connections.status END,
   updated_at = now()
-RETURNING id, (xmax = 0) AS inserted`,
+RETURNING id, (xmax = 0) AS inserted`
+
+// WebShell 的 upsert:身份是落点 URL。host/port 只是展示字段,重录时跟随
+// EXCLUDED 修正(例如最初按域名登记、后来补了端口)。
+const upsertWebshellConnectionSQL = `
+INSERT INTO connections(project_id, kind, host, port, username, secret, extra, source, status, note)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+ON CONFLICT (project_id, kind, (extra->>'url')) WHERE kind = 'webshell' DO UPDATE SET
+  host     = EXCLUDED.host,
+  port     = EXCLUDED.port,
+  username = CASE WHEN EXCLUDED.username <> '' THEN EXCLUDED.username ELSE connections.username END,
+  secret   = CASE WHEN EXCLUDED.secret <> '' THEN EXCLUDED.secret ELSE connections.secret END,
+  extra    = CASE WHEN EXCLUDED.extra <> '{}'::jsonb THEN EXCLUDED.extra ELSE connections.extra END,
+  note     = CASE WHEN EXCLUDED.note <> '' THEN EXCLUDED.note ELSE connections.note END,
+  source   = CASE WHEN connections.source = 'manual' AND EXCLUDED.source = 'discovered' THEN 'manual' ELSE EXCLUDED.source END,
+  status   = CASE WHEN EXCLUDED.status <> 'unknown' THEN EXCLUDED.status ELSE connections.status END,
+  updated_at = now()
+RETURNING id, (xmax = 0) AS inserted`
+
+// NormalizeWebshellURL 把落点 URL 规范成台账键:去空白、补 scheme、scheme/host
+// 小写、去 fragment。保留 query——有些 shell 靠 query 参数路由。
+func NormalizeWebshellURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "http://" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return raw
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	u.Host = strings.ToLower(u.Host)
+	u.Fragment = ""
+	return u.String()
+}
+
+// WebshellURLOf 取一行 webshell 连接的落点 URL(空=没有 URL,不是 URL 型行)。
+func WebshellURLOf(c *Connection) string {
+	if c == nil || !strings.EqualFold(strings.TrimSpace(c.Kind), "webshell") {
+		return ""
+	}
+	var extra struct {
+		URL string `json:"url"`
+	}
+	if len(c.Extra) > 0 {
+		_ = json.Unmarshal(c.Extra, &extra)
+	}
+	return NormalizeWebshellURL(extra.URL)
+}
+
+// withWebshellURL 在 extra 里写入规范化后的 url,其余键原样保留。
+func withWebshellURL(extra json.RawMessage, rawURL string) json.RawMessage {
+	obj := map[string]any{}
+	if len(extra) > 0 {
+		_ = json.Unmarshal(extra, &obj)
+	}
+	obj["url"] = NormalizeWebshellURL(rawURL)
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return extra
+	}
+	return out
+}
+
+// UpsertConnection 幂等入库:同键重录合并(secret 非空才覆盖、extra/note 非空才覆盖、
+// source 升级为 discovered 时不降级为 manual)。返回行 id 与是否新建。
+func (d *DB) UpsertConnection(ctx context.Context, c *Connection) (int64, bool, error) {
+	c.Kind = strings.ToLower(strings.TrimSpace(c.Kind))
+	if c.Extra == nil {
+		c.Extra = json.RawMessage("{}")
+	}
+	if c.Source == "" {
+		c.Source = "manual"
+	}
+	if c.Status == "" {
+		c.Status = "unknown"
+	}
+	// 端口缺省:台账其它地方(handler/自动落库)只在"没填"时补,补在这里
+	// 保证任何调用方都不会写出 port=0 的假连接。webshell 的 host/port 是
+	// 从 extra.url 推出来的展示字段,不参与连接,不动它。
+	if c.Kind != "webshell" && c.Port <= 0 {
+		if def := DefaultConnectionPort(c.Kind); def > 0 {
+			c.Port = def
+		}
+	}
+	stmt := upsertConnectionSQL
+	if c.Kind == "webshell" {
+		if u := WebshellURLOf(c); u != "" {
+			c.Extra = withWebshellURL(c.Extra, u)
+			stmt = upsertWebshellConnectionSQL
+		}
+	}
+	var id int64
+	var created bool
+	err := d.QueryRowContext(ctx, stmt,
 		c.ProjectID, c.Kind, c.Host, c.Port, c.Username, c.Secret, c.Extra, c.Source, c.Status, c.Note).
 		Scan(&id, &created)
 	return id, created, err
