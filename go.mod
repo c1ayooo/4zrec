@@ -150,3 +150,6 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+// 围栏目标提取已上收 capkit（guard 包，本地未发版，replace 到工作区）。
+replace github.com/c1ayooo/capkit => /home/c1ay/capkit

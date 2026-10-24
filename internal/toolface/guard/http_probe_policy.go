@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 
+	capguard "github.com/c1ayooo/capkit/guard"
+
 	"github.com/c1ayooo/4zrec/internal/toolface/intercept"
 )
 
@@ -43,11 +45,11 @@ func simpleHTTPFetch(cmd string) bool {
 			return false
 		}
 	}
-	args := tokenize(cmd)
+	args := capguard.Tokenize(cmd)
 	if len(args) == 0 {
 		return false
 	}
-	c, rest, inner, opaque, _ := peelCommand(args)
+	c, rest, inner, opaque, _ := capguard.PeelCommand(args)
 	if opaque || inner != "" {
 		return false
 	}
