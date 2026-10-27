@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/c1ayooo/capkit/contracts/target.json",
+  "title": "Target",
+  "type": "object",
+  "required": ["kind"],
+  "properties": {
+    "project_id": { "type": "integer" },
+    "kind": { "enum": ["url", "host", "domain", "ip", "cidr"] },
+    "url": { "type": "string" },
+    "host": { "type": "string" },
+    "port": { "type": "integer" },
+    "ip": { "type": "string" },
+    "cidr": { "type": "string" }
+  },
+  "additionalProperties": false
+}

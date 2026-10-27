@@ -487,7 +487,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
             <Button size="sm" variant="outline" disabled={goalBusy || !goalText.trim()} onClick={() => void addGoal()}>
               <PlusIcon className="size-3.5" /> 添加
             </Button>
-            {goalErr && <span className="text-xs text-red-500">{goalErr}</span>}
+            {goalErr && <span className="text-xs text-destructive">{goalErr}</span>}
           </div>
           {/* 目标列表 */}
           {goals.length > 0 ? (
@@ -524,7 +524,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                       disabled={goalBusy || !editText.trim()}
                       onClick={() => void saveEditGoal(g)}
                     >
-                      <CheckIcon className="size-3.5 text-emerald-500" />
+                      <CheckIcon className="size-3.5 text-success" />
                     </Button>
                     <Button
                       size="sm"
@@ -561,7 +561,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                       disabled={goalBusy}
                       onClick={() => void removeGoal(g)}
                     >
-                      <Trash2Icon className="size-3.5 text-red-500" />
+                      <Trash2Icon className="size-3.5 text-destructive" />
                     </Button>
                   </div>
                 ),
@@ -578,7 +578,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <ShieldAlertIcon className="size-4 text-amber-500" /> 操作约束
+            <ShieldAlertIcon className="size-4 text-warning" /> 操作约束
             <span className="text-muted-foreground text-xs font-normal">
               （框定 planner/worker 的探索边界，共 {constraints.length} 条；改动下一轮规划生效）
             </span>
@@ -613,7 +613,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
             >
               <PlusIcon className="size-3.5" /> 添加
             </Button>
-            {conErr && <span className="text-xs text-red-500">{conErr}</span>}
+            {conErr && <span className="text-xs text-destructive">{conErr}</span>}
           </div>
           {/* 约束列表 */}
           {constraints.length > 0 ? (
@@ -647,7 +647,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                       disabled={conBusy || !editConText.trim()}
                       onClick={() => void saveEditConstraint(c)}
                     >
-                      <CheckIcon className="size-3.5 text-emerald-500" />
+                      <CheckIcon className="size-3.5 text-success" />
                     </Button>
                     <Button
                       size="sm"
@@ -663,9 +663,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                   <div key={c.id} className="flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm">
                     <span
                       className={`shrink-0 rounded px-1.5 py-0.5 text-xs ${
-                        c.kind === "allow"
-                          ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                          : "bg-red-500/15 text-red-600 dark:text-red-400"
+                        c.kind === "allow" ? "bg-success/15 text-success" : "bg-destructive/15 text-destructive"
                       }`}
                     >
                       {c.kind === "allow" ? "允许" : "禁止"}
@@ -687,7 +685,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                       disabled={conBusy}
                       onClick={() => void removeConstraint(c)}
                     >
-                      <Trash2Icon className="size-3.5 text-red-500" />
+                      <Trash2Icon className="size-3.5 text-destructive" />
                     </Button>
                   </div>
                 ),
@@ -705,7 +703,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <TargetIcon className="size-4 text-emerald-500" /> 资产测试覆盖度
+              <TargetIcon className="size-4 text-success" /> 资产测试覆盖度
               <span className="text-muted-foreground text-xs font-normal">（粗估，仅供参考）</span>
             </CardTitle>
           </CardHeader>
@@ -738,7 +736,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <CoinsIcon className="size-4 text-amber-500" /> LLM Token 用量
+            <CoinsIcon className="size-4 text-warning" /> LLM Token 用量
             <span className="text-muted-foreground text-xs font-normal">
               （按模型统计{tokenTotals.calls > 0 ? `，共 ${tokenTotals.calls} 次调用` : ""}）
             </span>
@@ -763,7 +761,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                 </span>
                 <span className="tabular-nums">
                   <span className="text-muted-foreground">缓存命中率 </span>
-                  <span className="font-semibold text-emerald-500">
+                  <span className="font-semibold text-success">
                     {cacheHitRate(tokenTotals.cacheRead, tokenTotals.input)}
                   </span>
                 </span>
@@ -791,7 +789,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                         <td className="py-1.5 pr-3 text-right tabular-nums">{fmtTokens(m.input_tokens)}</td>
                         <td className="py-1.5 pr-3 text-right tabular-nums">{fmtTokens(m.output_tokens)}</td>
                         <td className="py-1.5 pr-3 text-right tabular-nums">{fmtTokens(m.cache_read_tokens)}</td>
-                        <td className="py-1.5 text-right tabular-nums text-emerald-500">
+                        <td className="py-1.5 text-right tabular-nums text-success">
                           {cacheHitRate(m.cache_read_tokens, m.input_tokens)}
                         </td>
                       </tr>
@@ -809,7 +807,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <ShieldCheckIcon className="size-4 text-emerald-500" /> 测试范围
+            <ShieldCheckIcon className="size-4 text-success" /> 测试范围
             <span className="text-muted-foreground text-xs font-normal">
               （覆盖度分母 + 授权边界，共 {scope.length} 条）
             </span>
@@ -859,7 +857,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
             >
               <PlusIcon className="size-3.5" /> 添加
             </Button>
-            {scopeErr && <span className="text-xs text-red-500">{scopeErr}</span>}
+            {scopeErr && <span className="text-xs text-destructive">{scopeErr}</span>}
           </div>
           {/* 范围列表 */}
           {scope.length > 0 ? (
@@ -878,7 +876,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                       className="h-6 shrink-0 px-1.5"
                       onClick={() => void removeScope(row)}
                     >
-                      <Trash2Icon className="size-3.5 text-red-500" />
+                      <Trash2Icon className="size-3.5 text-destructive" />
                     </Button>
                   ) : (
                     <span className="text-muted-foreground shrink-0 text-xs">继承</span>
@@ -895,7 +893,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <ActivityIcon className="size-4 text-blue-500" /> 心跳
+            <ActivityIcon className="size-4 text-info" /> 心跳
           </CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -959,16 +957,16 @@ export function OverviewTab({ taskId }: { taskId: string }) {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-sm">
-              <AlertTriangleIcon className="size-4 text-amber-500" /> 需要关注
+              <AlertTriangleIcon className="size-4 text-warning" /> 需要关注
             </CardTitle>
           </CardHeader>
           <CardContent className="grid grid-cols-2 gap-3 text-sm">
             <div>
-              <div className="text-2xl font-semibold tabular-nums text-red-600">{taskFindings.length}</div>
+              <div className="text-2xl font-semibold tabular-nums text-destructive">{taskFindings.length}</div>
               <div className="text-xs text-muted-foreground">确认漏洞</div>
             </div>
             <div>
-              <div className="text-2xl font-semibold tabular-nums text-blue-600">{running.length}</div>
+              <div className="text-2xl font-semibold tabular-nums text-info">{running.length}</div>
               <div className="text-xs text-muted-foreground">执行中</div>
             </div>
             <div>
@@ -976,7 +974,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
               <div className="text-xs text-muted-foreground">frontier 待领</div>
             </div>
             <div>
-              <div className="text-2xl font-semibold tabular-nums text-red-600">{blocked.length}</div>
+              <div className="text-2xl font-semibold tabular-nums text-destructive">{blocked.length}</div>
               <div className="text-xs text-muted-foreground">被拦意图</div>
             </div>
           </CardContent>
@@ -985,7 +983,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-sm">
-              <BugIcon className="size-4 text-red-500" /> 最近发现
+              <BugIcon className="size-4 text-destructive" /> 最近发现
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
@@ -1003,10 +1001,10 @@ export function OverviewTab({ taskId }: { taskId: string }) {
       {/* Blocked intents — 出错/被拦(如 LLM 网络问题)的意图，可一键重跑：置回 open，
           worker 会重新认领、从头再跑（已写回图谱的数据保留）；任务若已终态/暂停会自动复活。 */}
       {blocked.length > 0 && (
-        <Card className="border-red-500/30">
+        <Card className="border-destructive/30">
           <CardHeader className="flex-row items-center justify-between gap-2 space-y-0">
             <CardTitle className="flex items-center gap-2 text-sm">
-              <AlertTriangleIcon className="size-4 text-red-500" /> 被拦/出错意图
+              <AlertTriangleIcon className="size-4 text-destructive" /> 被拦/出错意图
               <span className="text-xs font-normal text-muted-foreground">（共 {blocked.length} 条，可重跑）</span>
             </CardTitle>
             <Button size="sm" variant="outline" disabled={rerunning.has("__all__")} onClick={() => void rerunAll()}>
@@ -1168,7 +1166,7 @@ function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
-          <ShieldCheckIcon className="size-4 text-sky-500" /> 任务级资产拦截 / 允许
+          <ShieldCheckIcon className="size-4 text-info" /> 任务级资产拦截 / 允许
           <span className="text-muted-foreground text-xs font-normal">
             （仅本任务生效，不进全局；先拦截后允许，共 {rules.length} 条）
           </span>
@@ -1208,7 +1206,7 @@ function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
           <Button size="sm" variant="outline" disabled={busy || !newPattern.trim()} onClick={() => void add()}>
             <PlusIcon className="size-3.5" /> 添加
           </Button>
-          {err && <span className="text-xs text-red-500">{err}</span>}
+          {err && <span className="text-xs text-destructive">{err}</span>}
         </div>
         {/* 规则列表 */}
         {rules.length > 0 ? (
@@ -1260,7 +1258,7 @@ function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
                     disabled={busy || !editPattern.trim()}
                     onClick={() => void saveEdit(r)}
                   >
-                    <CheckIcon className="size-3.5 text-emerald-500" />
+                    <CheckIcon className="size-3.5 text-success" />
                   </Button>
                   <Button
                     size="sm"
@@ -1276,9 +1274,7 @@ function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
                 <div key={r.id} className="flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm">
                   <span
                     className={`shrink-0 rounded px-1.5 py-0.5 text-xs ${
-                      r.action === "allow"
-                        ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                        : "bg-red-500/15 text-red-600 dark:text-red-400"
+                      r.action === "allow" ? "bg-success/15 text-success" : "bg-destructive/15 text-destructive"
                     }`}
                   >
                     {r.action === "allow" ? "允许" : "拦截"}
@@ -1305,7 +1301,7 @@ function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
                     disabled={busy}
                     onClick={() => void remove(r)}
                   >
-                    <Trash2Icon className="size-3.5 text-red-500" />
+                    <Trash2Icon className="size-3.5 text-destructive" />
                   </Button>
                 </div>
               ),

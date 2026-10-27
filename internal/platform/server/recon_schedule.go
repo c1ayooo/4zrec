@@ -8,6 +8,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -69,6 +70,8 @@ func (s *Server) executeReconSchedule(id int64) {
 		result, newAssets, authFail = s.executeEngineSchedule(sched)
 	case "pipeline":
 		result, newAssets, authFail = s.executePipelineSchedule(sched)
+	case "zreark":
+		result, newAssets, authFail = s.executeZrearkSchedule(sched)
 	default:
 		result = "未知任务形态: " + sched.Kind
 	}
@@ -85,6 +88,40 @@ func (s *Server) executeReconSchedule(id int64) {
 			ActionURL: "/function/assets",
 		})
 	}
+}
+
+// executeZrearkSchedule 定时从 4zreark 拉取站点资产入库（复用 asset_sync 核心）。
+// config: {"source_project_id":1,"target_project_id":2,"catalog":"all","limit":1000}；
+// 未配置连接或鉴权失败均视为 authFail 走指数退避熔断。
+func (s *Server) executeZrearkSchedule(sched *db.ReconSchedule) (string, int, bool) {
+	var cfg struct {
+		SourceProjectID int64  `json:"source_project_id"`
+		TargetProjectID int64  `json:"target_project_id"`
+		Catalog         string `json:"catalog"`
+		Limit           int    `json:"limit"`
+	}
+	_ = json.Unmarshal(sched.Config, &cfg)
+
+	caller, err := s.zrearkCallerFromRequest("", "")
+	if err != nil {
+		authFail := errors.Is(err, errZrearkNoConfig)
+		return "4zreark 连接未就绪: " + err.Error(), 0, authFail
+	}
+	result, err := s.runZrearkAssetSync(context.Background(), caller, zrearkSyncParams{
+		SourceProjectID: cfg.SourceProjectID,
+		TargetProjectID: cfg.TargetProjectID,
+		Catalog:         cfg.Catalog,
+		Limit:           cfg.Limit,
+	})
+	if err != nil {
+		authFail := errors.Is(err, errZrearkAuth)
+		return truncateSyncText(err.Error(), 300), 0, authFail
+	}
+	summary := fmt.Sprintf("4zreark 同步: 读取 %d / 写入 %d / 跳过 %d", result.Fetched, result.Imported, result.Skipped)
+	if len(result.Errors) > 0 {
+		summary += "; 首个错误: " + result.Errors[0]
+	}
+	return summary, result.Imported, false
 }
 
 // executeEngineSchedule 五引擎按域采集:每引擎×每域查询,新入库子域计数。
@@ -271,8 +308,8 @@ func (s *Server) reconSchedCreate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	if strings.TrimSpace(in.Name) == "" || (in.Kind != "engine" && in.Kind != "pipeline") {
-		writeErr(w, 400, "name 与 kind(engine|pipeline) 必填")
+	if strings.TrimSpace(in.Name) == "" || (in.Kind != "engine" && in.Kind != "pipeline" && in.Kind != "zreark") {
+		writeErr(w, 400, "name 与 kind(engine|pipeline|zreark) 必填")
 		return
 	}
 	if in.IntervalSec < 60 {

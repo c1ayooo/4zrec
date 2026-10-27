@@ -79,6 +79,18 @@ func httpToolPolicyBlock() string {
 		"- 不要把“写脚本更顺手/更自由”当理由；没有写明例外原因就用 curl，视为违规操作。"
 }
 
+// targetEnvPolicyBlock 是代码固定注入的尾巴(不入库、不可编辑):目标引用约定。
+// 项目授权目标由宿主注入 Bash 环境变量 ZREC_TARGETS(见 server/targets_env.go);
+// 引用变量=已授权目标,围栏直接放行;范围外目标会被资产围栏转人工审批。
+// 由 worker/planner/mainagent 的系统提示与 httpProbePriorityAgents 的 chat agent 共用。
+func targetEnvPolicyBlock() string {
+	return "\n\n**目标引用约定(ZREC_TARGETS,硬规则)**:\n" +
+		"- 项目授权范围内的目标(域名/IP/网段)已注入 Bash 环境变量 `$ZREC_TARGETS`(空格分隔)。引用它=已授权目标,资产围栏直接放行;需要清单文件时先落盘再喂给工具,例如 `tr ' ' '\\n' <<<\"$ZREC_TARGETS\" > targets.txt` 后 `nmap -iL targets.txt`。\n" +
+		"- **新发现的目标不要写死进脚本**:直接对它发起请求/扫描会被资产围栏拦下转人工审批,批准即登记为 approved(此后不再询问)。批量 HTTP 探测优先 http_probe 的 requests[]/template+matrix(目标值写进 JSON 参数,一个意图完成,逐条落证 traffic_id)。\n" +
+		"- `$ZREC_TARGETS` 为空说明当前未挂项目(围栏未启用)或授权范围为空;此时一切目标都走人工审批通道,不要自行扩大范围。"
+}
+
+
 // httpProbePriorityAgents 是拿到 httpToolPolicyBlock 的 chat agent key
 // (task 侧 worker/planner 在各自 system 里注入)。
 var httpProbePriorityAgents = map[string]bool{

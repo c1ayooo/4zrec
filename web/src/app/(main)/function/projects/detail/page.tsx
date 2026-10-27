@@ -1,20 +1,17 @@
 "use client";
 
 import * as React from "react";
+
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import {
-  ArrowLeftIcon,
-  BugIcon,
-  CheckIcon,
-  FolderIcon,
-  NetworkIcon,
-} from "lucide-react";
+
+import { ArrowLeftIcon, BugIcon, CheckIcon, FolderIcon, NetworkIcon } from "lucide-react";
 
 import { ApprovalRecords } from "@/components/approval-records";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
@@ -47,10 +44,10 @@ const TYPE_LABEL: Record<string, string> = {
 };
 
 const SEVERITY_CLASS: Record<string, string> = {
-  critical: "bg-red-100 text-red-700",
-  high: "bg-orange-100 text-orange-700",
-  medium: "bg-amber-100 text-amber-700",
-  low: "bg-blue-100 text-blue-700",
+  critical: "bg-destructive/15 text-destructive",
+  high: "bg-warning/15 text-warning",
+  medium: "bg-warning/15 text-warning",
+  low: "bg-info/15 text-info",
 };
 
 function SeverityBadge({ severity }: { severity: string }) {
@@ -67,8 +64,18 @@ function SeverityBadge({ severity }: { severity: string }) {
 
 function AuthzBadge({ authz }: { authz?: string }) {
   if (!authz || authz === "approved") return null;
-  if (authz === "pending") return <Badge variant="outline" className="text-amber-600">待审批</Badge>;
-  if (authz === "rejected") return <Badge variant="outline" className="text-red-600">已拒绝</Badge>;
+  if (authz === "pending")
+    return (
+      <Badge variant="outline" className="text-warning">
+        待审批
+      </Badge>
+    );
+  if (authz === "rejected")
+    return (
+      <Badge variant="outline" className="text-destructive">
+        已拒绝
+      </Badge>
+    );
   return null;
 }
 
@@ -94,7 +101,7 @@ function WizardStep({
     <div className="flex flex-col gap-1 rounded-lg border p-3">
       <div className="flex items-center gap-2">
         {done ? (
-          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-success/15 text-success">
             <CheckIcon className="size-3" />
           </span>
         ) : (
@@ -156,7 +163,13 @@ function ProjectDetail({ id }: { id: number }) {
   }, [id]);
 
   if (!loaded) {
-    return <p className="text-muted-foreground py-10 text-center text-sm">加载中…</p>;
+    return (
+      <div className="text-muted-foreground py-10 text-center text-sm flex flex-col gap-3">
+        <Skeleton className="h-10 w-full" />
+        <Skeleton className="h-10 w-full" />
+        <Skeleton className="h-10 w-full" />
+      </div>
+    );
   }
   if (!project) {
     return (
@@ -185,19 +198,19 @@ function ProjectDetail({ id }: { id: number }) {
             <span className="truncate">{project.name}</span>
             {project.status === "archived" && <Badge variant="secondary">已归档</Badge>}
           </h1>
-          {project.company_name && (
-            <p className="text-muted-foreground mt-1 text-sm">客户:{project.company_name}</p>
-          )}
-          {project.description && (
-            <p className="text-muted-foreground mt-1 text-sm">{project.description}</p>
-          )}
+          {project.company_name && <p className="text-muted-foreground mt-1 text-sm">客户:{project.company_name}</p>}
+          {project.description && <p className="text-muted-foreground mt-1 text-sm">{project.description}</p>}
         </div>
         <div className="text-muted-foreground flex shrink-0 gap-4 pt-6 text-sm">
           <span>任务 {tasks.length}</span>
           <span>资产 {assetsTotal}</span>
-          <span className={project.pending_count > 0 ? "font-medium text-amber-600" : ""}>
+          <Link
+            href={`/function/approvals?project_id=${project.id}`}
+            className={project.pending_count > 0 ? "font-medium text-warning hover:underline" : ""}
+            title="待审批资产在「安全与审批 → 资产审批」处理"
+          >
             待审批 {project.pending_count}
-          </span>
+          </Link>
         </div>
       </div>
 
@@ -268,7 +281,8 @@ function ProjectDetail({ id }: { id: number }) {
                 )}
               </div>
               <p className="text-muted-foreground text-xs leading-relaxed">
-                项目 = 一次渗透委托的授权根。范围内发现资产自动授权;范围外资产进待审批,批准前不可测试。任务/对话挂到项目下即启用围栏。
+                项目 =
+                一次渗透委托的授权根。范围内发现资产自动授权;范围外资产进待审批,批准前不可测试。任务/对话挂到项目下即启用围栏。
               </p>
               <p className="text-muted-foreground text-xs">创建于 {fmtTime(project.created_at)}</p>
             </CardContent>
@@ -302,10 +316,7 @@ function ProjectDetail({ id }: { id: number }) {
                         return (
                           <TableRow key={t.id}>
                             <TableCell>
-                              <Link
-                                href={`/function/tasks/detail?id=${t.id}`}
-                                className="font-medium hover:underline"
-                              >
+                              <Link href={`/function/tasks/detail?id=${t.id}`} className="font-medium hover:underline">
                                 {t.name || t.description || t.id}
                               </Link>
                             </TableCell>
@@ -316,9 +327,7 @@ function ProjectDetail({ id }: { id: number }) {
                             <TableCell className="text-muted-foreground text-sm tabular-nums">
                               {t.goals_met ?? 0}/{t.goals_total ?? 0}
                             </TableCell>
-                            <TableCell className="text-muted-foreground text-sm">
-                              {fmtTime(t.created_at)}
-                            </TableCell>
+                            <TableCell className="text-muted-foreground text-sm">{fmtTime(t.created_at)}</TableCell>
                           </TableRow>
                         );
                       })}
@@ -366,9 +375,7 @@ function ProjectDetail({ id }: { id: number }) {
                           <TableCell>
                             <AuthzBadge authz={a.authz} />
                           </TableCell>
-                          <TableCell className="text-muted-foreground text-xs">
-                            {fmtTime(a.last_seen)}
-                          </TableCell>
+                          <TableCell className="text-muted-foreground text-xs">{fmtTime(a.last_seen)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -390,9 +397,7 @@ function ProjectDetail({ id }: { id: number }) {
           <Card>
             <CardContent className="pt-2">
               {findings.length === 0 ? (
-                <p className="text-muted-foreground py-8 text-center text-sm">
-                  该项目下还没有登记漏洞。
-                </p>
+                <p className="text-muted-foreground py-8 text-center text-sm">该项目下还没有登记漏洞。</p>
               ) : (
                 <div className="rounded-md border">
                   <Table>

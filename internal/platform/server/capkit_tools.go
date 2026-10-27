@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit/adapters/exec"
-	"github.com/c1ayooo/capkit/adapters/httpx"
-	capkit "github.com/c1ayooo/capkit/core"
-	"github.com/c1ayooo/capkit/gates"
-	"github.com/c1ayooo/capkit/kits/identitykit"
-	shellsession "github.com/c1ayooo/capkit/kits/shellkit/session"
+	"github.com/c1ayooo/4zrec/internal/capkit/adapters/exec"
+	"github.com/c1ayooo/4zrec/internal/capkit/adapters/httpx"
+	capkit "github.com/c1ayooo/4zrec/internal/capkit/core"
+	"github.com/c1ayooo/4zrec/internal/capkit/gates"
+	"github.com/c1ayooo/4zrec/internal/capkit/kits/identitykit"
+	shellsession "github.com/c1ayooo/4zrec/internal/capkit/kits/shellkit/session"
 
 	"github.com/c1ayooo/4zrec/internal/capkitbridge"
 	"github.com/c1ayooo/4zrec/internal/toolface/intercept"
@@ -169,6 +169,29 @@ func (s *Server) seedCapkitTools() {
 		agents, _ := json.Marshal(bind)
 		if err := s.m.pg.SeedTool(t.Name(), t.Description(), schema, agents); err != nil {
 			log.Printf("[capkit] seed tool %s: %v", t.Name(), err)
+		}
+	}
+}
+
+// refreshCapkitToolSchemas 存量库迁移:capkit 工具 schema 随上游 kit 演进,而
+// SeedTool 首插播种的旧行不会自动跟上——exploitkit 的注入点 schema 曾以
+// $ref+definitions 形式播种,宿主的模型管线只透传 $defs,悬空引用被严格校验的
+// 供应商(DeepSeek 等)以 400 拒掉整个请求。这里把代码 schema 刷回存量行
+// (RefreshToolDefaults 保留绑定与启用状态),幂等,flag 守卫只做一次。
+// 上游 schema 再变更时换一个 flag 值。
+func (s *Server) refreshCapkitToolSchemas() {
+	const flag = "capkit_tool_schema_refresh_v1_inline_inject_point"
+	if s == nil || s.m == nil || s.m.pg == nil {
+		return
+	}
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	defer func() { _ = s.m.pg.SetSetting(flag, "true") }()
+	for _, t := range s.capkitTools() {
+		schema, _ := json.Marshal(t.InputSchema())
+		if err := s.m.pg.RefreshToolDefaults(t.Name(), t.Description(), schema); err != nil {
+			log.Printf("[capkit] refresh %s schema failed: %v", t.Name(), err)
 		}
 	}
 }

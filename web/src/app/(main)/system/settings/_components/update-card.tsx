@@ -12,10 +12,10 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Progress } from "@/components/ui/progress";
 import { api, sseUrl } from "@/lib/api";
 import type { UpdateCheck, UpdateProgress } from "@/lib/types";
@@ -239,7 +239,7 @@ export function UpdateCard() {
         </div>
 
         {info?.boot_notice && (
-          <p className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-400">
+          <p className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 p-2 text-xs text-warning">
             <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0" />
             {info.boot_notice}
           </p>
@@ -271,7 +271,7 @@ export function UpdateCard() {
 
         {info && !info.has_update && info.comparable && !info.error && (
           <p className="flex items-center gap-2 text-xs text-muted-foreground">
-            <CheckCircle2Icon className="size-3.5 text-emerald-600" />
+            <CheckCircle2Icon className="size-3.5 text-success" />
             当前已是最新版本。
           </p>
         )}

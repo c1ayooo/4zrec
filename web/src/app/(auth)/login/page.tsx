@@ -11,9 +11,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { APP_CONFIG } from "@/config/app-config";
 import { api } from "@/lib/api";
 import { auth } from "@/lib/auth";
-import { APP_CONFIG } from "@/config/app-config";
 
 export default function LoginPage() {
   const router = useRouter();

@@ -82,9 +82,9 @@ function pretty(value: unknown): string {
 }
 
 function statusTone(status: string): string {
-  if (status === "ok") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400";
-  if (status === "denied") return "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400";
-  return "border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400";
+  if (status === "ok") return "border-success/30 bg-success/10 text-success";
+  if (status === "denied") return "border-warning/30 bg-warning/10 text-warning";
+  return "border-destructive/30 bg-destructive/10 text-destructive";
 }
 
 function Stat({ label, value }: { label: string; value: React.ReactNode }) {
@@ -455,8 +455,8 @@ export function FeatureCallHistory({ feature }: { feature: FeatureCallFeature })
 
                 {shown.error ? (
                   <div className="grid gap-1">
-                    <span className="text-xs font-medium text-red-500">错误</span>
-                    <pre className="max-h-40 overflow-auto rounded-md border border-red-500/30 bg-red-500/5 p-2 font-mono text-xs whitespace-pre-wrap break-all text-red-600 dark:text-red-400">
+                    <span className="text-xs font-medium text-destructive">错误</span>
+                    <pre className="max-h-40 overflow-auto rounded-md border border-destructive/30 bg-destructive/5 p-2 font-mono text-xs whitespace-pre-wrap break-all text-destructive">
                       {shown.error}
                     </pre>
                   </div>

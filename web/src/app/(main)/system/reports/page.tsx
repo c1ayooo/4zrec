@@ -2,16 +2,23 @@
 
 import * as React from "react";
 
-import { DownloadIcon, FileTextIcon, ImageIcon, Loader2Icon, PencilIcon, PlusIcon, SparklesIcon, TrashIcon } from "lucide-react";
-import { useTranslation } from "@/lib/report-i18n";
-import type { TFunction } from "@/lib/report-i18n";
+import {
+  DownloadIcon,
+  FileTextIcon,
+  ImageIcon,
+  Loader2Icon,
+  PencilIcon,
+  PlusIcon,
+  SparklesIcon,
+  TrashIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
   Dialog,
   DialogContent,
@@ -26,8 +33,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
-import type { Finding, ReportPersonnel, ReportRecord, ReportSettings, ReportTemplate, Task } from "@/lib/types";
+import type { TFunction } from "@/lib/report-i18n";
+import { useTranslation } from "@/lib/report-i18n";
 import { taskLabel, taskMap } from "@/lib/task-label";
+import type { Finding, ReportPersonnel, ReportRecord, ReportSettings, ReportTemplate, Task } from "@/lib/types";
 
 function localeName(t: TFunction, locale: string): string {
   if (locale === "zh-TW") return t("reports.langZhTW");
@@ -104,7 +113,10 @@ export default function ReportsPage() {
   const [confirmBusy, setConfirmBusy] = React.useState(false);
 
   const loadReports = React.useCallback(() => {
-    api.reports().then(setReports).catch(() => {});
+    api
+      .reports()
+      .then(setReports)
+      .catch(() => {});
   }, []);
   // resolve the unified task label (名称优先→#id·描述) for the list, consistent
   // with findings/dashboard/assets; falls back to the stored task_desc.
@@ -130,20 +142,29 @@ export default function ReportsPage() {
     });
   }
   const loadTemplates = React.useCallback(() => {
-    api.reportTemplates().then(setTemplates).catch(() => {});
+    api
+      .reportTemplates()
+      .then(setTemplates)
+      .catch(() => {});
   }, []);
 
   React.useEffect(() => {
-    api.reportSettings().then((r) => setS({ ...r, personnel: r.personnel ?? [] })).catch(() => {});
+    api
+      .reportSettings()
+      .then((r) => setS({ ...r, personnel: r.personnel ?? [] }))
+      .catch(() => {});
     loadReports();
     loadTemplates();
   }, [loadReports, loadTemplates]);
 
   // Stop polling if the user leaves the page mid-generation (avoid a stray
   // interval + a "report done" toast popping up on some other page).
-  React.useEffect(() => () => {
-    if (pollRef.current) clearInterval(pollRef.current);
-  }, []);
+  React.useEffect(
+    () => () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    },
+    [],
+  );
 
   // ── report templates ──
   function openNewTemplate() {
@@ -203,7 +224,10 @@ export default function ReportsPage() {
     setSelTemplate("");
     setTaskFindings([]);
     setSelFindings(new Set());
-    api.tasks().then((r) => setTasks(r.tasks)).catch(() => {});
+    api
+      .tasks()
+      .then((r) => setTasks(r.tasks))
+      .catch(() => {});
     setDialogOpen(true);
   }
 
@@ -335,8 +359,7 @@ export default function ReportsPage() {
   return (
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">{t("reports.title")}</h1>
-        <p className="text-muted-foreground text-sm">{t("reports.subtitle")}</p>
+        <h1 className="text-2xl font-semibold tracking-tight">{t("reports.title")}</h1>
       </div>
 
       {/* ── report settings ── */}
@@ -509,7 +532,9 @@ export default function ReportsPage() {
             <TableBody>
               {reports.map((r) => (
                 <TableRow key={r.id}>
-                  <TableCell className="max-w-xs truncate" title={reportTaskLabel(r)}>{reportTaskLabel(r)}</TableCell>
+                  <TableCell className="max-w-xs truncate" title={reportTaskLabel(r)}>
+                    {reportTaskLabel(r)}
+                  </TableCell>
                   <TableCell className="font-mono text-xs">{r.filename}</TableCell>
                   <TableCell className="text-muted-foreground">{r.company || "—"}</TableCell>
                   <TableCell className="tabular-nums text-xs">{fmtSize(r.size)}</TableCell>
@@ -605,11 +630,19 @@ export default function ReportsPage() {
             </div>
             <div className="space-y-1.5">
               <Label>{t("reports.reportTitle")}</Label>
-              <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("reports.reportTitlePlaceholder")} />
+              <Input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder={t("reports.reportTitlePlaceholder")}
+              />
             </div>
             <div className="space-y-1.5">
               <Label>{t("reports.clientName")}</Label>
-              <Input value={client} onChange={(e) => setClient(e.target.value)} placeholder={t("reports.clientPlaceholder")} />
+              <Input
+                value={client}
+                onChange={(e) => setClient(e.target.value)}
+                placeholder={t("reports.clientPlaceholder")}
+              />
             </div>
             {/* findings selector */}
             {selTask && (
@@ -668,10 +701,7 @@ export default function ReportsPage() {
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               {t("common.cancel")}
             </Button>
-            <Button
-              onClick={startGenerate}
-              disabled={!selTask || (taskFindings.length > 0 && selFindings.size === 0)}
-            >
+            <Button onClick={startGenerate} disabled={!selTask || (taskFindings.length > 0 && selFindings.size === 0)}>
               <SparklesIcon /> {t("reports.generate")}
             </Button>
           </DialogFooter>

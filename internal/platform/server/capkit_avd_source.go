@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	capkit "github.com/c1ayooo/capkit/core"
+	capkit "github.com/c1ayooo/4zrec/internal/capkit/core"
 
 	"github.com/c1ayooo/4zrec/internal/capability/vuln/vulnintel/grab"
 )

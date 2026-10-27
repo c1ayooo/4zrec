@@ -48,7 +48,7 @@ func (s *Server) toolDeleteAssetsByHost() actool.CoreTool {
 		objSchema(map[string]any{
 			"host": strParam("要删除的 host：域名/子域名/IP。完全匹配，如 example.com 或 a.example.com 或 1.2.3.4"),
 		}, "host"),
-		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			as := s.assetStore()
 			if as == nil {
 				return actool.Errorf("资产库未初始化"), nil
@@ -57,8 +57,19 @@ func (s *Server) toolDeleteAssetsByHost() actool.CoreTool {
 				Host string `json:"host"`
 			}
 			_ = json.Unmarshal(in, &a)
-			if strings.TrimSpace(a.Host) == "" {
+			host := strings.ToLower(strings.TrimSpace(a.Host))
+			if host == "" {
 				return actool.Errorf("host 不能为空"), nil
+			}
+			// 项目隔离:挂项目的上下文只允许删本项目授权范围内的 host(防借全局删除越界)。
+			if scope := s.roeProjectID(ctx, 0); scope > 0 {
+				rules, rerr := s.m.pg.ProjectScopeRules(scope)
+				if rerr != nil {
+					return actool.Errorf("RoE 校验失败(读取项目范围): " + rerr.Error()), nil
+				}
+				if _, ok := db.MatchProjectScope(rules, host, ""); !ok {
+					return actool.Errorf(fmt.Sprintf("【RoE 拒绝】host %s 不在项目 %d 授权范围内", host, scope)), nil
+				}
 			}
 			counts, err := as.DeleteByHost(a.Host)
 			if err != nil {

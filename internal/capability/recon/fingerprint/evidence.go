@@ -6,7 +6,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/c1ayooo/capkit/kits/bindingkit"
+	"github.com/c1ayooo/4zrec/internal/capkit/kits/bindingkit"
 )
 
 // QueryMatches reports whether query looks like one of the recognized

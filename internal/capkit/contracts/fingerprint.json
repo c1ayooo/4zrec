@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/c1ayooo/capkit/contracts/fingerprint.json",
+  "title": "Fingerprint",
+  "type": "object",
+  "required": ["product"],
+  "properties": {
+    "product": { "type": "string", "minLength": 1 },
+    "version": { "type": "string" },
+    "category": { "type": "string" },
+    "source": { "type": "string" },
+    "confidence": { "type": "integer", "minimum": 0, "maximum": 100 }
+  },
+  "additionalProperties": false
+}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -19,7 +20,8 @@ import (
 //
 // 4zreark 暴露的是无状态 Streamable HTTP MCP（POST /api/mcp），资产侧只需要
 // 两个只读工具：list_projects 和 list_assets。这里不引入 MCP SDK，发 JSON-RPC
-// 请求即可；API key 只存在于本次请求内，不落库、不写日志。
+// 请求即可；连接信息优先取请求显式传入（改 key 后先试再存），否则回落
+// settings/env 持久化配置（zreark_config.go）。
 const (
 	assetSyncDefaultLimit = 1000
 	assetSyncMaxLimit     = 5000
@@ -35,6 +37,7 @@ type assetSyncRequest struct {
 	Catalog         string `json:"catalog"`
 	Limit           int    `json:"limit"`
 	DryRun          bool   `json:"dry_run"`
+	IncludeRoutes   bool   `json:"include_routes"`
 }
 
 type assetSyncProject struct {
@@ -63,17 +66,18 @@ type zrearkSite struct {
 	Port               int              `json:"port"`
 	Protocol           string           `json:"protocol"`
 	Value              string           `json:"value"`
-	IP                  string           `json:"ip"`
-	HTTPStatus          int              `json:"http_status"`
-	Title               string           `json:"title"`
-	Tech                []string         `json:"technology_stack"`
-	State               string           `json:"state"`
-	VerificationStatus  string           `json:"verification_status"`
-	RiskScore           int              `json:"risk_score"`
-	Priority            string           `json:"priority"`
-	FirstSeen           string           `json:"first_seen"`
-	LastSeen            string           `json:"last_seen"`
-	Endpoints           []zrearkEndpoint `json:"endpoints"`
+	IP                 string           `json:"ip"`
+	HTTPStatus         int              `json:"http_status"`
+	Title              string           `json:"title"`
+	Tech               []string         `json:"technology_stack"`
+	State              string           `json:"state"`
+	VerificationStatus string           `json:"verification_status"`
+	RiskScore          int              `json:"risk_score"`
+	Priority           string           `json:"priority"`
+	FirstSeen          string           `json:"first_seen"`
+	LastSeen           string           `json:"last_seen"`
+	Endpoints          []zrearkEndpoint `json:"endpoints"`
+	EndpointCount      int              `json:"endpoint_count"`
 }
 
 type zrearkAssetPage struct {
@@ -99,18 +103,53 @@ type assetSyncResult struct {
 	WouldImport int             `json:"would_import"`
 	Imported    int             `json:"imported"`
 	Assigned    int             `json:"assigned"`
+	Routes      int             `json:"routes"`
 	Skipped     int             `json:"skipped"`
 	Errors      []string        `json:"errors"`
 	Sample      []assetSyncItem `json:"sample"`
 	DryRun      bool            `json:"dry_run"`
 }
 
-// mcpSyncCaller 是只够资产同步用的最小 MCP 客户端。
+// mcpSyncCaller 是只够 4zreark 集成用的最小 MCP 客户端。
 type mcpSyncCaller struct {
 	endpoint string
 	apiKey   string
 	client   *http.Client
 	nextID   int
+}
+
+// errZrearkAuth 4zreark 鉴权失败(API key 无效/禁用/过期/缺权限)。
+// 定时同步靠 errors.Is 判定它触发指数退避熔断。
+var errZrearkAuth = errors.New("4zreark 鉴权失败")
+
+// errZrearkNoConfig 持久化配置里没有 API key 且请求也未显式携带。
+var errZrearkNoConfig = errors.New("尚未配置 4zreark API Key")
+
+// resolveZrearkCreds 请求显式传入的连接信息优先(便于改 key 后先试再存),
+// 否则回落 settings/env 持久化配置。
+func (s *Server) resolveZrearkCreds(reqBaseURL, reqAPIKey string) (string, string) {
+	var get func(key string) (string, bool, error)
+	if s.m.pg != nil {
+		get = s.m.pg.GetSetting
+	}
+	baseURL := strings.TrimSpace(reqBaseURL)
+	if baseURL == "" {
+		baseURL = resolveZrearkBaseURL(get)
+	}
+	apiKey := strings.TrimSpace(reqAPIKey)
+	if apiKey == "" {
+		apiKey = resolveZrearkAPIKey(get)
+	}
+	return baseURL, apiKey
+}
+
+// zrearkCallerFromRequest 按请求体里的连接信息(可缺省,回落持久化配置)构造客户端。
+func (s *Server) zrearkCallerFromRequest(reqBaseURL, reqAPIKey string) (*mcpSyncCaller, error) {
+	baseURL, apiKey := s.resolveZrearkCreds(reqBaseURL, reqAPIKey)
+	if apiKey == "" {
+		return nil, errZrearkNoConfig
+	}
+	return newMCPSyncCaller(baseURL, apiKey)
 }
 
 func newMCPSyncCaller(baseURL, apiKey string) (*mcpSyncCaller, error) {
@@ -190,7 +229,7 @@ func (c *mcpSyncCaller) call(ctx context.Context, name string, args map[string]a
 		return nil, fmt.Errorf("读取 4zreark 响应失败: %w", err)
 	}
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return nil, fmt.Errorf("4zreark 鉴权失败 (%d)，请检查 API Key 与 assets:read 权限", resp.StatusCode)
+		return nil, fmt.Errorf("%w (%d)，请检查 API Key 与 assets:read 权限", errZrearkAuth, resp.StatusCode)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("4zreark 返回 HTTP %d: %s", resp.StatusCode, truncateSyncText(string(raw), 300))
@@ -260,7 +299,7 @@ func (s *Server) assetSyncProjects(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
-	caller, err := newMCPSyncCaller(req.BaseURL, req.APIKey)
+	caller, err := s.zrearkCallerFromRequest(req.BaseURL, req.APIKey)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -284,36 +323,40 @@ func (s *Server) assetSyncProjects(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"projects": payload.Items})
 }
 
-// assetSyncHandler 按页读取 4zreark 站点并写入 4zrec 资产库。
-// dry_run=true 只做读取与映射，不写库，用于同步前预览。
-func (s *Server) assetSync(w http.ResponseWriter, r *http.Request) {
-	var req assetSyncRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-	caller, err := newMCPSyncCaller(req.BaseURL, req.APIKey)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
+// zrearkSyncParams 是一次资产同步的参数（HTTP 端点与定时任务共用）。
+type zrearkSyncParams struct {
+	SourceProjectID int64
+	TargetProjectID int64
+	Catalog         string
+	Limit           int
+	DryRun          bool
+	IncludeRoutes   bool
+}
+
+// errZrearkNoDB 非预览同步要求资产库可用。
+var errZrearkNoDB = errors.New("database unavailable")
+
+// errZrearkBadTarget 同步归属的目标项目不存在。
+var errZrearkBadTarget = errors.New("目标项目不存在")
+
+// runZrearkAssetSync 按页读取 4zreark 站点并写入 4zrec 资产库。
+// DryRun=true 只做读取与映射，不写库，用于同步前预览。
+func (s *Server) runZrearkAssetSync(ctx context.Context, caller *mcpSyncCaller, params zrearkSyncParams) (*assetSyncResult, error) {
 	as := s.assetStore()
-	if !req.DryRun && as == nil {
-		writeErr(w, http.StatusServiceUnavailable, "database unavailable")
-		return
+	if !params.DryRun && as == nil {
+		return nil, errZrearkNoDB
 	}
-	if req.TargetProjectID > 0 && !req.DryRun {
-		if _, err := s.m.pg.Projects().GetProject(req.TargetProjectID); err != nil {
-			writeErr(w, http.StatusBadRequest, "目标项目不存在: "+err.Error())
-			return
+	if params.TargetProjectID > 0 && !params.DryRun {
+		if _, err := s.m.pg.Projects().GetProject(params.TargetProjectID); err != nil {
+			return nil, fmt.Errorf("%w: %v", errZrearkBadTarget, err)
 		}
 	}
 
-	catalog := strings.TrimSpace(req.Catalog)
+	catalog := strings.TrimSpace(params.Catalog)
 	if catalog != "all" && catalog != "verified" {
 		catalog = "all"
 	}
-	limit := req.Limit
+	limit := params.Limit
 	if limit <= 0 {
 		limit = assetSyncDefaultLimit
 	}
@@ -324,7 +367,7 @@ func (s *Server) assetSync(w http.ResponseWriter, r *http.Request) {
 	result := assetSyncResult{
 		Errors: []string{},
 		Sample: []assetSyncItem{},
-		DryRun: req.DryRun,
+		DryRun: params.DryRun,
 	}
 	page := 1
 	for {
@@ -335,18 +378,16 @@ func (s *Server) assetSync(w http.ResponseWriter, r *http.Request) {
 			"page_size":  assetSyncPageSize,
 			"site_group": true,
 		}
-		if req.SourceProjectID > 0 {
-			args["project_id"] = req.SourceProjectID
+		if params.SourceProjectID > 0 {
+			args["project_id"] = params.SourceProjectID
 		}
-		raw, err := caller.call(r.Context(), "list_assets", args)
+		raw, err := caller.call(ctx, "list_assets", args)
 		if err != nil {
-			writeErr(w, http.StatusBadGateway, err.Error())
-			return
+			return nil, err
 		}
 		var pageData zrearkAssetPage
 		if err := json.Unmarshal(raw, &pageData); err != nil {
-			writeErr(w, http.StatusBadGateway, "解析 4zreark 资产列表失败: "+err.Error())
-			return
+			return nil, fmt.Errorf("解析 4zreark 资产列表失败: %w", err)
 		}
 		result.Total = pageData.Total
 		for _, site := range pageData.Items {
@@ -364,7 +405,7 @@ func (s *Server) assetSync(w http.ResponseWriter, r *http.Request) {
 			if len(result.Sample) < 5 {
 				result.Sample = append(result.Sample, item)
 			}
-			if req.DryRun {
+			if params.DryRun {
 				continue
 			}
 			id, err := as.UpsertHTTPService(upsert)
@@ -374,13 +415,24 @@ func (s *Server) assetSync(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			result.Imported++
-			as.DB().StampAssetSource(r.Context(), id, "4zreark")
-			if req.TargetProjectID > 0 {
-				claimed, err := as.ClaimAssetToProject(id, req.TargetProjectID)
+			as.DB().StampAssetSource(ctx, id, "4zreark")
+			if params.TargetProjectID > 0 {
+				claimed, err := as.ClaimAssetToProject(id, params.TargetProjectID)
 				if err != nil {
 					appendSyncError(&result.Errors, fmt.Sprintf("%s: 归属项目失败: %v", item.Host, err))
 				} else if claimed {
 					result.Assigned++
+				}
+			}
+			// 爬虫路由（site_routes）→ endpoint 资产：有爬虫沉淀的站点逐站拉取。
+			// 不以 endpoint_count 为门槛——list_assets 聚合行里该字段可能不反映
+			// 路由表实况（实测 179 项目 986 条路由被全滤），直接按站点拉，空页自会跳过。
+			if params.IncludeRoutes && site.ID > 0 {
+				imported, err := s.syncZrearkSiteRoutes(ctx, caller, as, site, item)
+				if err != nil {
+					appendSyncError(&result.Errors, fmt.Sprintf("%s: 路由同步失败: %v", item.Host, truncateSyncText(err.Error(), 120)))
+				} else {
+					result.Routes += imported
 				}
 			}
 		}
@@ -392,6 +444,40 @@ func (s *Server) assetSync(w http.ResponseWriter, r *http.Request) {
 		if page > 200 {
 			break
 		}
+	}
+	return &result, nil
+}
+
+// assetSyncHandler HTTP 入口：解析请求 → 构造客户端 → 复用同步核心。
+func (s *Server) assetSync(w http.ResponseWriter, r *http.Request) {
+	var req assetSyncRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	caller, err := s.zrearkCallerFromRequest(req.BaseURL, req.APIKey)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	result, err := s.runZrearkAssetSync(r.Context(), caller, zrearkSyncParams{
+		SourceProjectID: req.SourceProjectID,
+		TargetProjectID: req.TargetProjectID,
+		Catalog:         req.Catalog,
+		Limit:           req.Limit,
+		DryRun:          req.DryRun,
+		IncludeRoutes:   req.IncludeRoutes,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, errZrearkNoDB):
+			writeErr(w, http.StatusServiceUnavailable, err.Error())
+		case errors.Is(err, errZrearkBadTarget):
+			writeErr(w, http.StatusBadRequest, err.Error())
+		default:
+			writeErr(w, http.StatusBadGateway, err.Error())
+		}
+		return
 	}
 	writeJSON(w, http.StatusOK, result)
 }
@@ -431,7 +517,7 @@ func mapZrearkSite(site zrearkSite) (assetSyncItem, db.UpsertHTTPServiceReq, boo
 		URL:        siteURL,
 		StatusCode: status,
 		Title:      strings.TrimSpace(site.Title),
-		IP:         strings.TrimSpace(site.IP),
+		IP:         sanitizeZrearkIP(site.IP),
 	}
 	return item, db.UpsertHTTPServiceReq{
 		URL:          siteURL,
@@ -440,6 +526,33 @@ func mapZrearkSite(site zrearkSite) (assetSyncItem, db.UpsertHTTPServiceReq, boo
 		PageTitle:    item.Title,
 		IP:           item.IP,
 	}, true
+}
+
+// sanitizeZrearkIP 4zreark 的站点 ip 字段可能带 CIDR 后缀（如 "1.2.3.4/32"），
+// 4zrec 的资产校验只收裸地址：剥离 /32、/128；其它前缀的网段不是主机地址，丢弃。
+func sanitizeZrearkIP(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if u, err := url.Parse(raw); err == nil && u.Hostname() != "" && strings.Contains(raw, "://") {
+		raw = u.Hostname() // 容错：误填了 URL 的情况取主机名
+	}
+	if strings.Contains(raw, "/") {
+		addr, bits, ok := strings.Cut(raw, "/")
+		if !ok {
+			return ""
+		}
+		if (strings.Contains(addr, ":") && bits == "128") || (!strings.Contains(addr, ":") && bits == "32") {
+			raw = addr
+		} else {
+			return ""
+		}
+	}
+	if u, err := netip.ParseAddr(raw); err != nil || u.Zone() != "" {
+		return ""
+	}
+	return raw
 }
 
 func buildZrearkSiteURL(site zrearkSite, host string) string {

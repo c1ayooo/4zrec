@@ -265,10 +265,11 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		}
 		wireAgentAugment(m.pg, s.skillDir, s.hostTools) // 可见 skills/MCP + 流量/编排 host 工具装配进 agent 工具集
 		domainReg := buildDomainReg(m.Assets())
-		wireTools(m.pg, domainReg) // 内置工具表：按 agent 过滤 + 覆盖描述/schema + 注入默认值
-		seedPrompts(m.pg)          // 内置 agent 默认提示词正文播种进 agent_prompts(仅空时)
-		s.seedOrchestrationTools() // P2 跨任务编排工具 seed 进 tools 表(可按 agent 绑定)
-		s.seedCapkitTools()        // capkit 桥接工具 seed 进 tools 表(可按 agent 绑定)
+		wireTools(m.pg, domainReg)   // 内置工具表：按 agent 过滤 + 覆盖描述/schema + 注入默认值
+		seedPrompts(m.pg)            // 内置 agent 默认提示词正文播种进 agent_prompts(仅空时)
+		s.seedOrchestrationTools()   // P2 跨任务编排工具 seed 进 tools 表(可按 agent 绑定)
+		s.seedCapkitTools()          // capkit 桥接工具 seed 进 tools 表(可按 agent 绑定)
+		s.refreshCapkitToolSchemas() // 存量库把代码层 capkit schema 刷回工具行(一次性)
 		if err := s.seedFindingRetester(); err != nil {
 			log.Printf("[retester] seed: %v", err)
 		}
@@ -527,6 +528,7 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 	s.chatAgent.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
 	s.chatAgent.SetWebSearch(s.m.WebSearchOpts())
 	s.chatAgent.SetGuard(s.chatGuard())
+	s.chatAgent.SetTargetsEnv(s.targetsEnvForConv()) // ZREC_TARGETS:会话挂项目时注入(见 targets_env.go)
 	s.chatAgent.SetNonStreaming(nonStreamingResolver(cfg))
 	s.chatAgent.SetMaxTokens(maxTokensResolver(cfg))
 	s.chatAgent.SetNoaEnabled(s.m.NoaCompactionEnabled) // 实验功能:noa 上下文压缩(每 run 读)
@@ -740,6 +742,7 @@ func (s *Server) chatAgentForProfile(id int64) *agent.ChatAgent {
 	ca.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
 	ca.SetWebSearch(s.m.WebSearchOpts())
 	ca.SetGuard(s.chatGuard())
+	ca.SetTargetsEnv(s.targetsEnvForConv())
 	ca.SetNonStreaming(nonStreamingResolver(cfg))
 	ca.SetMaxTokens(maxTokensResolver(cfg))
 	ca.SetNoaEnabled(s.m.NoaCompactionEnabled) // 实验功能:noa 上下文压缩(每 run 读)
@@ -883,6 +886,12 @@ func (s *Server) Handler() http.Handler {
 	// 从 4zreark MCP 同步站点资产（预览 + 导入）
 	mux.HandleFunc("POST /api/assets/sync/projects", s.assetSyncProjects)
 	mux.HandleFunc("POST /api/assets/sync", s.assetSync)
+	// 4zreark 平台集成：连接配置 / 下发采集任务 / 远端任务列表 / 任务指纹与爬虫结果
+	mux.HandleFunc("GET /api/assets/zreark/config", s.zrearkConfigGet)
+	mux.HandleFunc("POST /api/assets/zreark/config", s.zrearkConfigSet)
+	mux.HandleFunc("POST /api/assets/zreark/dispatch", s.zrearkDispatch)
+	mux.HandleFunc("POST /api/assets/zreark/tasks", s.zrearkTasks)
+	mux.HandleFunc("POST /api/assets/zreark/task-results", s.zrearkTaskResults)
 	// 项目管理(授权根:范围/归属)
 	mux.HandleFunc("GET /api/projects", s.listProjects)
 	mux.HandleFunc("POST /api/projects", s.createProject)
@@ -1309,11 +1318,19 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	list := s.m.List()
 	metrics, _ := s.m.PG().TaskListMetricsAll()
 	archiveBlockers, _ := s.m.PG().TaskArchiveBlockers()
+	// 可选 query 过滤:?project_id=N 只返回挂在该项目下的任务(全局项目切换器用)。
+	qProject := int64(0)
+	if v := strings.TrimSpace(r.URL.Query().Get("project_id")); v != "" {
+		qProject, _ = strconv.ParseInt(v, 10, 64)
+	}
 	dtos := make([]TaskDTO, 0, len(list))
 	scopeProject := scopedProjectID(r.Context())
 	for _, t := range list {
 		// 项目级 API Key 只看到本项目任务。
 		if scopeProject > 0 && (t.ProjectID == nil || *t.ProjectID != scopeProject) {
+			continue
+		}
+		if qProject > 0 && (t.ProjectID == nil || *t.ProjectID != qProject) {
 			continue
 		}
 		dto := taskDTO(t, s.resolvedTaskStatus(t))

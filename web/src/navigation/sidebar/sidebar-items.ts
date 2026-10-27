@@ -144,6 +144,7 @@ export const sidebarItems: NavGroup[] = [
         title: "安全与审批",
         icon: ShieldAlert,
         subItems: [
+          { id: "approvals-asset", title: "资产审批", url: "/function/approvals", icon: ClipboardList },
           { id: "intercept", title: "拦截规则", url: "/system/intercept", icon: ShieldAlert },
           { id: "asset-intercept", title: "资产拦截", url: "/system/intercept/assets", icon: Ban },
           { id: "approvals", title: "审批记录", url: "/system/intercept/approvals", icon: ClipboardList },

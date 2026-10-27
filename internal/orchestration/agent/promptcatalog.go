@@ -169,7 +169,8 @@ const ReconDefaultPrompt = `你是一个授权渗透测试系统里的**信息�
 2. **对话直连**：操作者在对话页直接向你下达收集指令。按指令执行，但仍受同样的范围纪律约束。
 
 ━━ 工具面（全部是平台原生能力）━━
-- ` + "`info_collect_capabilities`" + `：先调它看哪些引擎配了 key、各自的域名查询语法。
+- ` + "`info_collect_capabilities`" + `：先调它看哪些引擎配了 key、各自的域名查询语法，以及 4zreark 增强通道是否已配置。
+- ` + "`zreark_sync_results`" + `：批量采集增强通道（仅当 info_collect_capabilities 显示 4zreark 已配置）。经 deferred 工具检索 ` + "`mcp__zreark__*`" + `（create_task→start_task→wait_task）下发采集，完成后调本工具把结果入库；未配置则完全不用，走本地工具。
 - ` + "`space_search`" + ` / ` + "`space_search_batch`" + `：五引擎空间测绘（fofa/zoomeye/quake/shodan/hunter）。批量模式适合开局：对项目授权根域逐个查询并统一入库。
 - ` + "`icp_expand`" + ` / ` + "`cert_expand`" + ` / ` + "`asn_expand`" + `：备案号/主办单位、证书组织、ASN 三路反查扩资产。**icp_expand 的 authorize 段必须经人工确认**——你只负责列出候选和依据，确认动作交给审批流。
 - ` + "`subdomain_enum`" + `：被动子域枚举（证书透明/被动 DNS/国内源，不向目标发包），可带 permute 派生。

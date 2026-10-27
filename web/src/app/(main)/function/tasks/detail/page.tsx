@@ -11,7 +11,6 @@ import { toast } from "sonner";
 import { StatusBadge } from "@/components/status-badge";
 import { TaskLLMProfileChain } from "@/components/task-llm-profile-chain";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,6 +22,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -34,11 +34,13 @@ import {
 } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import type { LLMProfile, Task } from "@/lib/types";
+import { useProjectStore } from "@/stores/project/project-provider";
 
 import { AssetsTab } from "./_tabs/assets-tab";
 import { BroadcastTab } from "./_tabs/broadcast-tab";
@@ -216,6 +218,11 @@ function TaskDetailInner() {
   const [archiving, setArchiving] = React.useState(false);
   // 归属项目名(徽标链接项目详情;一次性加载)
   const [projectName, setProjectName] = React.useState("");
+  // 打开别的项目的任务时,把全局上下文对齐过去(切换器口径:详情跟随实体所属项目)。
+  const globalProjectId = useProjectStore((s) => s.projectId);
+  const globalProjects = useProjectStore((s) => s.projects);
+  const globalStatus = useProjectStore((s) => s.status);
+  const setGlobalProject = useProjectStore((s) => s.setProject);
 
   React.useEffect(() => {
     const pid = task?.project_id;
@@ -223,11 +230,14 @@ function TaskDetailInner() {
       setProjectName("");
       return;
     }
-    api
-      .projects()
-      .then((ps) => setProjectName(ps.find((p) => p.id === pid)?.name ?? ""))
-      .catch(() => setProjectName(""));
-  }, [task?.project_id]);
+    setProjectName(globalProjects.find((p) => p.id === pid)?.name ?? "");
+  }, [task?.project_id, globalProjects]);
+
+  React.useEffect(() => {
+    const pid = task?.project_id;
+    if (globalStatus !== "ready" || !pid || pid === globalProjectId) return;
+    if (globalProjects.some((p) => p.id === pid)) setGlobalProject(pid);
+  }, [task?.project_id, globalStatus, globalProjectId, globalProjects, setGlobalProject]);
 
   React.useEffect(() => {
     api
@@ -318,13 +328,20 @@ function TaskDetailInner() {
   if (!task) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 p-10 text-center">
-        <p className="text-muted-foreground">{loaded ? `任务 ${id} 已被删除、归档或不存在` : "加载中…"}</p>
-        {loaded && (
-          <Button asChild variant="outline">
-            <Link href="/function/tasks">
-              <ArrowLeftIcon /> 返回任务列表
-            </Link>
-          </Button>
+        {loaded ? (
+          <>
+            <p className="text-muted-foreground">任务 {id} 已被删除、归档或不存在</p>
+            <Button asChild variant="outline">
+              <Link href="/function/tasks">
+                <ArrowLeftIcon /> 返回任务列表
+              </Link>
+            </Button>
+          </>
+        ) : (
+          <div className="flex w-full max-w-xl flex-col gap-3">
+            <Skeleton className="h-6 w-64" />
+            <Skeleton className="h-48 w-full" />
+          </div>
         )}
       </div>
     );
@@ -431,7 +448,7 @@ function TaskDetailInner() {
               <TabsTrigger key={t.value} value={t.value}>
                 {t.label}
                 {t.value === "intercept" && interceptPendingCount > 0 && (
-                  <span className="ml-1.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-[11px] font-semibold leading-none text-white">
+                  <span className="ml-1.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-warning px-1 text-[11px] font-semibold leading-none text-white">
                     {interceptPendingCount > 99 ? "99+" : interceptPendingCount}
                   </span>
                 )}

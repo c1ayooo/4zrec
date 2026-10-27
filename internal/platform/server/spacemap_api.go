@@ -247,6 +247,29 @@ func (s *Server) toolInfoCollectCapabilities() actool.CoreTool {
 			if !anyConfigured {
 				b.WriteString("\n所有引擎均未配置 key:请在 系统设置 → 空间测绘 页面配置,或设置环境变量(FOFA_API_KEY 等)。")
 			}
+			// 4zreark 增强通道自省:已配置时提示 agent 可经 MCP 调 zreark 工具做批量采集。
+			var getSetting func(string) (string, bool, error)
+			if s.m.pg != nil {
+				getSetting = s.m.pg.GetSetting
+			}
+			zrearkConfigured := resolveZrearkAPIKey(getSetting) != ""
+			defaultProject := ""
+			if getSetting != nil {
+				if v, ok, _ := getSetting(ZrearkDefaultProjectSetting); ok {
+					defaultProject = strings.TrimSpace(v)
+				}
+			}
+			b.WriteString("\n4zreark 增强通道:")
+			if zrearkConfigured {
+				b.WriteString(" 已配置。批量采集(子域/端口/指纹/爬虫/目录)可经 MCP 直调 zreark 工具(deferred 检索 mcp__zreark__*)," +
+					"完成后用 zreark_sync_results 把结果入库")
+				if defaultProject != "" {
+					b.WriteString("(缺省源项目 ID " + defaultProject + ")")
+				}
+				b.WriteString("。\n")
+			} else {
+				b.WriteString(" 未配置 4zreark 连接——请使用本地工具(subdomain_enum/subdomain_brute/port_scan/fingerprint_scan/web_crawl/dir_scan),能力完整可用。\n")
+			}
 			return actool.Text(b.String()), nil
 		},
 	})
@@ -397,6 +420,7 @@ func (s *Server) seedSpacemapTools() {
 	agents, _ := json.Marshal([]string{"auto", "worker"})
 	allCollectTools := slices.Concat(
 		s.spacemapTools(), s.spacemapExpandTools(), s.reconTools(),
+		s.crawlTools(), s.zrearkCollectTools(),
 		s.atomicTools(), s.entTools(), s.credTools(),
 		s.webreconTools(), s.coverageTools(), s.oobTools(), s.probeTools(), s.connTools(),
 	)

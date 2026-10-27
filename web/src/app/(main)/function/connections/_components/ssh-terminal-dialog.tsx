@@ -40,7 +40,9 @@ export function SshTerminalDialog({ connection, onClose }: Props) {
     const ws = new WebSocket(`${proto}://${window.location.host}/api/connections/${connection.id}/terminal`);
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
-    term.writeln(`\x1b[90m连接 ${connection.username ? connection.username + "@" : ""}${connection.host}:${connection.port} …\x1b[0m`);
+    term.writeln(
+      `\x1b[90m连接 ${connection.username ? connection.username + "@" : ""}${connection.host}:${connection.port} …\x1b[0m`,
+    );
 
     ws.onopen = () => {
       ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
@@ -88,13 +90,13 @@ export function SshTerminalDialog({ connection, onClose }: Props) {
       <DialogContent className="max-w-4xl">
         <DialogHeader>
           <DialogTitle>
-            SSH 终端 · {connection ? `${connection.username ? connection.username + "@" : ""}${connection.host}:${connection.port}` : ""}
+            SSH 终端 ·{" "}
+            {connection
+              ? `${connection.username ? connection.username + "@" : ""}${connection.host}:${connection.port}`
+              : ""}
           </DialogTitle>
         </DialogHeader>
-        <div
-          ref={hostRef}
-          className="h-96 w-full overflow-hidden rounded-md border bg-[#0b0e14] p-1"
-        />
+        <div ref={hostRef} className="h-96 w-full overflow-hidden rounded-md border bg-[#0b0e14] p-1" />
         <p className="text-muted-foreground text-xs">
           全交互 PTY 会话(xterm.js);断开即随页面关闭。一次性命令用「命令执行」。
         </p>

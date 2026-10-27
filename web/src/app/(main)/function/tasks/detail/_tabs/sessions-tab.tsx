@@ -332,19 +332,19 @@ function mergeBySeq(current: Activity[], incoming: Activity[]): Activity[] {
 function statusIcon(status: SessionStatus) {
   switch (status) {
     case "running": // 执行中
-      return <Loader2Icon className="size-3.5 animate-spin text-blue-500" />;
+      return <Loader2Icon className="size-3.5 animate-spin text-info" />;
     case "paused":
-      return <PauseIcon className="size-3.5 text-amber-500" />;
+      return <PauseIcon className="size-3.5 text-warning" />;
     case "pending": // 待领取(open intent)
       return <ClockIcon className="size-3.5 text-muted-foreground" />;
     case "done": // 完成
-      return <CircleCheckIcon className="size-3.5 text-emerald-500" />;
+      return <CircleCheckIcon className="size-3.5 text-success" />;
     case "stopped": // 取消/停止(被 planner 终止)
-      return <CircleSlashIcon className="size-3.5 text-amber-500" />;
+      return <CircleSlashIcon className="size-3.5 text-warning" />;
     case "blocked": // 出错
-      return <CircleXIcon className="size-3.5 text-red-500" />;
+      return <CircleXIcon className="size-3.5 text-destructive" />;
     case "exhausted": // 步数耗尽(撞 max_turns)
-      return <ZapOffIcon className="size-3.5 text-violet-500" />;
+      return <ZapOffIcon className="size-3.5 text-chart-4" />;
     case "deleted": // 用户假删除
       return <CircleSlashIcon className="size-3.5 text-muted-foreground" />;
   }
@@ -526,7 +526,7 @@ function SessionItem({
   ) : s.role === "worker" ? (
     statusIcon(s.status)
   ) : s.live ? (
-    <Loader2Icon className="size-3.5 animate-spin text-blue-500" />
+    <Loader2Icon className="size-3.5 animate-spin text-info" />
   ) : null;
 
   const cancellable =
@@ -568,15 +568,15 @@ function SessionItem({
             已删除
           </Badge>
         )}
-        {hasPending && <ShieldAlertIcon className="size-3.5 shrink-0 text-amber-500" />}
+        {hasPending && <ShieldAlertIcon className="size-3.5 shrink-0 text-warning" />}
         {!active && unread ? (
-          <span className="inline-flex min-w-4 items-center justify-center rounded-full bg-blue-500/15 px-1 text-[11px] font-medium tabular-nums text-blue-600 dark:text-blue-400">
+          <span className="inline-flex min-w-4 items-center justify-center rounded-full bg-info/15 px-1 text-[11px] font-medium tabular-nums text-info">
             {unread > 99 ? "99+" : unread}
           </span>
         ) : null}
         {s.live && (
-          <span className="inline-flex items-center gap-1 rounded bg-blue-500/15 px-1.5 py-0.5 text-[11px] font-medium text-blue-600 dark:text-blue-400">
-            <span className="size-1 animate-pulse rounded-full bg-blue-500" />
+          <span className="inline-flex items-center gap-1 rounded bg-info/15 px-1.5 py-0.5 text-[11px] font-medium text-info">
+            <span className="size-1 animate-pulse rounded-full bg-info" />
             实时
           </span>
         )}
@@ -1768,7 +1768,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
                       · {activeDisplayTitle}
                     </span>
                     {hiddenUnread > 0 && (
-                      <span className="inline-flex min-w-4 shrink-0 items-center justify-center rounded-full bg-blue-500/15 px-1 text-[11px] font-medium tabular-nums text-blue-600 lg:hidden dark:text-blue-400">
+                      <span className="inline-flex min-w-4 shrink-0 items-center justify-center rounded-full bg-info/15 px-1 text-[11px] font-medium tabular-nums text-info lg:hidden">
                         {hiddenUnread > 99 ? "99+" : hiddenUnread}
                       </span>
                     )}
@@ -1779,13 +1779,13 @@ export function SessionsTab({ taskId }: { taskId: string }) {
                 <span
                   className={cn(
                     "inline-flex items-center gap-1 text-[11px]",
-                    sseLive ? "text-emerald-500" : "text-amber-500",
+                    sseLive ? "text-success" : "text-warning",
                   )}
                   title={sseLive ? "实时连接正常" : "实时连接中断，正在自动重连（历史仍可见）"}
                 >
                   {sseLive ? (
                     <>
-                      <span className="size-1 animate-pulse rounded-full bg-emerald-500" />
+                      <span className="size-1 animate-pulse rounded-full bg-success" />
                       实时
                     </>
                   ) : (
@@ -1938,8 +1938,8 @@ export function SessionsTab({ taskId }: { taskId: string }) {
                 <Badge variant="outline">来源任务 #{active.source_task_id} · 只读历史</Badge>
               )}
               {active.live && (
-                <span className="inline-flex items-center gap-1 rounded bg-blue-500/15 px-1.5 py-0.5 text-[11px] font-medium text-blue-600 dark:text-blue-400">
-                  <span className="size-1 animate-pulse rounded-full bg-blue-500" />
+                <span className="inline-flex items-center gap-1 rounded bg-info/15 px-1.5 py-0.5 text-[11px] font-medium text-info">
+                  <span className="size-1 animate-pulse rounded-full bg-info" />
                   实时
                 </span>
               )}
@@ -2036,7 +2036,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
                     加载活动流…
                   </div>
                 ) : activeState?.error ? (
-                  <div className="flex items-center gap-2 pl-9 text-xs text-red-500">
+                  <div className="flex items-center gap-2 pl-9 text-xs text-destructive">
                     <CircleXIcon className="size-3.5" />
                     加载失败：{activeState.error}
                     <Button

@@ -28,6 +28,7 @@ type ChatAgent struct {
 	tx             *transcript.Store
 	window         int
 	proxyAddr      string
+	targetsEnvFn   targetsEnvResolver // 会话级目标变量(ZREC_TARGETS)解析器;nil=不注入
 	proxyCACert    string
 	webSearch      WebSearchOpts
 	guard          *guard.Guard // optional; nil disables intercept hooks for chat
@@ -66,6 +67,13 @@ func (c *ChatAgent) maxTokens() int {
 // CA cert it trusts (empty addr = direct). Kept for parity with the other agents.
 func (c *ChatAgent) SetProxy(addr, caCert string) { c.proxyAddr, c.proxyCACert = addr, caCert }
 
+// SetTargetsEnv 注入会话级目标环境变量解析器(ZREC_TARGETS,见 targets_env.go)。nil=不注入。
+func (c *ChatAgent) SetTargetsEnv(fn func(sessionID string) []string) { c.targetsEnvFn = fn }
+
+func (c *ChatAgent) targetsEnv(sessionID string) []string {
+	return targetsEnv(c.targetsEnvFn, sessionID)
+}
+
 // SetWebSearch selects the web_search backend for the chat agent (off by default).
 func (c *ChatAgent) SetWebSearch(o WebSearchOpts) { c.webSearch = o }
 
@@ -87,7 +95,7 @@ func chatWorkDirSpec(workDir string) string {
 func chatSystem(agentKey, dataDir, workDir string) string {
 	body := renderSystem(agentKey, DefaultAssistantPrompt, chatVars{DataDir: dataDir, Now: nowStr()}) + chatWorkDirSpec(workDir)
 	if httpProbePriorityAgents[agentKey] {
-		body += httpToolPolicyBlock()
+		body += httpToolPolicyBlock() + targetEnvPolicyBlock()
 	}
 	if diffProbeAgents[agentKey] {
 		body += diffProbePolicyBlock()
@@ -156,7 +164,7 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 			DeepSeekModel:   ws.DeepSeekModel,
 			Proxy:           ws.Proxy,
 		},
-		BashEnv:     proxyEnv(c.proxyAddr, c.proxyCACert), // Bash 子命令默认走代理+信任 CA
+		BashEnv:     append(proxyEnv(c.proxyAddr, c.proxyCACert), c.targetsEnv(sessionID)...), // Bash 子命令默认走代理+信任 CA + ZREC_TARGETS
 		WorkingDir:  sessionWorkDir,
 		MaxTurns:    maxTurns,
 		MaxDuration: maxDuration,

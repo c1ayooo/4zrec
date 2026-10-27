@@ -18,30 +18,29 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
-import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
 import type { AssetSyncResult, AssetSyncSourceProject, Project } from "@/lib/types";
 
-const BASE_URL_KEY = "4zrec_asset_sync_base_url";
-const DEFAULT_BASE_URL = "http://127.0.0.1:8080";
+import { ZrearkConnectionBar } from "./zreark-connection-bar";
 
 // 资产同步弹窗：通过 4zreark 的 MCP 接口读取站点，写入 4zrec 的 service 资产。
-// API Key 只保存在组件内存里，仅随本次请求发给 4zrec 后端。
+// 连接信息（地址 + API Key）持久化在 4zrec，连接条里管理，操作不再需要每次粘贴 key。
+// 可选同时拉取站点路由（爬虫沉淀的 site_routes）落成 endpoint 资产。
 export function AssetSyncDialog({ projects, onSynced }: { projects: Project[]; onSynced: () => void }) {
   const [open, setOpen] = React.useState(false);
-  const [baseURL, setBaseURL] = React.useState(() => getLocalStorageValue(BASE_URL_KEY) ?? DEFAULT_BASE_URL);
-  const [apiKey, setAPIKey] = React.useState("");
+  const [configured, setConfigured] = React.useState(false);
   const [sourceProjects, setSourceProjects] = React.useState<AssetSyncSourceProject[]>([]);
   const [sourceProjectID, setSourceProjectID] = React.useState("all");
   const [targetProjectID, setTargetProjectID] = React.useState("0");
   const [catalog, setCatalog] = React.useState<"all" | "verified">("all");
   const [limit, setLimit] = React.useState("500");
+  const [includeRoutes, setIncludeRoutes] = React.useState(true);
   const [busy, setBusy] = React.useState<"projects" | "preview" | "sync" | null>(null);
   const [preview, setPreview] = React.useState<AssetSyncResult | null>(null);
   const [result, setResult] = React.useState<AssetSyncResult | null>(null);
   const [error, setError] = React.useState("");
 
-  const canConnect = baseURL.trim() !== "" && apiKey.trim() !== "";
   const working = busy !== null;
 
   function resetLoaded() {
@@ -53,17 +52,16 @@ export function AssetSyncDialog({ projects, onSynced }: { projects: Project[]; o
   }
 
   async function loadProjects() {
-    if (!canConnect || working) return;
+    if (!configured || working) return;
     setBusy("projects");
     setError("");
     setPreview(null);
     setResult(null);
     try {
-      const res = await api.assetSyncProjects({ base_url: baseURL.trim(), api_key: apiKey.trim() });
+      const res = await api.assetSyncProjects({});
       const items = res.projects ?? [];
       setSourceProjects(items);
       if (items.length === 1) setSourceProjectID(String(items[0].id));
-      setLocalStorageValue(BASE_URL_KEY, baseURL.trim());
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -72,22 +70,20 @@ export function AssetSyncDialog({ projects, onSynced }: { projects: Project[]; o
   }
 
   async function run(dryRun: boolean) {
-    if (!canConnect || working) return;
+    if (!configured || working) return;
     setBusy(dryRun ? "preview" : "sync");
     setError("");
     if (dryRun) setPreview(null);
     else setResult(null);
     try {
       const res = await api.assetSync({
-        base_url: baseURL.trim(),
-        api_key: apiKey.trim(),
         source_project_id: sourceProjectID === "all" ? 0 : Number(sourceProjectID),
         target_project_id: Number(targetProjectID) || 0,
         catalog,
         limit: Number(limit) || 500,
         dry_run: dryRun,
+        include_routes: includeRoutes,
       });
-      setLocalStorageValue(BASE_URL_KEY, baseURL.trim());
       if (dryRun) {
         setPreview(res);
       } else {
@@ -108,7 +104,6 @@ export function AssetSyncDialog({ projects, onSynced }: { projects: Project[]; o
       onOpenChange={(next) => {
         setOpen(next);
         if (!next) {
-          setAPIKey("");
           setPreview(null);
           setResult(null);
           setError("");
@@ -129,37 +124,15 @@ export function AssetSyncDialog({ projects, onSynced }: { projects: Project[]; o
         </DialogHeader>
 
         <div className="grid gap-4">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="asset-sync-base">4zreark 地址</Label>
-              <Input
-                id="asset-sync-base"
-                value={baseURL}
-                placeholder={DEFAULT_BASE_URL}
-                onChange={(e) => {
-                  setBaseURL(e.target.value);
-                  resetLoaded();
-                }}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="asset-sync-key">API Key</Label>
-              <Input
-                id="asset-sync-key"
-                type="password"
-                autoComplete="off"
-                value={apiKey}
-                placeholder="zr_..."
-                onChange={(e) => {
-                  setAPIKey(e.target.value);
-                  resetLoaded();
-                }}
-              />
-            </div>
-          </div>
+          <ZrearkConnectionBar
+            onChanged={(cfg) => {
+              setConfigured(cfg.configured);
+              if (!cfg.configured) resetLoaded();
+            }}
+          />
 
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => void loadProjects()} disabled={!canConnect || working}>
+            <Button variant="outline" size="sm" onClick={() => void loadProjects()} disabled={!configured || working}>
               {busy === "projects" ? (
                 <Loader2Icon className="size-4 animate-spin" />
               ) : (
@@ -168,7 +141,7 @@ export function AssetSyncDialog({ projects, onSynced }: { projects: Project[]; o
               读取项目
             </Button>
             <span className="text-muted-foreground text-xs">
-              在 4zreark「系统设置 → MCP 接入」创建带 assets:read 的 Key；Key 只用于本次请求。
+              在 4zreark「系统设置 → MCP 接入」创建带 assets:read 的 Key，填到上方连接配置即可长期使用。
             </span>
           </div>
 
@@ -259,16 +232,26 @@ export function AssetSyncDialog({ projects, onSynced }: { projects: Project[]; o
             </div>
           </div>
 
+          <div className="flex items-center gap-3">
+            <Switch id="asset-sync-routes" checked={includeRoutes} onCheckedChange={setIncludeRoutes} />
+            <Label htmlFor="asset-sync-routes" className="cursor-pointer font-normal">
+              同时同步站点路由
+              <span className="text-muted-foreground ml-2 text-xs">
+                爬虫沉淀的路由（site_routes）落成 endpoint 资产，仅对有路由的站点逐站拉取
+              </span>
+            </Label>
+          </div>
+
           {error ? <p className="text-destructive text-sm">{error}</p> : null}
           {result ? <SyncSummary result={result} /> : preview ? <SyncSummary result={preview} /> : null}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => void run(true)} disabled={!canConnect || working}>
+          <Button variant="outline" onClick={() => void run(true)} disabled={!configured || working}>
             {busy === "preview" ? <Loader2Icon className="size-4 animate-spin" /> : null}
             预览
           </Button>
-          <Button onClick={() => void run(false)} disabled={!canConnect || working}>
+          <Button onClick={() => void run(false)} disabled={!configured || working}>
             {busy === "sync" ? <Loader2Icon className="size-4 animate-spin" /> : null}
             开始同步
           </Button>
@@ -286,10 +269,9 @@ function SyncSummary({ result }: { result: AssetSyncResult }) {
         <span>读取 {result.fetched} 项</span>
         <span>可导入 {result.would_import} 项</span>
         {!result.dry_run ? <span className="font-medium">已写入 {result.imported} 项</span> : null}
+        {!result.dry_run && result.routes > 0 ? <span>路由 {result.routes} 条</span> : null}
         {!result.dry_run && result.assigned > 0 ? <span>归属项目 {result.assigned} 项</span> : null}
-        {result.skipped > 0 ? (
-          <span className="text-amber-700 dark:text-amber-300">跳过 {result.skipped} 项</span>
-        ) : null}
+        {result.skipped > 0 ? <span className="text-warning">跳过 {result.skipped} 项</span> : null}
       </div>
       {result.sample.length > 0 ? (
         <div className="mt-2 space-y-1 border-t pt-2 text-xs">

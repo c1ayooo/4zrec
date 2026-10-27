@@ -100,7 +100,7 @@ func incIP(ip net.IP) {
 func (s *Server) toolPortScan() actool.CoreTool {
 	return actool.Build(actool.Spec{
 		Name: "port_scan",
-		Description: "端口扫描与服务识别(主动探测,免特权 TCP connect):内置 top100/web 端口集或自定义端口," +
+		Description: "端口扫描与服务识别(平台内置保底能力,主动探测,免特权 TCP connect):内置 top100/web 端口集或自定义端口," +
 			"令牌桶限速(默认 500 连接/秒,无需 root);开放端口经 fingerprintx 做协议识别(http/ssh/redis/mysql…)," +
 			"可选对识别出的中间件跑无凭据暴露面探测(fscan 式:Redis 未授权/ES 开放/FTP 匿名等)。" +
 			"挂项目上下文时目标必须全部命中项目授权范围,范围外目标直接拒绝。结果入库(IP 资产带开放端口,http 端口建服务资产)。",

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	capkit "github.com/c1ayooo/capkit/core"
-	"github.com/c1ayooo/capkit/gates"
+	capkit "github.com/c1ayooo/4zrec/internal/capkit/core"
+	"github.com/c1ayooo/4zrec/internal/capkit/gates"
 )
 
 // The bridge exposes capkit's intel, generation and binding kits only when the

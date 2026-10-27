@@ -6,6 +6,7 @@
 @import "../styles/presets/brutalist.css";
 @import "../styles/presets/soft-pop.css";
 @import "../styles/presets/tangerine.css";
+@import "../styles/presets/vault.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -32,6 +33,9 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -53,78 +57,106 @@
 }
 
 /* Default theme styles (used when no data-theme-preset is set or when 'default' is selected).
-These serve as the fallback; there is no separate default.css file. */
+Inkstone:近单色中性体系,强调几乎隐形,层次靠亮度差与状态色(2026-10-27 打样定稿,备选见 ~/.zcode/UI_DESIGN.md §10)。
+可选配色走 styles/presets 目录(vault/brutalist/soft-pop/tangerine)。
+*/
 :root {
-  --radius: 0.625rem;
+  --radius: 0.75rem;
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.21 0.006 285);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.21 0.006 285);
+  --primary: oklch(0.26 0.006 285);
+  --primary-foreground: oklch(0.985 0.001 285);
+  --secondary: oklch(0.955 0.002 285);
+  --secondary-foreground: oklch(0.25 0.005 285);
+  --muted: oklch(0.955 0.002 285);
+  --muted-foreground: oklch(0.51 0.01 285);
+  --accent: oklch(0.945 0.003 285);
+  --accent-foreground: oklch(0.25 0.005 285);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --success: oklch(0.55 0.125 160);
+  --warning: oklch(0.62 0.145 65);
+  --info: oklch(0.55 0.15 245);
+  --border: oklch(0.905 0.003 285);
+  --input: oklch(0.905 0.003 285);
+  --ring: oklch(0.26 0.006 285);
+  --chart-1: oklch(0.55 0.1 260);
+  --chart-2: oklch(0.62 0.1 195);
+  --chart-3: oklch(0.7 0.14 70);
+  --chart-4: oklch(0.62 0.16 350);
+  --chart-5: oklch(0.6 0.12 150);
+  --sidebar: oklch(0.952 0.002 285);
+  --sidebar-foreground: oklch(0.21 0.006 285);
+  --sidebar-primary: oklch(0.26 0.006 285);
+  --sidebar-primary-foreground: oklch(0.985 0.001 285);
+  --sidebar-accent: oklch(0.9 0.003 285);
+  --sidebar-accent-foreground: oklch(0.21 0.006 285);
+  --sidebar-border: oklch(0.905 0.003 285);
+  --sidebar-ring: oklch(0.26 0.006 285);
 
   /* fonts */
   --font-sans: var(--font-geist);
   --font-mono: var(--font-geist-mono);
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --background: oklch(0.98 0.001 285);
+  --foreground: oklch(0.21 0.006 285);
+
+  /* 柔影体系:中性低透明(Inkstone,2026-10-27 定稿) */
+  --shadow-2xs: 0 1px 2px oklch(0.21 0.006 285 / 0.05);
+  --shadow-xs: 0 1px 2px oklch(0.21 0.006 285 / 0.05);
+  --shadow-sm: 0 1px 2px oklch(0.21 0.006 285 / 0.06), 0 2px 6px oklch(0.21 0.006 285 / 0.05);
+  --shadow: 0 1px 2px oklch(0.21 0.006 285 / 0.06), 0 4px 10px oklch(0.21 0.006 285 / 0.06);
+  --shadow-md: 0 2px 4px oklch(0.21 0.006 285 / 0.06), 0 6px 14px oklch(0.21 0.006 285 / 0.07);
+  --shadow-lg: 0 4px 8px oklch(0.21 0.006 285 / 0.07), 0 12px 28px oklch(0.21 0.006 285 / 0.09);
+  --shadow-xl: 0 8px 16px oklch(0.21 0.006 285 / 0.08), 0 20px 44px oklch(0.21 0.006 285 / 0.11);
+  --shadow-2xl: 0 12px 24px oklch(0.21 0.006 285 / 0.12), 0 32px 64px oklch(0.21 0.006 285 / 0.14);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --background: oklch(0.17 0.004 285);
+  --foreground: oklch(0.93 0.003 285);
+  --card: oklch(0.215 0.004 285);
+  --card-foreground: oklch(0.93 0.003 285);
+  --popover: oklch(0.2 0.004 285);
+  --popover-foreground: oklch(0.93 0.003 285);
+  --primary: oklch(0.93 0.003 285);
+  --primary-foreground: oklch(0.17 0.004 285);
+  --secondary: oklch(0.26 0.004 285);
+  --secondary-foreground: oklch(0.9 0.003 285);
+  --muted: oklch(0.25 0.004 285);
+  --muted-foreground: oklch(0.63 0.008 285);
+  --accent: oklch(0.29 0.004 285);
+  --accent-foreground: oklch(0.9 0.003 285);
   --destructive: oklch(0.704 0.191 22.216);
+  --success: oklch(0.72 0.19 150);
+  --warning: oklch(0.79 0.155 72);
+  --info: oklch(0.72 0.12 245);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --ring: oklch(0.65 0.005 285);
+  --chart-1: oklch(0.65 0.1 260);
+  --chart-2: oklch(0.7 0.1 195);
+  --chart-3: oklch(0.78 0.14 72);
+  --chart-4: oklch(0.7 0.16 350);
+  --chart-5: oklch(0.7 0.12 150);
+  --sidebar: oklch(0.145 0.004 285);
+  --sidebar-foreground: oklch(0.8 0.003 285);
+  --sidebar-primary: oklch(0.93 0.003 285);
+  --sidebar-primary-foreground: oklch(0.17 0.004 285);
+  --sidebar-accent: oklch(0.27 0.004 285);
+  --sidebar-accent-foreground: oklch(0.95 0.002 285);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: oklch(0.65 0.005 285);
+
+  /* 暗色阴影:深色柔影 */
+  --shadow-2xs: 0 1px 2px oklch(0 0 0 / 0.25);
+  --shadow-xs: 0 1px 2px oklch(0 0 0 / 0.25);
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.3), 0 2px 6px oklch(0 0 0 / 0.25);
+  --shadow: 0 1px 2px oklch(0 0 0 / 0.3), 0 4px 10px oklch(0 0 0 / 0.28);
+  --shadow-md: 0 2px 4px oklch(0 0 0 / 0.3), 0 6px 14px oklch(0 0 0 / 0.28);
+  --shadow-lg: 0 4px 8px oklch(0 0 0 / 0.32), 0 12px 28px oklch(0 0 0 / 0.3);
+  --shadow-xl: 0 8px 16px oklch(0 0 0 / 0.34), 0 20px 44px oklch(0 0 0 / 0.32);
+  --shadow-2xl: 0 12px 24px oklch(0 0 0 / 0.4), 0 32px 64px oklch(0 0 0 / 0.36);
 }
 
 @layer base {
@@ -142,35 +174,35 @@ These serve as the fallback; there is no separate default.css file. */
 }
 
 @layer utilities {
-  [data-theme-preset]:not([data-theme-preset="default"]) .shadow-2xs {
+  [data-theme-preset] .shadow-2xs {
     box-shadow: var(--shadow-2xs);
   }
 
-  [data-theme-preset]:not([data-theme-preset="default"]) .shadow-xs {
+  [data-theme-preset] .shadow-xs {
     box-shadow: var(--shadow-xs);
   }
 
-  [data-theme-preset]:not([data-theme-preset="default"]) .shadow-sm {
+  [data-theme-preset] .shadow-sm {
     box-shadow: var(--shadow-sm);
   }
 
-  [data-theme-preset]:not([data-theme-preset="default"]) .shadow {
+  [data-theme-preset] .shadow {
     box-shadow: var(--shadow);
   }
 
-  [data-theme-preset]:not([data-theme-preset="default"]) .shadow-md {
+  [data-theme-preset] .shadow-md {
     box-shadow: var(--shadow-md);
   }
 
-  [data-theme-preset]:not([data-theme-preset="default"]) .shadow-lg {
+  [data-theme-preset] .shadow-lg {
     box-shadow: var(--shadow-lg);
   }
 
-  [data-theme-preset]:not([data-theme-preset="default"]) .shadow-xl {
+  [data-theme-preset] .shadow-xl {
     box-shadow: var(--shadow-xl);
   }
 
-  [data-theme-preset]:not([data-theme-preset="default"]) .shadow-2xl {
+  [data-theme-preset] .shadow-2xl {
     box-shadow: var(--shadow-2xl);
   }
 
@@ -228,6 +260,14 @@ These serve as the fallback; there is no separate default.css file. */
   html[data-font="playfairDisplay"] body {
     --font-sans: var(--font-playfair-display);
   }
+}
+
+
+/* 侧栏菜单项药丸化(Indigo 方向,2026-10-27 打样定稿)。
+   必须置于分层之外:非分层规则在级联中优先于 @layer utilities 的 rounded-md。 */
+[data-sidebar="menu-button"],
+[data-sidebar="menu-sub-button"] {
+  border-radius: 9999px;
 }
 
 html {

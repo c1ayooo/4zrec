@@ -20,8 +20,8 @@ import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
 import { NavMain } from "./nav-main";
 import { NavUser } from "./nav-user";
+import { ProjectSwitcher } from "./project-switcher";
 import { SidebarSupportCard } from "./sidebar-support-card";
-
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const currentUser = useCurrentUser();
@@ -45,11 +45,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <Link prefetch={false} href="/function/tasks">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="/logo.png" alt="4zrec" width={32} height={32} className="shrink-0 rounded-lg" />
-                <span className="font-semibold text-[16.2px]">{APP_CONFIG.name}</span>
+                <span className="font-semibold text-[13.5px]">{APP_CONFIG.name}</span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
+        {/* 左上角全局项目切换器：切换后全站项目相关页面只显示该项目内容 */}
+        <ProjectSwitcher />
       </SidebarHeader>
       <SidebarContent>
         <NavMain items={sidebarItems} />

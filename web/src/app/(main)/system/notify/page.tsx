@@ -293,10 +293,7 @@ export default function NotifyPage() {
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">通知推送</h1>
-          <p className="text-muted-foreground text-sm">
-            发现漏洞时推送到钉钉 / 飞书 / 企业微信等渠道 · 每个渠道可独立设推送时机与过滤规则
-          </p>
+          <h1 className="text-2xl font-semibold tracking-tight">通知推送</h1>
         </div>
         {meta && (
           // 用 div 而不是 label：Switch 自带 aria-label，外面再套一层 label

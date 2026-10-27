@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	capguard "github.com/c1ayooo/capkit/guard"
+	capguard "github.com/c1ayooo/4zrec/internal/capkit/guard"
 
 	"github.com/c1ayooo/4zrec/internal/domain/db"
 	"github.com/c1ayooo/4zrec/internal/kernel/askernel"
@@ -24,6 +24,9 @@ import (
 //  1. 从出网类工具(Bash/shell_open/shell_send/WebFetch/http_probe)的输入提取
 //     目标对象(IP/域名/URL host):Bash 走「命令对象」解析,http_probe 按字段
 //     结构化取 URL(见 fenceToolTargets/fence_http.go);
+//     会话注入的 ZREC_TARGETS(项目授权目标集,见 server/targets_env.go)按
+//     「引用即授权」语义工作——`$` 形态 token 本就不产生提取对象(宁漏勿扰),
+//     而变量值按构造就是授权集,围栏无需解析;
 //  2. 命中全局/任务黑名单 → 硬阻断(平台管控文案);
 //  3. 目标已获授权(项目范围命中,或库中 authz='approved' 的资产)→ 放行;
 //  4. 其余 → 合成 ask 审批(复用 intercept.HandleAsk:pending 记录 + 内联卡片 +
@@ -56,7 +59,7 @@ func (t fenceTargets) list() []string {
 	return out
 }
 
-// ---- 目标提取已上收 capkit（github.com/c1ayooo/capkit/guard，2026-10-24）----
+// ---- 目标提取已上收 capkit（github.com/c1ayooo/4zrec/internal/capkit/guard，2026-10-24）----
 //
 // 命令词法、URL 结构化、IP 变体归一、TLD 白名单全部是 capkit/guard 的实现；
 // 4zrec 保留的只有 fenceTargets 适配层与 AssetFence 编排（授权判定/审批合成/

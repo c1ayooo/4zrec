@@ -179,17 +179,25 @@ func (s *Server) pgRenameConversation(w http.ResponseWriter, r *http.Request) {
 		Title     *string `json:"title"`
 		Pinned    *bool   `json:"pinned"`
 		ProjectID *int64  `json:"project_id"` // 归属项目(授权根);指向 0=取消挂载;省略=不改
+		TaskID    *int64  `json:"task_id"`    // 关联任务;指向 0=解除关联;省略=不改
 	}
 	if !decodeConversationRequest(w, r, &req) {
 		return
 	}
-	if req.Title == nil && req.Pinned == nil && req.ProjectID == nil {
-		writeErr(w, 400, "至少需要提供 title、pinned 或 project_id")
+	if req.Title == nil && req.Pinned == nil && req.ProjectID == nil && req.TaskID == nil {
+		writeErr(w, 400, "至少需要提供 title、pinned、project_id 或 task_id")
 		return
 	}
 	if req.ProjectID != nil && *req.ProjectID > 0 {
 		if p, err := pg.Projects().GetProject(*req.ProjectID); err != nil || p.ID == 0 {
 			writeErr(w, 400, "项目不存在")
+			return
+		}
+	}
+	if req.TaskID != nil && *req.TaskID > 0 {
+		t, err := pg.GetTask(*req.TaskID)
+		if err != nil || t == nil {
+			writeErr(w, 400, "任务不存在")
 			return
 		}
 	}
@@ -205,7 +213,7 @@ func (s *Server) pgRenameConversation(w http.ResponseWriter, r *http.Request) {
 		}
 		req.Title = &title
 	}
-	updated, err := pg.UpdateConversation(c.ID, db.ConversationPatch{Title: req.Title, Pinned: req.Pinned, ProjectID: req.ProjectID})
+	updated, err := pg.UpdateConversation(c.ID, db.ConversationPatch{Title: req.Title, Pinned: req.Pinned, ProjectID: req.ProjectID, TaskID: req.TaskID})
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return

@@ -1,0 +1,6 @@
+name: test-pack
+version: "1.0"
+source: https://example.com/templates
+license: Apache-2.0
+templates:
+  - templates/**/*.yaml

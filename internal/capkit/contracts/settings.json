@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/c1ayooo/capkit/contracts/settings.json",
+  "title": "SettingSpec",
+  "type": "object",
+  "required": ["key", "type"],
+  "properties": {
+    "key": { "type": "string" },
+    "type": { "enum": ["string", "bool", "int"] },
+    "default": {},
+    "description": { "type": "string" },
+    "secret": { "type": "boolean" }
+  },
+  "additionalProperties": false
+}

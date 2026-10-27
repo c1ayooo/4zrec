@@ -1,5 +1,5 @@
+import { type StatusDomain, statusMeta, type Tone, toneClasses, toneDot } from "@/lib/status";
 import { cn } from "@/lib/utils";
-import { statusMeta, toneClasses, toneDot, type StatusDomain, type Tone } from "@/lib/status";
 
 export function StatusBadge({
   domain,

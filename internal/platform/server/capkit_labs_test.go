@@ -21,10 +21,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit/adapters/exec"
-	"github.com/c1ayooo/capkit/adapters/httpx"
-	capkit "github.com/c1ayooo/capkit/core"
-	"github.com/c1ayooo/capkit/gates"
+	"github.com/c1ayooo/4zrec/internal/capkit/adapters/exec"
+	"github.com/c1ayooo/4zrec/internal/capkit/adapters/httpx"
+	capkit "github.com/c1ayooo/4zrec/internal/capkit/core"
+	"github.com/c1ayooo/4zrec/internal/capkit/gates"
 
 	"github.com/c1ayooo/4zrec/internal/capkitbridge"
 )

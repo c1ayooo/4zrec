@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit/core"
+	"github.com/c1ayooo/4zrec/internal/capkit/core"
 	mysqldriver "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib" // postgres driver for sql.Open("pgx", ...)
 )

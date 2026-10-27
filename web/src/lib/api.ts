@@ -150,6 +150,12 @@ import type {
   VulnPipelineStatus,
   WorkspaceFile,
   WorkspaceListing,
+  ZrearkConfig,
+  ZrearkDispatchRequest,
+  ZrearkDispatchResult,
+  ZrearkTask,
+  ZrearkTaskResultsRequest,
+  ZrearkTaskResultsResult,
 } from "@/lib/types";
 
 function getToken(): string | null {
@@ -303,8 +309,11 @@ export const api = {
   deleteAPIKey: (id: number) => del<{ ok: boolean }>(`/api-keys/${id}`),
 
   // ---- tasks ----
-  tasks: () =>
-    get<{ tasks: Task[]; active: string }>("/tasks").then((r) => ({ tasks: arr(r.tasks), active: r.active ?? "" })),
+  tasks: (projectId?: number) =>
+    get<{ tasks: Task[]; active: string }>(`/tasks${projectId ? `?project_id=${projectId}` : ""}`).then((r) => ({
+      tasks: arr(r.tasks),
+      active: r.active ?? "",
+    })),
   task: (id: string) => get<Task>(`/tasks/${encodeURIComponent(id)}`),
   createTask: (input: {
     name?: string;
@@ -556,9 +565,20 @@ export const api = {
   deleteAssets: (ids: number[]) =>
     http<{ deleted: number }>("/assets", { method: "DELETE", body: JSON.stringify({ ids }) }),
   // 从 4zreark 的 MCP 接口读取站点资产；dry_run 只预览不写库。
-  assetSyncProjects: (payload: { base_url: string; api_key: string }) =>
+  // 连接信息可缺省：后端回落到已持久化的 4zreark 配置。
+  assetSyncProjects: (payload: { base_url?: string; api_key?: string }) =>
     post<{ projects: AssetSyncSourceProject[] }>("/assets/sync/projects", payload),
   assetSync: (payload: AssetSyncRequest) => post<AssetSyncResult>("/assets/sync", payload),
+  // 4zreark 平台集成：连接配置（key 掩码回显、留空不变）与采集任务下发。
+  zrearkConfig: () => get<ZrearkConfig>("/assets/zreark/config"),
+  zrearkConfigSet: (payload: { base_url: string; api_key?: string }) =>
+    post<ZrearkConfig>("/assets/zreark/config", payload),
+  zrearkDispatch: (payload: ZrearkDispatchRequest) => post<ZrearkDispatchResult>("/assets/zreark/dispatch", payload),
+  zrearkTasks: (payload: { source_project_id?: number; status?: string }) =>
+    post<{ tasks: ZrearkTask[]; total: number }>("/assets/zreark/tasks", payload),
+  // 按任务拉取指纹(service)与爬虫路由(crawler)结果入库。
+  zrearkTaskResults: (payload: ZrearkTaskResultsRequest) =>
+    post<ZrearkTaskResultsResult>("/assets/zreark/task-results", payload),
   // task-scoped view of the same endpoint — server-side paginated like `assets`
   taskAssets: (taskId: string, type = "", limit = 50, offset = 0) =>
     get<{ count: number; total: number; assets: Asset[] }>(
@@ -1172,8 +1192,10 @@ export const api = {
   conversations: () => get<{ conversations: Conversation[] }>("/conversations").then((r) => arr(r.conversations)),
   createConversation: (agent_key: string, title = "", llm_profile_id?: number | null) =>
     post<Conversation>("/conversations", { agent_key, title, llm_profile_id: llm_profile_id ?? null }),
-  updateConversation: (id: number, input: { title?: string; pinned?: boolean; project_id?: number }) =>
-    patch<Conversation>(`/conversations/${id}`, input),
+  updateConversation: (
+    id: number,
+    input: { title?: string; pinned?: boolean; project_id?: number; task_id?: number },
+  ) => patch<Conversation>(`/conversations/${id}`, input),
   renameConversation: (id: number, title: string) => patch<Conversation>(`/conversations/${id}`, { title }),
   pinConversation: (id: number, pinned: boolean) => patch<Conversation>(`/conversations/${id}`, { pinned }),
   updateConversationProfile: (id: number, llm_profile_id: number | null) =>

@@ -255,9 +255,9 @@ function applyDslSuggestion(text: string, s: DslSuggestion): { text: string; cur
 }
 
 const KIND_STYLE: Record<string, string> = {
-  field: "text-blue-500 dark:text-blue-400",
-  operator: "text-amber-500 dark:text-amber-400",
-  logic: "text-emerald-500 dark:text-emerald-400",
+  field: "text-info",
+  operator: "text-warning",
+  logic: "text-success",
 };
 
 // AssetDslSearch is the shared DSL search box: a monospace input with a

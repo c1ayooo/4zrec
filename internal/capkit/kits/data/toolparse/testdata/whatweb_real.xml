@@ -1,0 +1,24 @@
+<log>
+<target>
+	<uri>http://127.0.0.1:18082/</uri>
+	<http-status>200</http-status>
+	<request-config>
+		<header>
+			<header-name>User-Agent</header-name>
+			<header-value>WhatWeb/0.5.5</header-value>
+		</header>
+	</request-config>
+	<plugin>
+		<name>HTTPServer</name>
+		<string>BaseHTTP/0.6 Python/3.12.3, nginx/1.18.0</string>
+	</plugin>
+	<plugin>
+		<name>Python</name>
+		<version>3.12.3,</version>
+	</plugin>
+	<plugin>
+		<name>Title</name>
+		<string>Test App</string>
+	</plugin>
+</target>
+</log>

@@ -2,6 +2,37 @@
 
 本项目的重要变更记录在此文件中，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.5.2] - 2026-10-27
+
+### 围栏约定：目标先声明、再引用；批量请求治本
+
+- **`ZREC_TARGETS` 目标变量注入**：项目授权目标（范围 domain/ip/cidr ∪ approved 资产，与围栏授权同源）注入 agent 的 Bash 环境变量 `ZREC_TARGETS`（封顶 500 条；任务侧 planner/worker/mainagent 按任务解析项目、chat 按 `conv-<id>` 解析；未挂项目不注入）。引用变量 = 已授权目标，围栏直接放行（`$` 形态 token 本就不产生提取对象，变量值按构造就是授权集）；任务改挂项目、资产新获批后下一轮 run 即生效。
+- **目标引用约定进硬规则提示**：worker/planner/mainagent 与渗透类 chat agent（pentest/recon/auto）的系统提示追加「目标引用约定」——清单类工具先 `tr ' ' '\n' <<<"$ZREC_TARGETS" > targets.txt` 再 `-iL/-l`；新目标不写死进脚本，直接打会经围栏转人工审批（批准即授权）。
+- **批量 bash 循环拦截（http_probe 优先策略扩展）**：`for/while` 循环体里的简单 curl/wget 与裸 curl 同罪拦下，文案指路 `requests[]`（一次调用逐包发送、逐条完整落证并各自返回 traffic_id）与 `template+matrix/range`——「bash 循环省意图」的卖点不复存在，模型自然转向结构化批量。管道/重定向/命令替换、非 HTTP 工具（nmap/dig 等）与本地循环不拦，复杂形态例外口径不变。
+
+### capkit 并入项目 + 工具 schema 供应商兼容修复
+
+- **capkit 全量并入 `internal/capkit/`**：不再作为独立仓库依赖——adapters/kits/core/gates/guard/runtime 等约 370 个 Go 文件进模块，import 路径改写为 `github.com/c1ayooo/4zrec/internal/capkit`，go.mod 删除 require 与本地 replace，capkit 自身的三方依赖（AWS/阿里云/华为云/腾讯云 SDK、pgx、gjson 等）收编进本模块；协议文档（docs/）随迁，examples 与上游 CI 脚本不迁。
+- **exploitkit 注入点 schema 修复**：7 个带注入点的工具（cmdi_probe/cmdi_execute/ssti_probe/lfi_probe/lfi_read/sqli_probe/ssrf_probe）原用 draft-04 `definitions` + `$ref`，而宿主的模型管线只透传 `$defs`——`definitions` 被静默丢弃后引用悬空，严格校验的供应商（DeepSeek 官方 API）以 `Pointer '/definitions/inject_point' does not exist` 拒绝整个工具请求，意图未起步即 blocked。现改为内联注入点对象 schema（同时修掉定义内容多包一层 `point` 的嵌套语义错误），新增防回归测试（工具 schema 出现 `$ref`/`definitions` 即失败、point 必须直接 require url）；`refreshCapkitToolSchemas` 一次性把修正后的 schema 刷回存量工具行（保留绑定与启用状态）。
+
+### 4zreark：任务下发与结果回流
+
+- **资产收集任务下发**：走 4zreark MCP（create_task → start_task，list_tasks 轮询状态），任务类型白名单限定资产收集子集（资产发现/综合采集/子域名/端口/指纹/爬虫/目录扫描），攻击性验证类型不在此入口；资产页新增调度对话框与连接状态条。
+- **结果回流落资产**：按任务 `get_task_results`——service 结果（HTTP 指纹 technologies/fingerprints）并入站点技术栈，crawler 路由与 `list_asset_routes` 的 site_routes 落 endpoint 资产。
+- **定时同步**：新增 4zreark 站点资产定时拉取调度（复用 asset_sync 核心）；未配置连接或鉴权失败按 authFail 走指数退避熔断，API key 请求显式传入优先、回落持久化配置。
+
+### 本地保底收集
+
+- 新增 `web_crawl`（同域爬虫）与 `dir_scan`（目录探测）：平台自身保底能力，轻量、单点、离线可用，与 4zreark 的 crawler/dir_scan 任务类型对齐；批量/重采集走 4zreark 通道。RoE 门控同 portscan——挂项目上下文时范围外硬拒绝，无项目上下文走人工确认。
+
+### 对话关联任务
+
+- `conversations` 新增 `task_id`（纯引用，任务删除置 NULL；设置时通常同时把 project_id 对齐到任务所属项目）；对话 PATCH 支持部分更新 title/pin/project_id/task_id（省略=不改，0=清除）。
+
+### Web：审批中心、项目切换与全局态势
+
+- 新增审批中心独立页；顶栏项目切换器（dropdown + 项目级 store）；OpsPulse 全局态势条常驻顶栏下方（运行中任务/待审批数/LLM 状态，只让有内容的项发声，30s 轮询出错静默保留旧值）；新增 vault 主题预设、字体注册表调整与多处视觉统一。
+
 ## [0.5.1] - 2026-10-22
 
 ### 漏洞情报流水线：AI 分析 → 模板/指纹/PoC 草稿 → 人工确认
@@ -1307,6 +1338,8 @@
 - [@neouks](https://github.com/neouks)
 
 [Unreleased]: https://github.com/c1ayooo/4zrec/compare/v0.5.0...HEAD
+[0.5.2]: https://github.com/c1ayooo/4zrec/compare/v0.5.1...v0.5.2
+[0.5.1]: https://github.com/c1ayooo/4zrec/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/c1ayooo/4zrec/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/c1ayooo/4zrec/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/c1ayooo/4zrec/compare/v0.4.2...v0.4.3

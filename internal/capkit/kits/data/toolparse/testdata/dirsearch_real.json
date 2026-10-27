@@ -1,0 +1,8 @@
+{
+    "info": {"args": "dirsearch -u http://127.0.0.1:18082 -O json -o /tmp/ds.json", "time": "2026-09-25 03:21:04"},
+    "results": [
+        {"contentLength": 34, "contentType": "text/html", "elapsed": 0.015, "redirect": "", "status": 200, "url": "http://127.0.0.1:18082/search.php"},
+        {"contentLength": 12, "contentType": "text/html", "elapsed": 0.017, "redirect": "", "status": 200, "url": "http://127.0.0.1:18082/index.html"},
+        {"contentLength": 0, "contentType": "", "elapsed": 0.024, "redirect": "/assets/", "status": 301, "url": "http://127.0.0.1:18082/assets"}
+    ]
+}

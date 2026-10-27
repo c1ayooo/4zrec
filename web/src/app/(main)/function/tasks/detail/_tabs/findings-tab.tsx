@@ -172,11 +172,7 @@ function Row({
             )}
           </div>
           {(detail?.evidence ?? f.evidence) ? (
-            <EvidenceViewer
-              text={detail?.evidence ?? f.evidence}
-              reproduction={detail?.reproduction}
-              compact
-            />
+            <EvidenceViewer text={detail?.evidence ?? f.evidence} reproduction={detail?.reproduction} compact />
           ) : (
             <p className="text-sm text-muted-foreground">（无证据）</p>
           )}

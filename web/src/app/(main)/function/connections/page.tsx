@@ -11,9 +11,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import type { Connection, Project } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -271,9 +273,9 @@ export default function ConnectionsPage() {
       variant="outline"
       className={
         c.status === "alive"
-          ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+          ? "border-success/25 bg-success/10 text-success"
           : c.status === "dead"
-            ? "border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300"
+            ? "border-destructive/25 bg-destructive/10 text-destructive"
             : "text-muted-foreground"
       }
     >
@@ -330,10 +332,6 @@ export default function ConnectionsPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">连接管理</h1>
-          <p className="text-muted-foreground mt-1 max-w-3xl text-sm leading-relaxed">
-            SSH / 数据库 / 协议（SMB/WinRM/LDAP/VNC/FTP）凭据台账，按项目归集。worker 任务中验证成功的凭据
-            自动落库（source=discovered），也可手工登记；凭据明文存储，用于任务中的连接复用与凭据利用。
-          </p>
         </div>
         <Button size="sm" onClick={() => setAddOpen(true)}>
           <PlusIcon className="size-4" /> 登记凭据
@@ -374,9 +372,9 @@ export default function ConnectionsPage() {
       <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-4">
         {[
           { label: "凭据总数", value: credentialStats.total, dot: "bg-foreground" },
-          { label: "有效", value: credentialStats.alive, dot: "bg-emerald-600" },
-          { label: "失效", value: credentialStats.dead, dot: "bg-red-600" },
-          { label: "未验证", value: credentialStats.unverified, dot: "bg-slate-400" },
+          { label: "有效", value: credentialStats.alive, dot: "bg-success" },
+          { label: "失效", value: credentialStats.dead, dot: "bg-destructive" },
+          { label: "未验证", value: credentialStats.unverified, dot: "bg-warning" },
         ].map((stat) => (
           <div key={stat.label} className="bg-card px-4 py-3">
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -391,15 +389,19 @@ export default function ConnectionsPage() {
       <Card>
         <CardContent className="px-0">
           {rows === null ? (
-            <p className="text-muted-foreground px-4 py-6 text-sm">加载中…</p>
+            <div className="flex flex-col gap-3 px-4 py-6">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
           ) : rows.length === 0 ? (
             <div className="px-4 py-8">
-              <div className="rounded-lg border border-dashed px-4 py-6">
-                <p className="text-sm font-medium">暂无凭据</p>
-                <p className="text-muted-foreground mt-1 text-sm">
-                  worker 在任务中验证成功会自动落库；也可以手工登记第一条凭据。
-                </p>
-              </div>
+              <Empty>
+                <EmptyHeader>
+                  <EmptyTitle>暂无凭据</EmptyTitle>
+                  <EmptyDescription>worker 在任务中验证成功会自动落库；也可以手工登记第一条凭据。</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             </div>
           ) : (
             <>

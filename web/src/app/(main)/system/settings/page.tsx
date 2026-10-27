@@ -467,8 +467,7 @@ export default function SystemSettingsPage() {
   return (
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">系统配置</h1>
-        <p className="text-muted-foreground text-sm">全局运行时开关</p>
+        <h1 className="text-2xl font-semibold tracking-tight">系统配置</h1>
       </div>
 
       {/* 多列而非 grid：网络搜索卡片比其余高数倍，且高度随所选后端变化（brave/tavily
@@ -901,7 +900,7 @@ export default function SystemSettingsPage() {
               <div className="flex flex-col gap-2">
                 <Label htmlFor="brave-key" className="text-sm font-normal text-muted-foreground">
                   Brave Search API Key
-                  {braveKeySet && <span className="ml-2 text-xs text-emerald-500">已配置</span>}
+                  {braveKeySet && <span className="ml-2 text-xs text-success">已配置</span>}
                 </Label>
                 <div className="flex items-center gap-2">
                   <Input
@@ -922,7 +921,7 @@ export default function SystemSettingsPage() {
                   </Button>
                 </div>
                 {braveNeedsKey && (
-                  <p className="text-xs text-amber-500">
+                  <p className="text-xs text-warning">
                     已选择 Brave 但尚未配置 Key —— 在保存 Key 之前，搜索工具不会启用。
                   </p>
                 )}
@@ -936,7 +935,7 @@ export default function SystemSettingsPage() {
               <div className="flex flex-col gap-2">
                 <Label htmlFor="tavily-key" className="text-sm font-normal text-muted-foreground">
                   Tavily Search API Key
-                  {tavilyKeySet && <span className="ml-2 text-xs text-emerald-500">已配置</span>}
+                  {tavilyKeySet && <span className="ml-2 text-xs text-success">已配置</span>}
                 </Label>
                 <div className="flex items-center gap-2">
                   <Input
@@ -957,7 +956,7 @@ export default function SystemSettingsPage() {
                   </Button>
                 </div>
                 {webSearch && backend === "tavily" && !tavilyKeySet && (
-                  <p className="text-xs text-amber-500">
+                  <p className="text-xs text-warning">
                     已选择 Tavily 但尚未配置 Key —— 在保存 Key 之前，搜索工具不会启用。
                   </p>
                 )}

@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/c1ayooo/capkit/contracts/output.json",
+  "title": "ToolOutputContract",
+  "description": "Envelope-level invariants every tool return must satisfy, independent of any single tool's payload. CI validates real returns against this contract plus each tool's declared output_schema (which constrains Result.Data). See docs/究极渗透能力包实现方案.md §5.5 and §8.",
+  "type": "object",
+  "required": ["ok", "status", "summary", "meta"],
+  "properties": {
+    "ok": {
+      "type": "boolean",
+      "description": "Derived from status: true for success/partial, false otherwise."
+    },
+    "status": {
+      "enum": ["success", "partial", "failed", "blocked", "need_human", "unavailable"],
+      "description": "Exactly one of the six states; never absent on a real return."
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "Non-empty, <=200 runes, directly readable by an agent."
+    },
+    "data": {
+      "description": "Optional structured payload. Must validate against the calling tool's output_schema when present. Serialized size must be <= 8192 bytes; larger payloads are truncated with truncated=true and page.total set."
+    },
+    "truncated": { "type": "boolean" },
+    "page": { "$ref": "#/$defs/Page" },
+    "findings": { "type": "array" },
+    "evidence": { "type": "array" },
+    "next": { "type": "array" },
+    "error": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "$ref": "#/$defs/ErrorCode" },
+        "message": { "type": "string" },
+        "retryable": { "type": "boolean" },
+        "retry_after_ms": { "type": "integer", "minimum": 0 },
+        "hint": { "type": "string" },
+        "detail": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "meta": {
+      "type": "object",
+      "required": ["tool", "duration_ms"],
+      "properties": {
+        "tool": { "type": "string", "minLength": 1 },
+        "version": { "type": "string" },
+        "duration_ms": { "type": "integer", "minimum": 1 },
+        "requests": { "type": "integer", "minimum": 0 },
+        "target": { "type": "string" },
+        "gate_trace": { "type": "array", "items": { "type": "string" } },
+        "cached": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "ErrorCode": {
+      "description": "Fixed enum. Retryable must be semantic: scope_denied / approval_required / tool_missing are never retryable.",
+      "enum": [
+        "bad_input", "scope_denied", "approval_required", "not_found",
+        "conflict", "rate_limited", "unavailable", "internal", "need_human",
+        "tool_missing", "target_unreachable", "timeout", "upstream_error",
+        "evidence_write_failed"
+      ]
+    },
+    "Page": {
+      "type": "object",
+      "required": ["total", "has_more"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "cursor": { "type": "string" },
+        "has_more": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

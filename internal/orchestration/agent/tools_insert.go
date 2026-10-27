@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/c1ayooo/4zrec/internal/domain/db"
+	"github.com/c1ayooo/4zrec/internal/toolface/intercept"
 	actool "github.com/c1ayooo/4zrec/internal/toolface/tools"
 )
 
@@ -578,7 +579,7 @@ func (t *ToolSet) listAssets() actool.CoreTool {
 			"limit":  intp("返回上限，默认 10（可选）"),
 			"offset": intp("分页偏移，默认 0（可选）"),
 		}),
-		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			if t.as == nil {
 				return actool.Errorf("list_assets 未启用: AssetStore 未初始化"), nil
 			}
@@ -595,15 +596,39 @@ func (t *ToolSet) listAssets() actool.CoreTool {
 				a.Limit = 10
 			}
 
+			// 项目隔离:任务上下文沿用任务范围;无任务的对话按会话挂载项目收口
+			// (conv→project;未挂项目 = 全局助手语义,不收口)。
+			scopeProject := int64(0)
+			if t.taskID <= 0 {
+				if conv := intercept.ConvIDFromContext(ctx); conv > 0 {
+					if pid, err := t.as.DB().ConvProjectID(conv); err == nil {
+						scopeProject = pid
+					}
+				}
+			}
+			inProject := t.taskID <= 0 && scopeProject > 0
+
 			var assets []*db.Asset
 			var err error
 			switch {
 			case a.ID > 0:
-				assets, err = t.as.GetByIDsInScope(t.taskID, []int64{a.ID})
+				if inProject {
+					assets, err = t.as.GetByIDsInProject(scopeProject, []int64{a.ID})
+				} else {
+					assets, err = t.as.GetByIDsInScope(t.taskID, []int64{a.ID})
+				}
 			case len(a.IDs) > 0:
-				assets, err = t.as.GetByIDsInScope(t.taskID, a.IDs)
+				if inProject {
+					assets, err = t.as.GetByIDsInProject(scopeProject, a.IDs)
+				} else {
+					assets, err = t.as.GetByIDsInScope(t.taskID, a.IDs)
+				}
 			case a.DSL != "":
-				assets, err = t.as.QueryDSLInScope(a.DSL, a.Type, t.taskID, a.Limit, a.Offset)
+				if inProject {
+					assets, err = t.as.QueryDSLInProject(a.DSL, a.Type, scopeProject, a.Limit, a.Offset)
+				} else {
+					assets, err = t.as.QueryDSLInScope(a.DSL, a.Type, t.taskID, a.Limit, a.Offset)
+				}
 			default:
 				return actool.Errorf("未传 id/ids 时 dsl 不能为空：不允许无条件查询全部资产，请提供查询条件"), nil
 			}

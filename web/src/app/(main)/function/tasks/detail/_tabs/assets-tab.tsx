@@ -47,13 +47,13 @@ import { cn } from "@/lib/utils";
 const PAGE_SIZES = [25, 50, 100, 200];
 
 const METHOD_COLOR: Record<string, string> = {
-  DELETE: "bg-red-100 text-red-700",
-  GET: "bg-emerald-100 text-emerald-700",
-  HEAD: "bg-purple-100 text-purple-700",
-  OPTIONS: "bg-slate-100 text-slate-600",
-  PATCH: "bg-orange-100 text-orange-700",
-  POST: "bg-blue-100 text-blue-700",
-  PUT: "bg-amber-100 text-amber-700",
+  DELETE: "bg-destructive/15 text-destructive",
+  GET: "bg-success/15 text-success",
+  HEAD: "bg-chart-4/15 text-chart-4",
+  OPTIONS: "bg-secondary text-secondary-foreground",
+  PATCH: "bg-warning/15 text-warning",
+  POST: "bg-info/15 text-info",
+  PUT: "bg-warning/15 text-warning",
 };
 
 const TABS: { key: NewAssetType; label: string; icon: LucideIcon }[] = [
@@ -103,10 +103,10 @@ function MethodBadge({ method }: { method: string }) {
 }
 
 function statusTone(code: number) {
-  if (code >= 500) return "text-red-500";
-  if (code >= 400) return "text-amber-500";
-  if (code >= 300) return "text-blue-500";
-  if (code >= 200) return "text-emerald-500";
+  if (code >= 500) return "text-destructive";
+  if (code >= 400) return "text-warning";
+  if (code >= 300) return "text-info";
+  if (code >= 200) return "text-success";
   return "text-muted-foreground";
 }
 

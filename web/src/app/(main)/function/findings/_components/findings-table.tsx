@@ -34,6 +34,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { statusMeta } from "@/lib/status";
@@ -423,7 +424,13 @@ export function FindingsTable({
                           {(() => {
                             const rep = reports[rowKey];
                             if (!rep || rep.status === "loading")
-                              return <p className="text-xs text-muted-foreground">加载中…</p>;
+                              return (
+                                <div className="text-xs text-muted-foreground flex flex-col gap-3">
+                                  <Skeleton className="h-10 w-full" />
+                                  <Skeleton className="h-10 w-full" />
+                                  <Skeleton className="h-10 w-full" />
+                                </div>
+                              );
                             if (rep.status === "error")
                               return <p className="text-xs text-muted-foreground">报告加载失败。</p>;
                             if (!rep.text.trim())

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	capkit "github.com/c1ayooo/capkit/core"
+	capkit "github.com/c1ayooo/4zrec/internal/capkit/core"
 )
 
 // capkitCompleter adapts the host's model profile to capkit's Completer port.

@@ -7,7 +7,7 @@ import (
 
 	mysqldriver "github.com/go-sql-driver/mysql"
 
-	"github.com/c1ayooo/capkit/core"
+	"github.com/c1ayooo/4zrec/internal/capkit/core"
 )
 
 func TestDBWriteStatementClassification(t *testing.T) {

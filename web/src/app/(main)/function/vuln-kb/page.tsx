@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import { FeatureCallHistory } from "@/components/feature-call-history";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -44,26 +45,22 @@ const FP_MAX_LEN = 48;
 
 // typeTone 按漏洞类型给徽章配色:高危语义类偏红,注入类偏琥珀,其余中性。
 function typeTone(v: string): string {
-  if (/rce|命令|代码执行/i.test(v)) return "border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400";
-  if (/注入|sql|inject|上传|deserial|反序列/i.test(v))
-    return "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400";
-  if (/绕过|未授权|泄露|信息泄露/i.test(v)) return "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400";
+  if (/rce|命令|代码执行/i.test(v)) return "border-destructive/30 bg-destructive/10 text-destructive";
+  if (/注入|sql|inject|上传|deserial|反序列/i.test(v)) return "border-warning/30 bg-warning/10 text-warning";
+  if (/绕过|未授权|泄露|信息泄露/i.test(v)) return "border-info/30 bg-info/10 text-info";
   return "";
 }
 
 function intelTone(v: string): string {
-  if (v.includes("严重") || v.includes("critical"))
-    return "border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400";
-  if (v.includes("高危") || v.includes("high"))
-    return "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400";
-  if (v.includes("中危") || v.includes("medium"))
-    return "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400";
+  if (v.includes("严重") || v.includes("critical")) return "border-destructive/30 bg-destructive/10 text-destructive";
+  if (v.includes("高危") || v.includes("high")) return "border-warning/30 bg-warning/10 text-warning";
+  if (v.includes("中危") || v.includes("medium")) return "border-info/30 bg-info/10 text-info";
   return "";
 }
 
 function sourceTone(source: string): string {
-  if (source === "intel") return "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400";
-  return "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400";
+  if (source === "intel") return "border-info/30 bg-info/10 text-info";
+  return "border-success/30 bg-success/10 text-success";
 }
 
 function sourceLabel(source: string): string {
@@ -77,8 +74,8 @@ function truncate(s: string, maxLen: number): string {
 }
 
 function verdictTone(v: string): string {
-  if (v === "act") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400";
-  if (v === "watch") return "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400";
+  if (v === "act") return "border-success/30 bg-success/10 text-success";
+  if (v === "watch") return "border-warning/30 bg-warning/10 text-warning";
   return "";
 }
 
@@ -603,12 +600,16 @@ function LibraryTab() {
                   onFpDiscard={runFpDiscard}
                 />
               ) : (
-                <p className="py-8 text-center text-sm text-muted-foreground">加载失败</p>
+                <Alert variant="destructive" className="m-4">
+                  <AlertDescription>加载失败，请刷新重试。</AlertDescription>
+                </Alert>
               )
             ) : kbDetail ? (
               <KbDetail entry={kbDetail} />
             ) : (
-              <p className="py-8 text-center text-sm text-muted-foreground">加载失败</p>
+              <Alert variant="destructive" className="m-4">
+                <AlertDescription>加载失败，请刷新重试。</AlertDescription>
+              </Alert>
             )}
           </div>
         </SheetContent>
@@ -756,7 +757,7 @@ function IntelDetail({
         </p>
       ) : null}
       {entry.analysis_error ? (
-        <p className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+        <p className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">
           上次分析失败：{entry.analysis_error}（下一轮会自动重试，也可点上方按钮立即重试）
         </p>
       ) : null}
@@ -782,7 +783,7 @@ function IntelDetail({
           <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-md border bg-muted/50 p-2 font-mono text-xs">
             {a.poc_code}
           </pre>
-          {a.poc_note ? <p className="text-[11px] text-amber-600 dark:text-amber-400">{a.poc_note}</p> : null}
+          {a.poc_note ? <p className="text-[11px] text-warning">{a.poc_note}</p> : null}
         </div>
       ) : a && a.poc_origin === "upstream" ? (
         <p className="text-xs text-muted-foreground">上游仓库已有 PoC（见下方仓库列表），未另行生成代码。</p>
@@ -801,7 +802,7 @@ function IntelDetail({
                 {entry.nuclei_tpl_id}
               </Badge>
             ) : (
-              <Badge className="bg-amber-500/15 text-[11px] text-amber-600 dark:text-amber-400">未写入模板库</Badge>
+              <Badge className="bg-warning/15 text-[11px] text-warning">未写入模板库</Badge>
             )}
           </span>
           {a?.nuclei_template ? (
@@ -821,7 +822,7 @@ function IntelDetail({
                 {entry.fingerprint_id}
               </Badge>
             ) : (
-              <Badge className="bg-amber-500/15 text-[11px] text-amber-600 dark:text-amber-400">未写入指纹库</Badge>
+              <Badge className="bg-warning/15 text-[11px] text-warning">未写入指纹库</Badge>
             )}
           </span>
           {fpDraft ? (

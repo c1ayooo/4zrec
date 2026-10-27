@@ -1,0 +1,41 @@
+┌──────────────────────────────────────────────┐
+│    ___                              _        │
+│   / _ \     ___  ___ _ __ __ _  ___| | __    │
+│  / /_\/____/ __|/ __| '__/ _` |/ __| |/ /    │
+│ / /_\\_____\__ \ (__| | | (_| | (__|   <     │
+│ \____/     |___/\___|_|  \__,_|\___|_|\_\    │
+└──────────────────────────────────────────────┘
+      Fscan 2.2.1
+
+[*] 服务插件: webpoc, webtitle
+[*] 参数自适应: Timeout=1000ms, ModuleThread=5, Retry=1, ICMPRate=0.50, PocNum=5
+[*] http://127.0.0.1:18097         http     [Product:Open Lighting Architecture daemon] Banner:(<!DOCTYPE HTML> <html lang="en"> <head> <meta charset="utf-8"> <title>Error resp...)
+[*] http://127.0.0.1:18099         http     [Product:Open Lighting Architecture daemon] Banner:(HTTP/1.1 400 Bad Request Content-Type: text/plain; charset=utf-8 Connection: clo...)
+[*] 扫描完成，发现 2 个开放端口
+[*] http://127.0.0.1:18099         code:404 len:0     title:None                
+[*] POC加载完成: 总共487个，成功487个，失败0个
+[+] http://127.0.0.1:18097         code:200 len:443   title:Directory listing for / server:SimpleHTTP/0.6 Python/3.12.3 [目录遍历 列目录]
+[*] 扫描任务完成，耗时 13.241s，已扫描 4 个目标
+
+[+] alive 10.10.10.5
+[!] MySQL 10.10.10.5:3306 root:123456
+[!] SSH密码认证成功: 10.10.10.5:22 [root:toor]
+[!] 检测到漏洞 http://10.10.10.5:8080 poc-yaml-backup-file
+[!] 目标: http://10.10.10.5:8090
+  漏洞类型: poc-yaml-drupal-cve-2018-7600
+  漏洞名称: Drupal Drupalgeddon2 远程代码执行
+[!] Redis 10.10.10.6:6379 未授权访问
+[!] MS17-010漏洞 (10.10.10.7)
+
+# ===== 开放端口 =====
+127.0.0.1:18097
+127.0.0.1:18099
+
+# ===== 服务信息 =====
+http://127.0.0.1:18097 [Directory listing for /] 200 SimpleHTTP/0.6 Python/3.12.3 [目录遍历,列目录]
+http://127.0.0.1:18099 404
+
+# ===== Web服务 =====
+http://127.0.0.1:18097
+http://127.0.0.1:18099
+

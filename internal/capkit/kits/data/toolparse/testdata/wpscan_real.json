@@ -1,0 +1,6 @@
+{
+  "version": {"number": "5.9.2", "released": "2021-11-17", "status": "outdated", "interesting_findings": []},
+  "main_theme": {"slug": "twentytwenty", "location": "http://127.0.0.1:18083/wp-content/themes/twentytwenty/", "version": {"number": "1.8"}},
+  "plugins": {"contact-form-7": {"version": {"number": "5.5.6"}, "vulnerabilities": [{"id": "45f8d3c6", "title": "Contact Form 7 <= 5.5.6 - Authenticated SQL Injection", "severity": "high", "description": "..."}]}},
+  "vulnerabilities": []
+}

@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/c1ayooo/capkit/contracts/result.json",
+  "title": "Result",
+  "description": "Agent-facing envelope returned by every tool. Status, Summary, Error and Meta are always meaningful.",
+  "type": "object",
+  "required": ["ok", "meta"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "status": { "enum": ["success", "partial", "failed", "blocked", "need_human", "unavailable"] },
+    "summary": { "type": "string", "maxLength": 200 },
+    "data": {},
+    "findings": { "type": "array", "items": { "$ref": "#/$defs/Finding" } },
+    "evidence": { "type": "array", "items": { "$ref": "#/$defs/EvidenceRef" } },
+    "next": { "type": "array", "items": { "$ref": "#/$defs/NextStep" } },
+    "truncated": { "type": "boolean" },
+    "page": { "$ref": "#/$defs/Page" },
+    "error": { "$ref": "#/$defs/ToolError" },
+    "meta": { "$ref": "#/$defs/Meta" },
+    "text": { "type": "string" },
+    "evidence_ids": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "ToolError": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "enum": [
+            "bad_input", "scope_denied", "approval_required", "not_found",
+            "conflict", "rate_limited", "unavailable", "internal", "need_human",
+            "tool_missing", "target_unreachable", "timeout", "upstream_error",
+            "evidence_write_failed"
+          ]
+        },
+        "message": { "type": "string" },
+        "retryable": { "type": "boolean" },
+        "retry_after_ms": { "type": "integer", "minimum": 0 },
+        "hint": { "type": "string" },
+        "detail": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "Meta": {
+      "type": "object",
+      "required": ["tool"],
+      "properties": {
+        "tool": { "type": "string" },
+        "version": { "type": "string" },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "requests": { "type": "integer", "minimum": 0 },
+        "target": { "type": "string" },
+        "gate_trace": { "type": "array", "items": { "type": "string" } },
+        "cached": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "Page": {
+      "type": "object",
+      "required": ["total", "has_more"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "cursor": { "type": "string" },
+        "has_more": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "EvidenceRef": {
+      "type": "object",
+      "required": ["id", "kind"],
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "type": "string" },
+        "size": { "type": "integer", "minimum": 0 },
+        "sha256": { "type": "string" },
+        "preview": { "type": "string", "maxLength": 200 }
+      },
+      "additionalProperties": false
+    },
+    "NextStep": {
+      "type": "object",
+      "required": ["tool", "reason"],
+      "properties": {
+        "tool": { "type": "string" },
+        "reason": { "type": "string" },
+        "preconditions": { "type": "array", "items": { "type": "string" } },
+        "risk": { "enum": ["low", "medium", "high"] },
+        "params": {}
+      },
+      "additionalProperties": false
+    },
+    "Finding": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "target": { "$ref": "target.json" },
+        "kind": { "type": "string", "minLength": 1 },
+        "fingerprint": { "type": "string" },
+        "confirmed": { "type": "boolean" },
+        "payload": { "type": "string" },
+        "evidence": { "type": "array", "items": { "type": "string" } },
+        "source": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/c1ayooo/capkit/contracts/template.json",
+  "title": "TemplateRef",
+  "type": "object",
+  "required": ["id", "kind"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "name": { "type": "string" },
+    "kind": { "enum": ["http", "nuclei", "shell", "chain"] },
+    "engine": { "type": "string" },
+    "artifact": { "type": "string", "contentEncoding": "base64" },
+    "meta": { "type": "object", "additionalProperties": { "type": "string" } }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "TemplateQuery": {
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" },
+        "products": { "type": "array", "items": { "type": "string" } },
+        "fingerprint": { "type": "string" },
+        "cve": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "severity": { "type": "array", "items": { "type": "string" } },
+        "kind": { "enum": ["http", "nuclei", "shell", "chain"] },
+        "limit": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

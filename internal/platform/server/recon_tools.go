@@ -32,7 +32,7 @@ func (s *Server) importSubdomains(ctx context.Context, projectID int64, domains 
 func (s *Server) toolSubdomainEnum() actool.CoreTool {
 	return actool.Build(actool.Spec{
 		Name: "subdomain_enum",
-		Description: "被动子域枚举(不向目标发包):聚合证书透明日志(crt.sh/CertSpotter)、公开被动 DNS" +
+		Description: "被动子域枚举(平台内置保底能力,不向目标发包):聚合证书透明日志(crt.sh/CertSpotter)、公开被动 DNS" +
 			"(HackerTarget/OTX/RapidDNS)、国内被动源(千讯/ip138/chinaz)与目标工件(robots/sitemap/CSP/证书 SAN)," +
 			"可选 permute 派生候选。适合开局建子域清单;主动探测用 subdomain_brute/recon 流水线。",
 		Schema: map[string]any{
@@ -119,7 +119,7 @@ func (s *Server) toolSubdomainEnum() actool.CoreTool {
 func (s *Server) toolSubdomainBrute() actool.CoreTool {
 	return actool.Build(actool.Spec{
 		Name: "subdomain_brute",
-		Description: "子域名爆破(主动 DNS 查询):内置 ~400 词中文 SRC 语境字典 + 追加词表,泛解析域自动基线过滤," +
+		Description: "子域名爆破(平台内置保底能力,主动 DNS 查询):内置 ~400 词中文 SRC 语境字典 + 追加词表,泛解析域自动基线过滤," +
 			"令牌桶限速(默认 QPS 300,对权威 NS 友好)。只对授权范围内的主域使用。结果带解析 IP 与 CNAME," +
 			"可导入资产库(范围内 approved/范围外待审批)。",
 		Schema: map[string]any{

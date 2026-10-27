@@ -5,8 +5,8 @@ export function StatTile({ label, value, hint, tone }: { label: string; value: s
     <Card size="sm" className="gap-1">
       <CardContent>
         <p className="text-muted-foreground text-xs">{label}</p>
-        <p className={`text-lg font-semibold ${tone === "red" ? "text-rose-600" : ""}`}>{value}</p>
-        {hint && <p className={`text-xs ${tone === "red" ? "text-rose-600" : "text-muted-foreground"}`}>{hint}</p>}
+        <p className={`text-lg font-semibold ${tone === "red" ? "text-destructive" : ""}`}>{value}</p>
+        {hint && <p className={`text-xs ${tone === "red" ? "text-destructive" : "text-muted-foreground"}`}>{hint}</p>}
       </CardContent>
     </Card>
   );

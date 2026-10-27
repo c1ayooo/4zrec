@@ -4,7 +4,22 @@ go 1.26.3
 
 require (
 	github.com/PuerkitoBio/goquery v1.8.1
-	github.com/c1ayooo/capkit v0.5.0
+	github.com/alibabacloud-go/darabonba-openapi/v2 v2.2.4
+	github.com/alibabacloud-go/ecs-20140526/v4 v4.26.10
+	github.com/alibabacloud-go/ram-20150501/v2 v2.2.1
+	github.com/alibabacloud-go/rds-20140815/v6 v6.1.0
+	github.com/alibabacloud-go/sts-20150401/v2 v2.1.0
+	github.com/alibabacloud-go/tea v1.5.3
+	github.com/aliyun/alibabacloud-oss-go-sdk-v2 v1.6.1
+	github.com/aws/aws-sdk-go-v2 v1.47.4
+	github.com/aws/aws-sdk-go-v2/credentials v1.20.9
+	github.com/aws/aws-sdk-go-v2/service/ec2 v1.341.0
+	github.com/aws/aws-sdk-go-v2/service/iam v1.64.5
+	github.com/aws/aws-sdk-go-v2/service/rds v1.131.1
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.5
+	github.com/aws/aws-sdk-go-v2/service/ssm v1.81.0
+	github.com/aws/aws-sdk-go-v2/service/sts v1.51.4
+	github.com/aws/smithy-go v1.28.6
 	github.com/cloudwego/eino v0.9.21
 	github.com/cloudwego/eino-ext/components/model/claude v0.1.26
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.13
@@ -17,6 +32,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02
+	github.com/huaweicloud/huaweicloud-sdk-go-v3 v0.1.220
 	github.com/imroc/req/v3 v3.44.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/klauspost/compress v1.18.6
@@ -26,6 +42,12 @@ require (
 	github.com/praetorian-inc/fingerprintx v1.1.19
 	github.com/projectdiscovery/dnsx v1.2.3
 	github.com/spaolacci/murmur3 v1.1.0
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cam v1.3.186
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdb v1.3.197
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.200
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cvm v1.3.183
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/sts v1.1.11
+	github.com/tencentyun/cos-go-sdk-v5 v0.7.76
 	github.com/tidwall/gjson v1.18.0
 	golang.org/x/crypto v0.55.0
 	golang.org/x/net v0.58.0
@@ -39,45 +61,54 @@ require (
 	cloud.google.com/go/auth/oauth2adapt v0.2.3 // indirect
 	cloud.google.com/go/compute/metadata v0.5.0 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
+	github.com/alibabacloud-go/alibabacloud-gateway-spi v0.0.5 // indirect
+	github.com/alibabacloud-go/debug v1.0.1 // indirect
+	github.com/alibabacloud-go/endpoint-util v1.1.0 // indirect
+	github.com/alibabacloud-go/openapi-util v0.1.1 // indirect
+	github.com/alibabacloud-go/tea-utils/v2 v2.0.9 // indirect
+	github.com/aliyun/credentials-go v1.4.5 // indirect
 	github.com/andybalholm/brotli v1.2.1 // indirect
 	github.com/andybalholm/cascadia v1.3.1 // indirect
 	github.com/anthropics/anthropic-sdk-go v1.56.0 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
-	github.com/aws/aws-sdk-go-v2 v1.47.3 // indirect
-	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.22 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.24 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.29.1 // indirect
-	github.com/aws/aws-sdk-go-v2/credentials v1.20.9 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.20.3 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.6 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.6 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.7 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.7 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.1 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/v4a v1.5.6 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.21 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.6 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/v4a v1.5.7 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.22 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.11.8 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.7 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.20.7 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.38.4 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.43.4 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sts v1.51.4 // indirect
-	github.com/aws/smithy-go v1.28.5 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.15.0 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
+	github.com/clbanning/mxj v1.8.4 // indirect
+	github.com/clbanning/mxj/v2 v2.7.0 // indirect
 	github.com/cloudflare/circl v1.6.1 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.17 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/evanphx/json-patch v0.5.2 // indirect
+	github.com/fatih/color v1.15.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/gaissmai/bart v0.26.0 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
+	github.com/goccy/go-yaml v1.9.8 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
+	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/pprof v0.0.0-20250317173921-a4b03ec1a45e // indirect
 	github.com/google/s2a-go v0.1.7 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.2 // indirect
@@ -93,11 +124,14 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
+	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/meguminnnnnnnnn/go-openai v0.1.2 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
+	github.com/mitchellh/mapstructure v1.4.3 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
+	github.com/mozillazg/go-httpheader v0.2.1 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/nikolalohinski/gonja v1.5.3 // indirect
 	github.com/onsi/ginkgo/v2 v2.16.0 // indirect
@@ -120,10 +154,12 @@ require (
 	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
+	github.com/tjfoc/gmsm v1.4.1 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/weppos/publicsuffix-go v0.40.3-0.20250408071509-6074bbe7fd39 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/yargevad/filepathx v1.0.0 // indirect
+	go.mongodb.org/mongo-driver v1.13.1 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.49.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.49.0 // indirect
@@ -142,14 +178,13 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect
+	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 	google.golang.org/api v0.189.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240722135656-d784300faade // indirect
 	google.golang.org/grpc v1.64.1 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
+	gopkg.in/ini.v1 v1.67.0 // indirect
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-
-// 围栏目标提取已上收 capkit（guard 包，本地未发版，replace 到工作区）。
-replace github.com/c1ayooo/capkit => /home/c1ay/capkit

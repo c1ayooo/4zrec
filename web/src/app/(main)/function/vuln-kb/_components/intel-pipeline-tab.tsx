@@ -93,14 +93,11 @@ export function IntelPipelineTab() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         {status?.llm_ready ? (
-          <Badge
-            variant="outline"
-            className="border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-          >
+          <Badge variant="outline" className="border-success/30 bg-success/10 text-success">
             <SparklesIcon className="mr-1 size-3" /> LLM 已就绪
           </Badge>
         ) : (
-          <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400">
+          <Badge variant="outline" className="border-warning/30 bg-warning/10 text-warning">
             <AlertTriangleIcon className="mr-1 size-3" /> 未配置 LLM，分析会跳过
           </Badge>
         )}

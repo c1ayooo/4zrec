@@ -5,10 +5,10 @@ import * as React from "react";
 import { CopyIcon, KeyRoundIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
   Dialog,
   DialogContent,
@@ -17,16 +17,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import type { APIKeyRecord, Project } from "@/lib/types";
@@ -146,10 +141,6 @@ export default function APIKeysPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">API 密钥</h1>
-          <p className="text-muted-foreground mt-1 text-sm">
-            给 Hermes 等外部 agent 的持久凭据。全局密钥可访问全平台；项目级密钥只能访问绑定项目的任务、资产、漏洞与审批。
-            明文只在创建时显示一次。
-          </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
@@ -166,12 +157,21 @@ export default function APIKeysPage() {
       <Card>
         <CardContent className="px-0">
           {loading ? (
-            <p className="text-muted-foreground py-8 text-center text-sm">加载中…</p>
-          ) : keys.length === 0 ? (
-            <div className="text-muted-foreground flex flex-col items-center gap-2 py-10 text-center text-sm">
-              <KeyRoundIcon className="text-muted-foreground/50 size-8" />
-              还没有 API 密钥。新建一个项目级密钥给外部 agent 使用。
+            <div className="flex flex-col gap-3">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
             </div>
+          ) : keys.length === 0 ? (
+            <Empty>
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <KeyRoundIcon />
+                </EmptyMedia>
+                <EmptyTitle>还没有 API 密钥</EmptyTitle>
+                <EmptyDescription>新建一个项目级密钥给外部 agent 使用。</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : (
             <Table>
               <TableHeader>
@@ -267,10 +267,7 @@ export default function APIKeysPage() {
             {form.scope === "project" ? (
               <div className="flex flex-col gap-1.5">
                 <Label>绑定项目</Label>
-                <Select
-                  value={form.project_id}
-                  onValueChange={(v) => setForm((f) => ({ ...f, project_id: v }))}
-                >
+                <Select value={form.project_id} onValueChange={(v) => setForm((f) => ({ ...f, project_id: v }))}>
                   <SelectTrigger>
                     <SelectValue placeholder="选择项目…" />
                   </SelectTrigger>
@@ -326,9 +323,7 @@ export default function APIKeysPage() {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>密钥已创建</DialogTitle>
-            <DialogDescription>
-              这是明文 token 的唯一一次展示，关闭后无法再次查看。请立即保存。
-            </DialogDescription>
+            <DialogDescription>这是明文 token 的唯一一次展示，关闭后无法再次查看。请立即保存。</DialogDescription>
           </DialogHeader>
           <div className="min-w-0 rounded-lg border bg-muted/40 p-3">
             <p className="break-all font-mono text-xs">{created?.token}</p>

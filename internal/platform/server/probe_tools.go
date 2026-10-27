@@ -503,7 +503,7 @@ func orDefaultLabel(label, fallback string) string {
 func (s *Server) toolFingerprintScan() actool.CoreTool {
 	return actool.Build(actool.Spec{
 		Name: "fingerprint_scan",
-		Description: "Web 指纹扫描(主动探测):对目标 URL 探测并用平台指纹规则库匹配(webanalyze/wappalyzergo/dddd " +
+		Description: "Web 指纹扫描(平台内置保底能力,主动探测):对目标 URL 探测并用平台指纹规则库匹配(webanalyze/wappalyzergo/dddd " +
 			"三源规则,24h 自动同步),返回组件/版本结论并回写服务资产(technologies,联动 1day 漏洞库线索)。" +
 			"挂项目上下文时目标必须在授权范围内。",
 		Schema: map[string]any{

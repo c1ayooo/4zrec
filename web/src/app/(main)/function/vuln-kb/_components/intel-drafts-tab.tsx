@@ -20,12 +20,9 @@ import type { IntelDraft } from "@/lib/types";
 
 // severityTone 给等级徽章配色,与漏洞库列表保持一致。
 function severityTone(v: string): string {
-  if (v.includes("严重") || v.includes("critical"))
-    return "border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400";
-  if (v.includes("高危") || v.includes("high"))
-    return "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400";
-  if (v.includes("中危") || v.includes("medium"))
-    return "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400";
+  if (v.includes("严重") || v.includes("critical")) return "border-destructive/30 bg-destructive/10 text-destructive";
+  if (v.includes("高危") || v.includes("high")) return "border-warning/30 bg-warning/10 text-warning";
+  if (v.includes("中危") || v.includes("medium")) return "border-info/30 bg-info/10 text-info";
   return "";
 }
 
@@ -118,11 +115,9 @@ export function IntelDraftsTab() {
                   ) : hasNuclei ? (
                     <>
                       {d.nuclei_usable ? (
-                        <Badge className="bg-emerald-500/15 text-[11px] text-emerald-600 dark:text-emerald-400">
-                          可入库
-                        </Badge>
+                        <Badge className="bg-success/15 text-[11px] text-success">可入库</Badge>
                       ) : (
-                        <Badge className="flex items-center gap-1 bg-amber-500/15 text-[11px] text-amber-600 dark:text-amber-400">
+                        <Badge className="flex items-center gap-1 bg-warning/15 text-[11px] text-warning">
                           <AlertTriangleIcon className="size-3" /> 不可用
                         </Badge>
                       )}
@@ -179,7 +174,7 @@ export function IntelDraftsTab() {
                   </pre>
                 ) : null}
                 {hasNuclei && !d.nuclei_usable && d.nuclei_issue ? (
-                  <p className="px-3 pb-2 text-[11px] text-amber-600 dark:text-amber-400">{d.nuclei_issue}</p>
+                  <p className="px-3 pb-2 text-[11px] text-warning">{d.nuclei_issue}</p>
                 ) : null}
 
                 {/* ---- 指纹规则 ---- */}
@@ -193,11 +188,9 @@ export function IntelDraftsTab() {
                   ) : hasFp ? (
                     <>
                       {d.fingerprint_usable ? (
-                        <Badge className="bg-emerald-500/15 text-[11px] text-emerald-600 dark:text-emerald-400">
-                          可入库
-                        </Badge>
+                        <Badge className="bg-success/15 text-[11px] text-success">可入库</Badge>
                       ) : (
-                        <Badge className="flex items-center gap-1 bg-amber-500/15 text-[11px] text-amber-600 dark:text-amber-400">
+                        <Badge className="flex items-center gap-1 bg-warning/15 text-[11px] text-warning">
                           <AlertTriangleIcon className="size-3" /> 不可用
                         </Badge>
                       )}
@@ -256,7 +249,7 @@ export function IntelDraftsTab() {
                   </div>
                 ) : null}
                 {hasFp && !d.fingerprint_usable && d.fingerprint_issue ? (
-                  <p className="px-3 pb-2 text-[11px] text-amber-600 dark:text-amber-400">{d.fingerprint_issue}</p>
+                  <p className="px-3 pb-2 text-[11px] text-warning">{d.fingerprint_issue}</p>
                 ) : null}
               </div>
             </Card>

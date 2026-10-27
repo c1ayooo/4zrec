@@ -41,6 +41,7 @@ import type {
   Severity,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useProjectStore } from "@/stores/project/project-provider";
 
 import { AssetTree, assetPathOf } from "./_components/asset-tree";
 import {
@@ -121,6 +122,15 @@ const EMPTY_STATS: FindingStats = {
 type ChainWarning = { chain: string; missing: { id: string; name: string }[] };
 
 export default function FindingsPage() {
+  // 发现经任务归属项目:默认只看全局当前项目(左上角切换器)的发现。
+  const globalProjects = useProjectStore((s) => s.projects);
+  const globalProjectId = useProjectStore((s) => s.projectId);
+  // 项目筛选:默认跟随左上角全局项目;null=跟随,可手动切到其它项目或「全部」。
+  const [projectFilter, setProjectFilter] = React.useState<number | "all" | null>(null);
+  React.useEffect(() => {
+    setProjectFilter(null); // 全局项目切换后回到跟随
+  }, [globalProjectId]);
+  const effectiveProjectId = projectFilter === "all" ? 0 : (projectFilter ?? globalProjectId);
   const [view, setView] = React.useState<FindingView>("flat");
   const [severity, setSeverity] = React.useState<"all" | Severity>("all");
   const [status, setStatus] = React.useState<"all" | FindingStatus>("all");
@@ -356,6 +366,7 @@ export default function FindingsPage() {
         task,
         query,
         sort,
+        projectId: effectiveProjectId || undefined,
         assetScope: activeAssetScope ?? undefined,
       });
       if (request !== flatRequest.current || activeFilterFingerprint.current !== requestFilter) return;
@@ -365,7 +376,19 @@ export default function FindingsPage() {
       // Polling keeps the last successful snapshot visible.
       setFlat((current) => ({ ...current, loading: false }));
     }
-  }, [activeAssetScope, filterFingerprint, flatPage, flatPageSize, severity, status, vulnclass, task, query, sort]);
+  }, [
+    activeAssetScope,
+    filterFingerprint,
+    flatPage,
+    flatPageSize,
+    severity,
+    status,
+    vulnclass,
+    task,
+    query,
+    sort,
+    globalProjectId,
+  ]);
 
   // loadAssetTree 取整棵资产树。树不随选中节点变化(否则选一下就塌成一条链),
   // 所以这里不带 assetScope。
@@ -390,7 +413,7 @@ export default function FindingsPage() {
       setAssetTree((current) => ({ ...current, loading: false }));
       toast.error(`资产树加载失败：${(e as Error).message}`);
     }
-  }, [filterFingerprint, severity, status, vulnclass, task, query, sort]);
+  }, [filterFingerprint, severity, status, vulnclass, task, query, sort, effectiveProjectId]);
 
   const refreshGroups = React.useCallback(async () => {
     const requestFilter = filterFingerprint;
@@ -406,6 +429,7 @@ export default function FindingsPage() {
         task,
         query,
         sort,
+        projectId: effectiveProjectId || undefined,
       });
       if (request !== groupsRequest.current || activeFilterFingerprint.current !== requestFilter) return;
       setGroups(result.items);
@@ -414,7 +438,7 @@ export default function FindingsPage() {
     } catch {
       // Polling keeps the last successful snapshot visible.
     }
-  }, [filterFingerprint, page, pageSize, severity, status, vulnclass, task, query, sort]);
+  }, [filterFingerprint, page, pageSize, severity, status, vulnclass, task, query, sort, effectiveProjectId]);
 
   const loadGroup = React.useCallback(
     async (key: string, groupPage: number, groupPageSize: number) => {
@@ -443,6 +467,7 @@ export default function FindingsPage() {
           task: key,
           query,
           sort,
+          projectId: effectiveProjectId || undefined,
         });
         if (groupRequests.current[key] !== request || activeFilterFingerprint.current !== requestFilter) return;
         setGroupFindings((current) => ({
@@ -779,11 +804,11 @@ export default function FindingsPage() {
 
   const statCards = [
     { label: "发现总数", value: stats.total, dot: "bg-foreground" },
-    { label: "待处理", value: stats.pending, dot: "bg-amber-600" },
-    { label: "严重", value: stats.critical, dot: "bg-red-700" },
-    { label: "高危", value: stats.high, dot: "bg-red-500" },
-    { label: "中危", value: stats.medium, dot: "bg-amber-500" },
-    { label: "低危", value: stats.low, dot: "bg-slate-400" },
+    { label: "待处理", value: stats.pending, dot: "bg-warning" },
+    { label: "严重", value: stats.critical, dot: "bg-destructive" },
+    { label: "高危", value: stats.high, dot: "bg-destructive" },
+    { label: "中危", value: stats.medium, dot: "bg-warning" },
+    { label: "低危", value: stats.low, dot: "bg-info" },
   ];
 
   // 导出弹窗里「当前筛选」的条数:两个视图的筛选一致,只是统计口径来源不同。
@@ -845,7 +870,6 @@ export default function FindingsPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">发现</h1>
-          <p className="text-muted-foreground mt-1 text-sm">跨任务漏洞汇总</p>
         </div>
         <Tabs value={view} onValueChange={(v) => setView(v as FindingView)}>
           <TabsList>
@@ -931,6 +955,26 @@ export default function FindingsPage() {
           </Button>
 
           <div className={cn("flex-wrap items-center gap-2", filtersOpen ? "flex" : "hidden sm:contents")}>
+            <Select
+              value={projectFilter === null ? "follow" : String(projectFilter)}
+              onValueChange={(v) => setProjectFilter(v === "follow" ? null : v === "all" ? "all" : Number(v))}
+            >
+              <SelectTrigger size="sm" className="w-40" aria-label="按项目筛选">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="follow">当前项目</SelectItem>
+                <SelectItem value="all">全部项目</SelectItem>
+                {globalProjects
+                  .filter((p) => p.id !== globalProjectId)
+                  .map((p) => (
+                    <SelectItem key={p.id} value={String(p.id)}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+
             <Select value={vulnclass} onValueChange={setVulnclass}>
               <SelectTrigger size="sm" className="w-40">
                 <SelectValue placeholder="漏洞类型" />

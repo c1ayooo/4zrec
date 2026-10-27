@@ -27,11 +27,7 @@ export default function SpacemapPage() {
       const [list, keys] = await Promise.all([api.spacemapEngines(), api.intelKeys()]);
       setEngines(list);
       setIntel(keys);
-      setDrafts(
-        Object.fromEntries(
-          list.map((e) => [e.provider, { key: "", baseUrl: e.base_url ?? "" }]),
-        ),
-      );
+      setDrafts(Object.fromEntries(list.map((e) => [e.provider, { key: "", baseUrl: e.base_url ?? "" }])));
       setIntelDrafts(Object.fromEntries(keys.map((k) => [k.key, ""])));
     } catch (err) {
       toast.error(String(err instanceof Error ? err.message : err));
@@ -68,11 +64,7 @@ export default function SpacemapPage() {
         base_url: draft.baseUrl.trim(),
       });
       setEngines(list);
-      setDrafts(
-        Object.fromEntries(
-          list.map((e) => [e.provider, { key: "", baseUrl: e.base_url ?? "" }]),
-        ),
-      );
+      setDrafts(Object.fromEntries(list.map((e) => [e.provider, { key: "", baseUrl: e.base_url ?? "" }])));
       toast.success("已保存");
     } catch (err) {
       toast.error(String(err instanceof Error ? err.message : err));
@@ -86,8 +78,8 @@ export default function SpacemapPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">空间测绘</h1>
         <p className="text-muted-foreground mt-1 text-sm">
-          五引擎空间测绘的 API Key 配置。信息收集 agent 的 space_search /
-          space_search_batch 工具读这里的凭据；环境变量（FOFA_API_KEY 等）优先于页面配置。
+          五引擎空间测绘的 API Key 配置。信息收集 agent 的 space_search / space_search_batch
+          工具读这里的凭据；环境变量（FOFA_API_KEY 等）优先于页面配置。
         </p>
       </div>
       {engines === null ? (
@@ -114,23 +106,17 @@ export default function SpacemapPage() {
                     )}
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor={`key-${e.provider}`}>
-                      API Key{e.key_masked ? `（当前 ${e.key_masked}）` : ""}
-                    </Label>
+                    <Label htmlFor={`key-${e.provider}`}>API Key{e.key_masked ? `（当前 ${e.key_masked}）` : ""}</Label>
                     <Input
                       id={`key-${e.provider}`}
                       type="password"
                       placeholder={e.configured ? "留空保持不变" : "粘贴 API Key"}
                       value={draft.key}
                       disabled={e.from_env}
-                      onChange={(ev) =>
-                        setDrafts((d) => ({ ...d, [e.provider]: { ...draft, key: ev.target.value } }))
-                      }
+                      onChange={(ev) => setDrafts((d) => ({ ...d, [e.provider]: { ...draft, key: ev.target.value } }))}
                     />
                     {e.from_env ? (
-                      <p className="text-muted-foreground text-xs">
-                        key 来自环境变量，页面修改不生效。
-                      </p>
+                      <p className="text-muted-foreground text-xs">key 来自环境变量，页面修改不生效。</p>
                     ) : null}
                   </div>
                   <div className="space-y-2">
@@ -186,9 +172,7 @@ export default function SpacemapPage() {
                   )}
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor={`intel-${k.key}`}>
-                    API Key{k.masked ? `（当前 ${k.masked}）` : ""}
-                  </Label>
+                  <Label htmlFor={`intel-${k.key}`}>API Key{k.masked ? `（当前 ${k.masked}）` : ""}</Label>
                   <Input
                     id={`intel-${k.key}`}
                     type="password"

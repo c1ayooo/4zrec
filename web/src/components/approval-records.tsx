@@ -109,18 +109,48 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge variant={variant}>{labels[status] ?? status}</Badge>;
 }
 
+// isFenceAsk 报告一条审批是否由资产围栏发起:围栏 ask 没有归属的拦截规则
+// (rule_id 为空),靠结构化 targets(新记录)或 reason 的「【资产围栏】」
+// 前缀识别——与后端 guard.AskAuthorized 的识别口径一致。
+function isFenceAsk(row: Pick<InterceptApprovalRow, "targets" | "reason">): boolean {
+  return (
+    Boolean(row.targets?.domains?.length || row.targets?.ips?.length) || Boolean(row.reason?.startsWith("【资产围栏】"))
+  );
+}
+
+// displayReason 摘除判定理由的来源前缀([模型]/【资产围栏】):来源已由
+// 徽标表达,正文只留理由本身。
+function displayReason(reason?: string): string {
+  return (reason ?? "").replace(/^\[模型\]\s*/, "").replace(/^【资产围栏】/, "");
+}
+
+// MatchLabel 判定依据标签:模型判定与资产围栏给徽标(二者都没有归属的拦截
+// 规则),规则命中显示规则名,规则被删后提示未记录。
+function MatchLabel({ row }: { row: InterceptApprovalRow }) {
+  if (source(row) === "model") {
+    return (
+      <Badge variant="outline">
+        <BotIcon />
+        模型判定
+      </Badge>
+    );
+  }
+  if (isFenceAsk(row)) {
+    return (
+      <Badge variant="outline">
+        <ShieldAlertIcon />
+        资产围栏
+      </Badge>
+    );
+  }
+  return <span className="truncate">{row.rule_name || "规则未记录或已删除"}</span>;
+}
+
 function MatchCell({ row, showReason = true }: { row: InterceptApprovalRow; showReason?: boolean }) {
-  const reason = row.reason?.replace(/^\[模型\]\s*/, "");
+  const reason = displayReason(row.reason);
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      {source(row) === "model" ? (
-        <Badge variant="outline">
-          <BotIcon />
-          模型判定
-        </Badge>
-      ) : (
-        <span className="truncate">{row.rule_name || "规则未记录或已删除"}</span>
-      )}
+      <MatchLabel row={row} />
       {showReason ? (
         <p className="truncate text-muted-foreground text-xs" title={reason}>
           {reason || "未记录理由"}
@@ -299,6 +329,73 @@ function TargetChip({
   );
 }
 
+// approvalTargetText 从 tool_input 提取最有信息量的字段作为审批对象摘要;
+// 围栏审批优先用结构化 targets(见 TargetCell)。
+function approvalTargetText(row: InterceptApprovalRow): string {
+  const input = row.tool_input ?? {};
+  for (const key of ["command", "url", "host", "domain", "target", "path"]) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  if (Array.isArray(input.targets) && input.targets.length) return input.targets.join(", ");
+  const json = JSON.stringify(input);
+  return json === "{}" ? "" : json;
+}
+
+// TargetCell 审批对象列:围栏审批显示域名/IP 摘要(附命令),其余显示命令或
+// 关键参数——不展开详情也能看清这次审批针对谁。
+function TargetCell({ row }: { row: InterceptApprovalRow }) {
+  const targets = targetList(row);
+  const text = approvalTargetText(row);
+  if (targets.length) {
+    const preview = targets
+      .slice(0, 2)
+      .map((t) => t.value)
+      .join("、");
+    const rest = targets.length - 2;
+    return (
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <code className="truncate text-xs" title={targets.map((t) => `${t.kind} ${t.value}`).join("\n")}>
+          {preview}
+          {rest > 0 ? ` 等 ${targets.length} 个目标` : ""}
+        </code>
+        {text ? (
+          <code className="truncate text-muted-foreground text-[11px]" title={text}>
+            {text}
+          </code>
+        ) : null}
+      </div>
+    );
+  }
+  return text ? (
+    <code className="block truncate text-xs" title={text}>
+      {text}
+    </code>
+  ) : (
+    <span className="text-muted-foreground text-xs">—</span>
+  );
+}
+
+// StaticTargets 已决记录的授权目标静态展示:对象是谁一目了然,不再渲染
+// 勾选框(已决记录的勾选不产生任何效果)。
+function StaticTargets({ row }: { row: InterceptApprovalRow }) {
+  const targets = targetList(row);
+  if (!targets.length) return null;
+  return (
+    <section className="flex min-w-0 flex-col gap-2" aria-label="授权目标">
+      <h3 className="font-medium text-muted-foreground text-xs">授权目标（{targets.length}）</h3>
+      <div className="flex flex-wrap gap-2">
+        {targets.map((t) => (
+          <code key={`${t.kind}-${t.value}`} className="rounded-lg border px-3 py-1.5 font-mono text-xs">
+            <span className="mr-2 text-[11px] text-muted-foreground">{t.kind}</span>
+            {t.value}
+          </code>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 // FenceTargets 资产围栏审批的逐目标复选:默认全选;取消勾选的目标不会被
 // 登记为 approved(本次调用仍按「允许」执行)。
 function FenceTargets({
@@ -448,7 +545,9 @@ export function ApprovalDetail({
   if (row.status === "pending") execution = "尚未执行";
   if (audit && audit.correlation !== "exact" && audit.effective_action === "allow") execution = "未关联执行结果";
   const command = typeof row.tool_input?.command === "string" ? row.tool_input.command : undefined;
-  let initialLabel = source(row) === "model" ? "模型初判" : "规则初判";
+  let initialLabel = "规则初判";
+  if (source(row) === "model") initialLabel = "模型初判";
+  else if (isFenceAsk(row)) initialLabel = "围栏初判";
   if (audit?.model_fallback) initialLabel = "模型异常回退";
 
   return (
@@ -485,7 +584,7 @@ export function ApprovalDetail({
             <MatchCell row={current} showReason={false} />
           </div>
           <p className="whitespace-pre-wrap break-words text-sm leading-7 [overflow-wrap:anywhere]">
-            {current.reason?.replace(/^\[模型\]\s*/, "") || "未记录审批理由"}
+            {displayReason(current.reason) || "未记录审批理由"}
           </p>
           {audit?.decision_reason ? <p className="text-sm">{audit.decision_reason}</p> : null}
           {audit?.effective_action ? <p className="text-sm">最终动作：{actionLabels[audit.effective_action]}</p> : null}
@@ -511,7 +610,11 @@ export function ApprovalDetail({
               </>
             ) : null}
           </dl>
-          {!readOnly ? <FenceTargets row={current} selected={selectedTargets} onChange={setSelectedTargets} /> : null}
+          {!readOnly && current.status === "pending" ? (
+            <FenceTargets row={current} selected={selectedTargets} onChange={setSelectedTargets} />
+          ) : (
+            <StaticTargets row={current} />
+          )}
           {!readOnly ? <DecisionActions row={current} busy={busy} decide={decide} selected={selectedTargets} /> : null}
         </div>
       </div>
@@ -600,7 +703,7 @@ export function ApprovalDetail({
               ) : null}
               <CodeBlock
                 label={`${initialLabel}：${actionLabels[audit.initial_action] ?? audit.initial_action}`}
-                text={audit.initial_reason.replace(/^\[模型\]\s*/, "")}
+                text={displayReason(audit.initial_reason)}
               />
               <CodeBlock
                 label="执行输出"
@@ -643,7 +746,8 @@ function subscribeColumns(onChange: () => void) {
 }
 function visibleColumnCount() {
   const matches = approvalBreakpoints.map((query) => window.matchMedia(query).matches);
-  return 3 + Number(matches[0]) + Number(matches[1]) + 2 * Number(matches[2]) + 2 * Number(matches[3]);
+  // 常显 4 列(展开/工具/审批对象/状态),响应式补 #/来源/匹配规则/申请时间/决定时间。
+  return 4 + Number(matches[0]) + Number(matches[1]) + 2 * Number(matches[2]) + Number(matches[3]);
 }
 function serverColumnCount() {
   return 9;
@@ -682,9 +786,9 @@ function ApprovalTable({
           </TableHead>
           <TableHead className="hidden w-14 sm:table-cell">#</TableHead>
           <TableHead className="w-28">工具</TableHead>
-          <TableHead className="hidden md:table-cell">来源</TableHead>
-          <TableHead className="hidden lg:table-cell">匹配规则</TableHead>
-          <TableHead className="hidden xl:table-cell">参数</TableHead>
+          <TableHead>审批对象</TableHead>
+          <TableHead className="hidden w-36 md:table-cell">来源</TableHead>
+          <TableHead className="hidden w-40 lg:table-cell">匹配规则</TableHead>
           <TableHead className="w-24">状态</TableHead>
           <TableHead className="hidden w-36 lg:table-cell">申请时间</TableHead>
           <TableHead className="hidden w-36 xl:table-cell">决定时间</TableHead>
@@ -720,6 +824,9 @@ function ApprovalTable({
                 <TableCell>
                   <code className="block truncate text-xs">{row.tool_name}</code>
                 </TableCell>
+                <TableCell>
+                  <TargetCell row={row} />
+                </TableCell>
                 <TableCell className="hidden md:table-cell">
                   <div className="flex flex-col gap-1">
                     <span className="truncate" title={originLabel(row)}>
@@ -732,9 +839,6 @@ function ApprovalTable({
                 </TableCell>
                 <TableCell className="hidden lg:table-cell">
                   <MatchCell row={row} />
-                </TableCell>
-                <TableCell className="hidden xl:table-cell">
-                  <code className="block truncate text-muted-foreground text-xs">{JSON.stringify(row.tool_input)}</code>
                 </TableCell>
                 <TableCell>
                   <StatusBadge status={row.status} />
@@ -926,7 +1030,6 @@ export function ApprovalRecords({ taskId, projectId }: { taskId?: string; projec
           刷新
         </Button>
       </div>
-      <p className="text-muted-foreground text-sm">展开记录查看工具请求和审批裁决，以及当时的上下文与执行结果。</p>
       <FieldGroup className="flex-row flex-wrap items-end gap-3" aria-label="审批记录筛选">
         <Field className="w-full sm:w-40">
           <FieldLabel htmlFor={`${filterID}-status`}>审批状态</FieldLabel>

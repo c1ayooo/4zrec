@@ -130,7 +130,7 @@ export default function CommandsPage() {
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <TerminalIcon className="h-5 w-5 text-muted-foreground" />
-          <h1 className="text-xl font-semibold tracking-tight">工具执行</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">工具执行</h1>
           <Badge variant="secondary">{total}</Badge>
         </div>
       </div>
@@ -258,7 +258,7 @@ export default function CommandsPage() {
                             失败
                           </Badge>
                         ) : (
-                          <Badge variant="secondary" className="text-xs text-emerald-600">
+                          <Badge variant="secondary" className="text-xs text-success">
                             成功
                           </Badge>
                         )}
@@ -287,7 +287,7 @@ export default function CommandsPage() {
                   {statsErrors > 0 && (
                     <>
                       {" · 失败 "}
-                      <span className="tabular-nums text-red-600 dark:text-red-400">{statsErrors}</span>
+                      <span className="tabular-nums text-destructive">{statsErrors}</span>
                     </>
                   )}
                 </>
@@ -309,7 +309,7 @@ export default function CommandsPage() {
                     <div className="flex items-center gap-2">
                       <span className="truncate font-mono text-xs font-medium">{s.tool}</span>
                       {s.errors > 0 && (
-                        <span className="text-[11px] tabular-nums text-red-600 dark:text-red-400">失败 {s.errors}</span>
+                        <span className="text-[11px] tabular-nums text-destructive">失败 {s.errors}</span>
                       )}
                     </div>
                     <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
@@ -354,7 +354,7 @@ export default function CommandsPage() {
                       失败
                     </Badge>
                   ) : (
-                    <Badge variant="secondary" className="text-xs text-emerald-600">
+                    <Badge variant="secondary" className="text-xs text-success">
                       成功
                     </Badge>
                   )}
@@ -375,7 +375,7 @@ export default function CommandsPage() {
                     <pre
                       className={cn(
                         "p-5 font-mono text-xs break-all whitespace-pre-wrap",
-                        selected.is_error && "text-red-600 dark:text-red-400",
+                        selected.is_error && "text-destructive",
                       )}
                     >
                       {selected.output || "（空）"}

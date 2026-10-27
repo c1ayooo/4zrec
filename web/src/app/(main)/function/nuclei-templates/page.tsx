@@ -234,10 +234,6 @@ export default function NucleiTemplatesPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">nuclei 模板</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
-          官方模板由 nuclei 自动更新，只读；自定义模板保存在独立目录，不会被模板更新覆盖。扫描时未显式选模板，
-          tags/severity/type 会同时作用于两个目录。
-        </p>
       </div>
 
       <Card>
@@ -282,7 +278,7 @@ export default function NucleiTemplatesPage() {
                   : updateJob.error ||
                     `已完成：官方模板 ${updateJob.result?.template_count ?? 0} 个 / 自定义 ${updateJob.result?.custom_template_count ?? 0} 个`)}
             </p>
-            {updateJob.error && <p className="text-xs text-red-500">{updateJob.error}</p>}
+            {updateJob.error && <p className="text-xs text-destructive">{updateJob.error}</p>}
           </CardContent>
         </Card>
       )}
@@ -378,7 +374,7 @@ export default function NucleiTemplatesPage() {
                 <SearchIcon className="size-4" /> 搜索
               </Button>
             </div>
-            {warning && <p className="text-xs text-amber-500">{warning}</p>}
+            {warning && <p className="text-xs text-warning">{warning}</p>}
 
             <div className="overflow-x-auto">
               <Table>

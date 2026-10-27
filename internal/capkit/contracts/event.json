@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/c1ayooo/capkit/contracts/event.json",
+  "title": "AuditEvent",
+  "type": "object",
+  "required": ["trace_id", "capability", "tool", "risk", "phase", "started_at"],
+  "properties": {
+    "trace_id": { "type": "string" },
+    "actor": { "type": "string" },
+    "project_id": { "type": "integer" },
+    "task_id": { "type": "string" },
+    "capability": { "type": "string" },
+    "tool": { "type": "string" },
+    "risk": { "enum": ["low", "medium", "high"] },
+    "targets": { "type": "array", "items": { "$ref": "target.json" } },
+    "phase": { "type": "string" },
+    "status": { "type": "string" },
+    "error": { "type": "string" },
+    "input_hash": { "type": "string" },
+    "duration_ms": { "type": "integer" },
+    "evidence_ids": { "type": "array", "items": { "type": "string" } },
+    "started_at": { "type": "string", "format": "date-time" },
+    "finished_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

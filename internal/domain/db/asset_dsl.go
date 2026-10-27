@@ -604,6 +604,72 @@ func (s *AssetStore) QueryDSLInScope(dsl, typ string, taskID int64, limit, offse
 // direct source tasks') declared scope, so an agent cannot reach out-of-scope
 // assets by id. taskID<=0 (non-task contexts) falls back to the global GetByIDs.
 // Out-of-scope ids are silently dropped from the result (not an error).
+// QueryDSLInProject is QueryDSL restricted to assets ATTRIBUTED to projectID
+// (assets.project_id = 展示归属;由 scope 认领/ClaimAssetToProject 写入)。这是
+// 会话侧 list_assets 的隔离通道:会话挂了项目的对话只读本项目资产,跨项目不可见。
+// projectID<=0 回落全局 QueryDSL(未挂项目 = 全局助手语义)。
+func (s *AssetStore) QueryDSLInProject(dsl, typ string, projectID int64, limit, offset int) ([]*Asset, error) {
+	if projectID <= 0 {
+		return s.QueryDSL(dsl, typ, 0, limit, offset)
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	node, err := ParseDSL(dsl)
+	if err != nil {
+		return nil, err
+	}
+	where, args, err := buildDSLWhere(node)
+	if err != nil {
+		return nil, err
+	}
+	if typ != "" {
+		args = append(args, typ)
+		where += fmt.Sprintf(" AND type = $%d", len(args))
+	}
+	args = append(args, projectID)
+	where += fmt.Sprintf(" AND project_id = $%d", len(args))
+	args = append(args, limit, offset)
+	q := assetSelectCols + " WHERE " + where +
+		fmt.Sprintf(" ORDER BY last_seen DESC, id DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args))
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanAssets(rows)
+}
+
+// GetByIDsInProject is GetByIDs restricted to assets attributed to projectID;
+// 归属不符的 id 一律不可见(不泄露其它项目是否存在该 id)。
+func (s *AssetStore) GetByIDsInProject(projectID int64, ids []int64) ([]*Asset, error) {
+	if projectID <= 0 {
+		return s.GetByIDs(ids)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, projectID)
+	placeholders := make([]string, len(ids))
+	for i, id := range ids {
+		placeholders[i] = fmt.Sprintf("$%d", i+2)
+		args = append(args, id)
+	}
+	q := assetSelectCols +
+		" WHERE project_id = $1 AND id IN (" + strings.Join(placeholders, ",") + ")" +
+		" ORDER BY last_seen DESC, id DESC"
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanAssets(rows)
+}
+
 func (s *AssetStore) GetByIDsInScope(taskID int64, ids []int64) ([]*Asset, error) {
 	if taskID <= 0 {
 		return s.GetByIDs(ids)

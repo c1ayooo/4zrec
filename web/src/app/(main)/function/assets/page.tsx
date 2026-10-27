@@ -8,6 +8,7 @@ import {
   BuildingIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  FolderKanbanIcon,
   GlobeIcon,
   KeyRoundIcon,
   LayoutTemplateIcon,
@@ -64,17 +65,19 @@ import { api } from "@/lib/api";
 import { assetProvenance } from "@/lib/asset-provenance";
 import type { Asset, Project } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useProjectStore } from "@/stores/project/project-provider";
 
 import { AssetSyncDialog } from "./_components/asset-sync-dialog";
+import { ZrearkDispatchDialog } from "./_components/zreark-dispatch-dialog";
 
 const METHOD_COLOR: Record<string, string> = {
-  GET: "bg-emerald-100 text-emerald-700",
-  POST: "bg-blue-100 text-blue-700",
-  PUT: "bg-amber-100 text-amber-700",
-  PATCH: "bg-orange-100 text-orange-700",
-  DELETE: "bg-red-100 text-red-700",
-  HEAD: "bg-purple-100 text-purple-700",
-  OPTIONS: "bg-slate-100 text-slate-600",
+  GET: "bg-success/15 text-success",
+  POST: "bg-info/15 text-info",
+  PUT: "bg-warning/15 text-warning",
+  PATCH: "bg-warning/15 text-warning",
+  DELETE: "bg-destructive/15 text-destructive",
+  HEAD: "bg-chart-4/15 text-chart-4",
+  OPTIONS: "bg-secondary text-secondary-foreground",
 };
 
 function MethodBadge({ method }: { method: string }) {
@@ -96,13 +99,13 @@ function AuthzBadge({ authz }: { authz?: string }) {
   if (!authz || authz === "approved") return <span className="text-muted-foreground text-xs">—</span>;
   if (authz === "pending")
     return (
-      <Badge variant="outline" className="text-amber-600">
+      <Badge variant="outline" className="text-warning">
         待审批
       </Badge>
     );
   if (authz === "rejected")
     return (
-      <Badge variant="outline" className="text-red-600">
+      <Badge variant="outline" className="text-destructive">
         已拒绝
       </Badge>
     );
@@ -110,10 +113,10 @@ function AuthzBadge({ authz }: { authz?: string }) {
 }
 
 function statusTone(code: number) {
-  if (code >= 500) return "text-red-500";
-  if (code >= 400) return "text-amber-500";
-  if (code >= 300) return "text-blue-500";
-  if (code >= 200) return "text-emerald-500";
+  if (code >= 500) return "text-destructive";
+  if (code >= 400) return "text-warning";
+  if (code >= 300) return "text-info";
+  if (code >= 200) return "text-success";
   return "text-muted-foreground";
 }
 
@@ -131,12 +134,13 @@ const TABS: { key: string; label: string; icon: LucideIcon }[] = [
 export default function AssetsPage() {
   const [rows, setRows] = React.useState<Asset[]>([]);
   const [total, setTotal] = React.useState(0);
-  const [projects, setProjects] = React.useState<Project[]>([]);
+  // 项目维度跟全局上下文(左上角切换器),不再提供页内项目筛选。
+  const globalProjects = useProjectStore((s) => s.projects);
+  const globalProjectId = useProjectStore((s) => s.projectId);
+  const globalStatus = useProjectStore((s) => s.status);
   const [counts, setCounts] = React.useState<Record<string, number>>({});
   const [tab, setTab] = React.useState("root_domain");
   const [query, setQuery] = React.useState("");
-  // "all" | "-1"(未归属项目) | String(project.id) — 服务端 project_id 过滤;项目=授权根是唯一归属主轴
-  const [projectFilter, setProjectFilter] = React.useState("all");
   // 未归属批量认领:筛选"未归属项目"时勾选行 → 归属到所选项目。
   const [bindTarget, setBindTarget] = React.useState("");
   const [loaded, setLoaded] = React.useState(false);
@@ -156,12 +160,6 @@ export default function AssetsPage() {
 
   // Projects + per-type counts (tab badges) — loaded on demand, no background polling.
   const loadMeta = React.useCallback(() => {
-    api
-      .projects()
-      .then(setProjects)
-      .catch(() => {
-        /* 项目列表加载失败不阻塞资产页(归属项目列退化为 id)。 */
-      });
     api
       .assetCounts()
       .then(setCounts)
@@ -239,12 +237,8 @@ export default function AssetsPage() {
     setLoaded(false);
   }, [tab]);
 
-  const onProjectFilter = (v: string) => {
-    setProjectFilter(v);
-  };
-
   // biome-ignore lint/correctness/useExhaustiveDependencies: these controls intentionally reset server pagination.
-  React.useEffect(() => setPage(0), [tab, size, query, projectFilter]);
+  React.useEffect(() => setPage(0), [tab, size, query, globalProjectId]);
 
   const dslMode = query.trim() !== "";
 
@@ -257,7 +251,7 @@ export default function AssetsPage() {
     const offset = page * size;
     const run = async () => {
       try {
-        const projectId = projectFilter === "all" ? "" : projectFilter;
+        const projectId = globalProjectId > 0 ? String(globalProjectId) : "";
         const r = dsl
           ? await api.searchAssets(dsl, tab, size, offset)
           : await api.assets(tab, size, offset, "", projectId);
@@ -284,7 +278,7 @@ export default function AssetsPage() {
       clearTimeout(tid);
       if (assetsRequestRef.current === request) assetsRequestRef.current++;
     };
-  }, [tab, page, size, query, projectFilter, refreshKey]);
+  }, [tab, page, size, query, globalProjectId, refreshKey]);
 
   React.useEffect(() => {
     const lastPage = Math.max(0, Math.ceil(total / size) - 1);
@@ -293,9 +287,9 @@ export default function AssetsPage() {
 
   const projectById = React.useMemo(() => {
     const m = new Map<number, string>();
-    for (const p of projects) m.set(p.id, p.name);
+    for (const p of globalProjects) m.set(p.id, p.name);
     return m;
-  }, [projects]);
+  }, [globalProjects]);
 
   const projectName = (id?: number) => (id ? (projectById.get(id) ?? `#${id}`) : "");
 
@@ -320,22 +314,10 @@ export default function AssetsPage() {
   // 数据 tab 的工具栏:项目筛选 + DSL 搜索。筛选在非 DSL 模式下生效(DSL 有自己的作用域)。
   const toolbar = (
     <div className="flex items-start gap-2">
-      <Select value={projectFilter} onValueChange={onProjectFilter}>
-        <SelectTrigger className="w-40 shrink-0" aria-label="按项目筛选">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">全部项目</SelectItem>
-          <SelectItem value="-1">未归属项目</SelectItem>
-          <SelectGroup>
-            {projects.map((p) => (
-              <SelectItem key={p.id} value={String(p.id)}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectGroup>
-        </SelectContent>
-      </Select>
+      <div className="bg-muted/40 text-muted-foreground flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs">
+        <FolderKanbanIcon className="size-3.5" />
+        {globalStatus !== "ready" ? "项目加载中…" : "已按项目过滤（左上角可切换）"}
+      </div>
       <div className="min-w-0 flex-1">{searchBox}</div>
     </div>
   );
@@ -344,7 +326,7 @@ export default function AssetsPage() {
     <div className="flex h-[calc(100vh-6rem)] min-h-0 flex-col gap-4">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">资产</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">资产</h1>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-sm text-muted-foreground">
@@ -358,7 +340,7 @@ export default function AssetsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">选择项目</SelectItem>
-                  {projects.map((p) => (
+                  {globalProjects.map((p) => (
                     <SelectItem key={p.id} value={String(p.id)}>
                       {p.name}
                     </SelectItem>
@@ -388,8 +370,9 @@ export default function AssetsPage() {
               <Trash2Icon className="size-3.5" /> 删除已选 ({selected.size})
             </Button>
           )}
+          <ZrearkDispatchDialog />
           <AssetSyncDialog
-            projects={projects}
+            projects={globalProjects}
             onSynced={() => {
               refresh();
               setTab("service");
@@ -627,12 +610,7 @@ export default function AssetsPage() {
               let domainCell: React.ReactNode = "—";
               if (isHttp && a.url) {
                 domainCell = (
-                  <a
-                    href={a.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-blue-600 hover:underline dark:text-blue-400"
-                  >
+                  <a href={a.url} target="_blank" rel="noreferrer" className="text-info hover:underline">
                     {a.domain || a.url}
                   </a>
                 );

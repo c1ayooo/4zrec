@@ -362,12 +362,12 @@ function AssetTreeRow({
       </button>
       <span className="flex shrink-0 items-center gap-1 text-xs tabular-nums">
         {node.critical > 0 && (
-          <span className="text-rose-600" title={`严重 ${node.critical}`}>
+          <span className="text-destructive" title={`严重 ${node.critical}`}>
             {node.critical}
           </span>
         )}
         {node.high > 0 && (
-          <span className="text-red-500" title={`高危 ${node.high}`}>
+          <span className="text-destructive" title={`高危 ${node.high}`}>
             {node.high}
           </span>
         )}

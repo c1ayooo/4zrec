@@ -178,20 +178,20 @@ export function LLMPricingDialog({
                   placeholder="deepseek-*"
                   className="h-8 font-mono text-xs"
                 />
-                {(
-                  ["input_per_mtok", "output_per_mtok", "cache_read_per_mtok", "cache_write_per_mtok"] as const
-                ).map((field) => (
-                  <Input
-                    key={field}
-                    type="number"
-                    min="0"
-                    step="0.0001"
-                    value={r[field]}
-                    onChange={(e) => patch(r.key, field, e.target.value)}
-                    placeholder="0"
-                    className="h-8 font-mono text-xs"
-                  />
-                ))}
+                {(["input_per_mtok", "output_per_mtok", "cache_read_per_mtok", "cache_write_per_mtok"] as const).map(
+                  (field) => (
+                    <Input
+                      key={field}
+                      type="number"
+                      min="0"
+                      step="0.0001"
+                      value={r[field]}
+                      onChange={(e) => patch(r.key, field, e.target.value)}
+                      placeholder="0"
+                      className="h-8 font-mono text-xs"
+                    />
+                  ),
+                )}
                 <Input
                   value={r.currency}
                   onChange={(e) => patch(r.key, "currency", e.target.value)}

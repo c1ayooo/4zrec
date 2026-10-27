@@ -3,12 +3,12 @@
 import * as React from "react";
 
 import { CheckIcon, CopyIcon, DownloadIcon, FileTextIcon, Loader2Icon, SparklesIcon } from "lucide-react";
-import { useTranslation } from "@/lib/report-i18n";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
+import { useTranslation } from "@/lib/report-i18n";
 import type { ReportJob } from "@/lib/types";
 
 export function ReportTab({ taskId }: { taskId: string }) {

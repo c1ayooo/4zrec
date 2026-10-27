@@ -12,11 +12,11 @@ export type ResolvedThemeMode = "light" | "dark";
 
 export const THEME_PRESET_OPTIONS = [
   {
-    label: "Default",
+    label: "默认",
     value: "default",
     primary: {
-      light: "oklch(0.205 0 0)",
-      dark: "oklch(0.922 0 0)",
+      light: "oklch(0.26 0.006 285)",
+      dark: "oklch(0.93 0.003 285)",
     },
   },
   {
@@ -41,6 +41,14 @@ export const THEME_PRESET_OPTIONS = [
     primary: {
       light: "oklch(0.64 0.17 36.44)",
       dark: "oklch(0.64 0.17 36.44)",
+    },
+  },
+  {
+    label: "Vault",
+    value: "vault",
+    primary: {
+      light: "oklch(0.42 0.1 259)",
+      dark: "oklch(0.585 0.185 259)",
     },
   },
 ] as const;

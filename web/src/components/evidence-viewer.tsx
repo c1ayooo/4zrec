@@ -180,9 +180,7 @@ function StepView({ index, title, children }: { index: number; title?: string; c
 function NoteView({ label, children }: { label: string; children: React.ReactNode }) {
   const compact = React.useContext(CompactCtx);
   return (
-    <section
-      className={cn("rounded-lg border border-dashed bg-muted/30", compact ? "px-2.5 py-1.5" : "px-3 py-2.5")}
-    >
+    <section className={cn("rounded-lg border border-dashed bg-muted/30", compact ? "px-2.5 py-1.5" : "px-3 py-2.5")}>
       <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
         <InfoIcon className="size-3.5 shrink-0" />
         {label}

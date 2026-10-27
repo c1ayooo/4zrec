@@ -11,8 +11,8 @@ import (
 	"strings"
 	"sync"
 
-	capkit "github.com/c1ayooo/capkit/core"
-	"github.com/c1ayooo/capkit/kits/shellkit"
+	capkit "github.com/c1ayooo/4zrec/internal/capkit/core"
+	"github.com/c1ayooo/4zrec/internal/capkit/kits/shellkit"
 
 	"github.com/c1ayooo/4zrec/internal/capkitbridge"
 )

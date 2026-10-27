@@ -92,11 +92,11 @@ function healthOf(p: LLMProfile, m?: LLMPoolMember): Health {
   if (m?.state === "degraded") {
     return {
       label: `异常 · 失败 ${m.fails} 次`,
-      cls: "border-amber-500/50 text-amber-600 dark:text-amber-400",
+      cls: "border-warning/50 text-warning",
       hint: m.last_error,
     };
   }
-  return { label: "正常", cls: "border-emerald-500/50 text-emerald-600 dark:text-emerald-400" };
+  return { label: "正常", cls: "border-success/50 text-success" };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -236,7 +236,7 @@ function PoolSheet({
                         </span>
                         <span className="font-medium">{m.name}</span>
                         {m.active && (
-                          <Badge variant="outline" className="border-amber-400/50 text-amber-500">
+                          <Badge variant="outline" className="border-warning/50 text-warning">
                             激活
                           </Badge>
                         )}
@@ -467,7 +467,7 @@ function ProfileSheet({
           <SheetTitle className="flex items-center gap-2">
             {isNew ? "新建模型配置" : `编辑：${profile?.name}`}
             {profile?.is_default && (
-              <Badge variant="outline" className="border-amber-400/50 text-amber-500">
+              <Badge variant="outline" className="border-warning/50 text-warning">
                 激活中
               </Badge>
             )}
@@ -865,7 +865,7 @@ export default function LLMPage() {
           <Button size="sm" variant="outline" onClick={() => setPoolOpen(true)}>
             <ZapIcon /> 轮询配置
             {poolOn && (
-              <Badge variant="outline" className="ml-1 border-emerald-500/50 text-emerald-600 dark:text-emerald-400">
+              <Badge variant="outline" className="ml-1 border-success/50 text-success">
                 已开启
               </Badge>
             )}
@@ -901,7 +901,7 @@ export default function LLMPage() {
                   }}
                   className={cn(
                     "cursor-pointer gap-0 py-4 outline-none transition-colors hover:border-foreground/30",
-                    p.is_default && "border-amber-400/50 bg-amber-400/5",
+                    p.is_default && "border-warning/50 bg-warning/5",
                   )}
                 >
                   <CardContent className="grid gap-2 px-4">
@@ -909,7 +909,7 @@ export default function LLMPage() {
                       <StarIcon
                         className={cn(
                           "mt-0.5 size-4 shrink-0",
-                          p.is_default ? "fill-amber-400 text-amber-400" : "text-muted-foreground",
+                          p.is_default ? "fill-warning text-warning" : "text-muted-foreground",
                         )}
                       />
                       <div className="min-w-0 flex-1">

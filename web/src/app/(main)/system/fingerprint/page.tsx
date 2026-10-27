@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import type { FingerprintRule, FingerprintStatus, FingerprintSyncJob } from "@/lib/types";
@@ -158,7 +159,7 @@ export default function FingerprintPage() {
               <p className="text-muted-foreground text-xs">
                 {syncJob.message || (syncJob.running ? "正在同步上游规则…" : syncJob.error || "完成")}
               </p>
-              {syncJob.error ? <p className="text-xs text-red-500">{syncJob.error}</p> : null}
+              {syncJob.error ? <p className="text-xs text-destructive">{syncJob.error}</p> : null}
               {syncJob.outcomes?.length ? (
                 <div className="flex flex-wrap gap-2">
                   {syncJob.outcomes.map((outcome) => (
@@ -215,7 +216,11 @@ export default function FingerprintPage() {
                 {loading ? <Loader2Icon className="size-4 animate-spin" /> : null}
               </div>
               {rules === null ? (
-                <p className="text-muted-foreground px-4 pb-4 text-sm">加载中…</p>
+                <div className="text-muted-foreground px-4 pb-4 text-sm flex flex-col gap-3">
+                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className="h-10 w-full" />
+                </div>
               ) : rules.length === 0 ? (
                 <p className="text-muted-foreground px-4 pb-4 text-sm">无匹配规则。</p>
               ) : (

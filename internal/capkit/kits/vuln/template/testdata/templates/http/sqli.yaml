@@ -1,0 +1,22 @@
+id: weaver/eoffice-sqli
+name: 泛微 e-office SQL 注入
+kind: http
+product: [weaver, e-office]
+fingerprint: 'app="weaver-e-office"'
+severity: high
+tags: [sqli, predefined]
+cve: CVE-2024-0001
+request:
+  method: GET
+  path: /general/validate_sort
+matchers:
+  - type: status
+    status: [200]
+  - type: regex
+    part: body
+    regex: ["SQL syntax.*"]
+extract:
+  - name: db_error
+    regex: "SQL syntax.*"
+references:
+  - https://example.com/advisory

@@ -199,7 +199,7 @@ export default function SessionsPage() {
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <SquareTerminalIcon className="h-5 w-5 text-muted-foreground" />
-          <h1 className="text-xl font-semibold tracking-tight">终端</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">终端</h1>
           <Badge variant="secondary">{sessions.length}</Badge>
         </div>
         <div className="flex items-center gap-2">
@@ -329,12 +329,12 @@ export default function SessionsPage() {
               )}
               {activeLogs.map((entry) => (
                 <div key={entry.id} className="mb-3">
-                  <div className="text-sky-400">
+                  <div className="text-info">
                     <span className="text-neutral-500">[{entry.at}]</span> $ {entry.command}
                   </div>
                   {entry.stdout && <pre className="whitespace-pre-wrap break-words">{entry.stdout}</pre>}
-                  {entry.stderr && <pre className="whitespace-pre-wrap break-words text-amber-300">{entry.stderr}</pre>}
-                  <div className={cn("text-neutral-500", entry.exitCode !== 0 && "text-red-400")}>
+                  {entry.stderr && <pre className="whitespace-pre-wrap break-words text-warning">{entry.stderr}</pre>}
+                  <div className={cn("text-neutral-500", entry.exitCode !== 0 && "text-destructive")}>
                     exit {entry.exitCode} · {entry.durationMs}ms
                   </div>
                 </div>

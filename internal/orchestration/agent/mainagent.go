@@ -25,6 +25,7 @@ type MainAgent struct {
 	windowFn        func() int                             // optional dynamic task-chain minimum
 	maxTurns        int                                    // max agent turns per run (0 = unlimited)
 	proxyAddr       string                                 // recording proxy for WebFetch (empty = direct)
+	targetsEnvFn    targetsEnvResolver                     // 会话级目标变量(ZREC_TARGETS)解析器;nil=不注入
 	proxyCACert     string                                 // recording proxy's CA cert path (HTTPS verify)
 	webSearch       WebSearchOpts                          // web_search tool backend selection (off by default)
 	workDir         string                                 // shared work dir (surfaced in prompt as artifact-output target)
@@ -81,6 +82,13 @@ func (m *MainAgent) compactionWindow() int {
 // cert it trusts to verify HTTPS through it (empty addr = direct).
 func (m *MainAgent) SetProxy(addr, caCert string) { m.proxyAddr, m.proxyCACert = addr, caCert }
 
+// SetTargetsEnv 注入会话级目标环境变量解析器(ZREC_TARGETS,见 targets_env.go)。nil=不注入。
+func (m *MainAgent) SetTargetsEnv(fn func(sessionID string) []string) { m.targetsEnvFn = fn }
+
+func (m *MainAgent) targetsEnv(sessionID string) []string {
+	return targetsEnv(m.targetsEnvFn, sessionID)
+}
+
 // SetWebSearch selects the web_search backend for the main agent (off by default).
 func (m *MainAgent) SetWebSearch(o WebSearchOpts) { m.webSearch = o }
 
@@ -112,7 +120,7 @@ const mainAgentDefaultTmpl = `你是一个授权渗透测试系统的"主 agent"
 
 func mainAgentSystem(goal, dataDir, workDir, assetSummary string) string {
 	body := renderSystem("mainagent", mainAgentDefaultTmpl, MainVars{Goal: goal, AssetSummary: assetSummary, DataDir: dataDir, Now: nowStr()})
-	return body + artifactSpec(workDir)
+	return body + targetEnvPolicyBlock() + artifactSpec(workDir)
 }
 
 // Chat handles one human message and returns the assistant reply. emit, if
@@ -169,8 +177,8 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 			DeepSeekModel:   m.webSearch.DeepSeekModel,
 			Proxy:           m.webSearch.Proxy,
 		},
-		BashEnv:       proxyEnv(m.proxyAddr, m.proxyCACert), // Bash 子命令默认走代理+信任 CA
-		WorkingDir:    mainDir,                              // 本任务工作目录 <workDir>/tasks/<taskID>
+		BashEnv:       append(proxyEnv(m.proxyAddr, m.proxyCACert), m.targetsEnv(fmt.Sprintf("exp%d-main", ts.ID()))...), // Bash 子命令默认走代理+信任 CA
+		WorkingDir:    mainDir,                                                                                           // 本任务工作目录 <workDir>/tasks/<taskID>
 		ToolOutputDir: cmdOutDir(mainDir),
 		MaxTurns:      m.maxTurns,                             // 0 = unlimited (configurable in agent management)
 		Compaction:    compactionConfig(m.compactionWindow()), // long chats stay within the window

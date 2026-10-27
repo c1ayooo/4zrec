@@ -16,13 +16,13 @@ import {
 } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Tooltip as RechartsTooltip, XAxis, YAxis } from "recharts";
 
+import { LLMPricingDialog } from "@/components/llm-pricing-dialog";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { Progress } from "@/components/ui/progress";
-import { LLMPricingDialog } from "@/components/llm-pricing-dialog";
 import { api } from "@/lib/api";
 import type {
   Activity,
@@ -92,32 +92,32 @@ const ASSET_TYPE_LABELS: Record<string, string> = {
 // Asset kinds are one hue ramp, not six unrelated hues: the category is read
 // from position and label, not from a rainbow.
 const ASSET_COLORS: Record<string, string> = {
-  root_domain: "bg-blue-700",
-  ip: "bg-blue-600",
-  subdomain: "bg-blue-500",
-  app: "bg-blue-400",
-  service: "bg-blue-300",
-  endpoint: "bg-blue-200",
+  root_domain: "bg-info",
+  ip: "bg-info",
+  subdomain: "bg-info",
+  app: "bg-info",
+  service: "bg-chart-1/70",
+  endpoint: "bg-chart-1/40",
 };
 
 function statusColor(code: number): string {
-  if (code < 300) return "text-emerald-700 dark:text-emerald-300";
-  if (code < 400) return "text-blue-700 dark:text-blue-300";
-  if (code < 500) return "text-amber-700 dark:text-amber-300";
-  return "text-red-700 dark:text-red-300";
+  if (code < 300) return "text-success";
+  if (code < 400) return "text-info";
+  if (code < 500) return "text-warning";
+  return "text-destructive";
 }
 
 function statusBg(code: number): string {
-  if (code < 300) return "bg-emerald-500";
-  if (code < 400) return "bg-blue-400";
-  if (code < 500) return "bg-amber-400";
-  return "bg-red-400";
+  if (code < 300) return "bg-success";
+  if (code < 400) return "bg-info";
+  if (code < 500) return "bg-warning";
+  return "bg-destructive";
 }
 
 // ── sub-components ────────────────────────────────────────────────────────────
 
 function LiveDot({ className }: { className?: string }) {
-  return <span className={cn("inline-block size-1.5 shrink-0 animate-pulse rounded-full bg-blue-400", className)} />;
+  return <span className={cn("inline-block size-1.5 shrink-0 animate-pulse rounded-full bg-info", className)} />;
 }
 
 function SectionTitle({
@@ -512,15 +512,15 @@ export default function DashboardPage() {
   }
 
   function workerColor(w: string): string {
-    if (w === "planner") return "text-sky-700 dark:text-sky-300";
-    if (w === "mainagent") return "text-blue-700 dark:text-blue-300";
-    return "text-blue-700 dark:text-blue-300";
+    if (w === "planner") return "text-info";
+    if (w === "mainagent") return "text-info";
+    return "text-info";
   }
 
   function workerBg(w: string): string {
-    if (w === "planner") return "bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/20";
-    if (w === "mainagent") return "bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20";
-    return "bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20";
+    if (w === "planner") return "bg-info/10 text-info border-info/20";
+    if (w === "mainagent") return "bg-info/10 text-info border-info/20";
+    return "bg-info/10 text-info border-info/20";
   }
 
   // ── render ────────────────────────────────────────────────────────────────
@@ -528,12 +528,7 @@ export default function DashboardPage() {
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
       {/* ── Header ── */}
-      <div>
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">总览</h1>
-          <p className="mt-1 text-sm text-muted-foreground">系统全局状态 · 实时刷新</p>
-        </div>
-      </div>
+      <h1 className="text-2xl font-semibold tracking-tight">总览</h1>
 
       {/* ── Row 1: 5 stat cards ── */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -549,15 +544,9 @@ export default function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-x-2.5 gap-y-0.5 text-[13px]">
-            {(tasksByStatus.running ?? 0) > 0 && (
-              <span className="text-blue-700 dark:text-blue-300">探索 {tasksByStatus.running}</span>
-            )}
-            {(tasksByStatus.paused ?? 0) > 0 && (
-              <span className="text-amber-700 dark:text-amber-300">暂停 {tasksByStatus.paused}</span>
-            )}
-            {(tasksByStatus.done ?? 0) > 0 && (
-              <span className="text-emerald-700 dark:text-emerald-300">完成 {tasksByStatus.done}</span>
-            )}
+            {(tasksByStatus.running ?? 0) > 0 && <span className="text-info">探索 {tasksByStatus.running}</span>}
+            {(tasksByStatus.paused ?? 0) > 0 && <span className="text-warning">暂停 {tasksByStatus.paused}</span>}
+            {(tasksByStatus.done ?? 0) > 0 && <span className="text-success">完成 {tasksByStatus.done}</span>}
             {tasks.length === 0 && <span className="text-muted-foreground">暂无任务</span>}
           </CardContent>
         </Card>
@@ -571,10 +560,10 @@ export default function DashboardPage() {
             <div className="text-2xl font-semibold tabular-nums">{findings.length}</div>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-2.5 text-[13px]">
-            <span className="text-red-700 dark:text-red-300">严重 {findingsBySev.critical}</span>
-            <span className="text-red-700 dark:text-red-300">高危 {findingsBySev.high}</span>
-            <span className="text-amber-700 dark:text-amber-300">中危 {findingsBySev.medium}</span>
-            <span className="text-slate-600 dark:text-slate-300">低危 {findingsBySev.low}</span>
+            <span className="text-destructive">严重 {findingsBySev.critical}</span>
+            <span className="text-destructive">高危 {findingsBySev.high}</span>
+            <span className="text-warning">中危 {findingsBySev.medium}</span>
+            <span className="text-info">低危 {findingsBySev.low}</span>
           </CardContent>
         </Card>
 
@@ -716,9 +705,7 @@ export default function DashboardPage() {
                     <span
                       className={cn(
                         "rounded px-1 py-0 text-[11px]",
-                        tokenTab === resolvedKey
-                          ? "bg-background/20 text-background"
-                          : "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300",
+                        tokenTab === resolvedKey ? "bg-background/20 text-background" : "bg-success/20 text-success",
                       )}
                     >
                       默认
@@ -748,7 +735,7 @@ export default function DashboardPage() {
                 <button
                   type="button"
                   onClick={() => setPricingOpen(true)}
-                  className="mt-1 text-left text-[13px] text-amber-700 hover:underline dark:text-amber-300"
+                  className="mt-1 text-left text-[13px] text-warning hover:underline"
                   title="这些模型有 token 消耗但未配置单价，费用未计入"
                 >
                   未配单价：{usageStats?.unpriced_models.join("、")}，点此配置
@@ -766,19 +753,19 @@ export default function DashboardPage() {
                     label: "输入(未命中)",
                     value: displayedTokens.input,
                     barColor: dailyTrendConfig.input.color!,
-                    text: "text-blue-700 dark:text-blue-300",
+                    text: "text-info",
                   },
                   {
                     label: "缓存命中",
                     value: displayedTokens.cacheRead,
                     barColor: dailyTrendConfig.cacheRead.color!,
-                    text: "text-emerald-700 dark:text-emerald-300",
+                    text: "text-success",
                   },
                   {
                     label: "输出",
                     value: displayedTokens.output,
                     barColor: dailyTrendConfig.output.color!,
-                    text: "text-sky-700 dark:text-sky-300",
+                    text: "text-info",
                   },
                 ].map(({ label, value, barColor, text }) => {
                   const pct = total > 0 ? (value / total) * 100 : 0;
@@ -808,12 +795,7 @@ export default function DashboardPage() {
               return (
                 <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2 text-[13px]">
                   <span className="text-muted-foreground">缓存命中率</span>
-                  <span
-                    className={cn(
-                      "font-semibold tabular-nums",
-                      hitPct > 50 ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300",
-                    )}
-                  >
+                  <span className={cn("font-semibold tabular-nums", hitPct > 50 ? "text-success" : "text-warning")}>
                     {hitPct}%
                   </span>
                 </div>
@@ -922,7 +904,256 @@ export default function DashboardPage() {
         </div>
       </Card>
 
-      {/* ── Row 3: 活动流 | 发现 ── */}
+      {/* ── Row 3: 资产分布 | 流量状态码 | 拦截 & 待审批 ── */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+        {/* 资产分布 */}
+        <Card className="p-4">
+          <SectionTitle icon={NetworkIcon} sub="按类型">
+            资产分布
+          </SectionTitle>
+
+          {assetByType.length === 0 ? (
+            <div className="py-6 text-center text-[13px] text-muted-foreground">暂无资产数据</div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {assetByType.map(([type, count]) => (
+                <div key={type} className="flex items-center gap-2 text-[13px]">
+                  <span className="w-8 shrink-0 text-right text-[13px] text-muted-foreground">
+                    {ASSET_TYPE_LABELS[type] ?? type}
+                  </span>
+                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className={cn("h-full rounded-full", ASSET_COLORS[type] ?? "bg-muted-foreground/40")}
+                      style={{ width: `${(count / assetMax) * 100}%` }}
+                    />
+                  </div>
+                  <span className="w-4 text-right tabular-nums">{count}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="mt-3 border-t pt-3 text-[13px] text-muted-foreground">共 {totalAssets} 节点</div>
+        </Card>
+
+        {/* 流量状态码 */}
+        <Card className="p-4">
+          <SectionTitle icon={ActivityIcon} sub={`${traffic.length} 次请求`}>
+            流量状态码
+          </SectionTitle>
+
+          {/* bar chart */}
+          {trafficByCodes.length === 0 ? (
+            <div className="py-6 text-center text-[13px] text-muted-foreground">暂无流量数据</div>
+          ) : (
+            <>
+              <div className="mb-3 flex items-end gap-2" style={{ height: 52 }}>
+                {trafficByCodes.map(({ code, n }) => (
+                  <div key={code} className="flex flex-1 flex-col items-center gap-1">
+                    <span className="text-[11px] tabular-nums text-muted-foreground">{n}</span>
+                    <div
+                      className={cn("w-full min-h-1 rounded-sm", statusBg(code), "opacity-80")}
+                      style={{ height: Math.max(4, (n / trafficMax) * 36) }}
+                    />
+                    <span className={cn("text-[11px] font-mono", statusColor(code))}>{code}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="border-t pt-2.5">
+                <div className="mb-1.5 text-[13px] text-muted-foreground">最近请求</div>
+                <div className="flex flex-col gap-1.5">
+                  {recentTraffic.map((e) => (
+                    <div key={e.id} className="flex items-center gap-1.5 text-[13px]">
+                      <span
+                        className={cn(
+                          "shrink-0 rounded border px-1 py-0 font-mono text-[11px]",
+                          e.method === "GET"
+                            ? "border-success/30 bg-success/10 text-success"
+                            : "border-info/30 bg-info/10 text-info",
+                        )}
+                      >
+                        {e.method}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground">
+                        {e.host}
+                        {e.url.replace(/^https?:\/\/[^/]+/, "").substring(0, 30)}
+                      </span>
+                      <span className={cn("shrink-0 font-mono text-[11px]", statusColor(e.status))}>{e.status}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+        </Card>
+
+        {/* 系统状态 & 待审批 */}
+        <Card className="p-4">
+          <SectionTitle icon={ShieldCheckIcon}>系统状态</SectionTitle>
+
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2">
+              <div className="text-[13px] text-muted-foreground">LLM 配置</div>
+              <Badge
+                variant="outline"
+                className={cn(
+                  "text-[13px]",
+                  stats?.llm_configured
+                    ? "border-success/30 bg-success/10 text-success"
+                    : "border-destructive/30 bg-destructive/10 text-destructive",
+                )}
+              >
+                {stats?.llm_configured ? "已配置" : "未配置"}
+              </Badge>
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2">
+              <div className="text-[13px] text-muted-foreground">流量捕获</div>
+              <Badge
+                variant="outline"
+                className={cn(
+                  "text-[13px]",
+                  settings?.traffic_capture ? "border-info/30 bg-info/10 text-info" : "text-muted-foreground",
+                )}
+              >
+                {settings?.traffic_capture ? "开启" : "关闭"}
+              </Badge>
+            </div>
+
+            {activeProfile && (
+              <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2">
+                <div className="text-[13px] text-muted-foreground">激活模型</div>
+                <span className="font-mono text-[13px]">{activeProfile.model}</span>
+              </div>
+            )}
+          </div>
+
+          {/* pending approvals */}
+          {pendingCount > 0 && (
+            <div className="mt-3">
+              <div className="mb-1.5 text-[13px] font-medium text-warning">待审批 ({pendingCount})</div>
+              <div className="flex flex-col gap-1.5">
+                {pending.slice(0, 3).map((p) => (
+                  <Link
+                    key={p.id}
+                    href="/system/intercept/approvals"
+                    className="flex items-center justify-between rounded-lg border border-warning/20 bg-warning/5 px-2.5 py-2 hover:bg-warning/10"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-medium">{p.tool_name}</div>
+                      <div className="text-[11px] text-muted-foreground">{p.agent_name}</div>
+                    </div>
+                    <ArrowUpRightIcon className="size-3 shrink-0 text-warning" />
+                  </Link>
+                ))}
+                {pendingCount > 3 && (
+                  <Link
+                    href="/system/intercept/approvals"
+                    className="text-center text-[13px] text-muted-foreground hover:text-foreground"
+                  >
+                    还有 {pendingCount - 3} 条…
+                  </Link>
+                )}
+              </div>
+            </div>
+          )}
+
+          {pendingCount === 0 && (
+            <div className="mt-3 rounded-lg border bg-muted/10 px-3 py-3 text-center text-[13px] text-muted-foreground">
+              <ShieldCheckIcon className="mx-auto mb-1 size-4 text-success/50" />
+              无待审批拦截
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {/* ── Row 4: 任务表格 ── */}
+      <Card className="overflow-hidden p-0">
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <div className="flex items-center gap-1.5 text-[13px] font-semibold">
+            <ClockIcon className="size-3.5 text-muted-foreground" />
+            任务
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[13px] text-muted-foreground">{tasks.length} 个任务</span>
+            <Link
+              href="/function/tasks"
+              className="flex items-center gap-0.5 text-[13px] text-muted-foreground hover:text-foreground"
+            >
+              全部 <ArrowUpRightIcon className="size-3" />
+            </Link>
+          </div>
+        </div>
+        <table className="w-full border-collapse text-[13px]">
+          <thead>
+            <tr className="border-b">
+              {["任务", "状态", "引擎", "目标进度", "在途", "最近活动"].map((h) => (
+                <th key={h} className="px-4 py-2 text-left text-[13px] font-medium text-muted-foreground first:pl-4">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {sortedTasks.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="px-4 py-6 text-center text-[13px] text-muted-foreground">
+                  暂无任务
+                </td>
+              </tr>
+            ) : (
+              sortedTasks.map((t) => {
+                const goalsPct = t.goals_total ? Math.round(((t.goals_met ?? 0) / t.goals_total) * 100) : null;
+                return (
+                  <tr key={t.id} className="border-b last:border-0 transition-colors hover:bg-muted/30">
+                    <td className="max-w-xs px-4 py-3">
+                      <Link href={`/function/tasks/detail?id=${t.id}`} className="group flex flex-col">
+                        <span className="truncate font-medium group-hover:underline">{t.description}</span>
+                        <span className="mt-0.5 truncate font-mono text-[13px] text-muted-foreground">{t.id}</span>
+                      </Link>
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusBadge domain="task" value={t.status} dot className="px-1.5 py-0 text-[13px]" />
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusBadge
+                        domain="engine"
+                        value={t.engine_mode ?? "idle"}
+                        className="px-1.5 py-0 text-[13px]"
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      {goalsPct !== null ? (
+                        <div className="flex items-center gap-2">
+                          <Progress value={goalsPct} className="h-1 w-14" />
+                          <span className="tabular-nums text-muted-foreground">
+                            {t.goals_met ?? 0}/{t.goals_total}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 tabular-nums">
+                      {(t.in_flight ?? 0) > 0 ? (
+                        <span className="font-semibold">{t.in_flight}</span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 tabular-nums text-muted-foreground">
+                      {fmtRel(t.last_activity_unix ?? t.created_unix)}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </Card>
+
+      {/* ── Row 5: 活动流 | 发现 ── */}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         {/* 活动流 */}
         <Card className="flex flex-col p-4">
@@ -1030,259 +1261,6 @@ export default function DashboardPage() {
               ))
             )}
           </div>
-        </Card>
-      </div>
-
-      {/* ── Row 4: 任务表格 ── */}
-      <Card className="overflow-hidden p-0">
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <div className="flex items-center gap-1.5 text-[13px] font-semibold">
-            <ClockIcon className="size-3.5 text-muted-foreground" />
-            任务
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[13px] text-muted-foreground">{tasks.length} 个任务</span>
-            <Link
-              href="/function/tasks"
-              className="flex items-center gap-0.5 text-[13px] text-muted-foreground hover:text-foreground"
-            >
-              全部 <ArrowUpRightIcon className="size-3" />
-            </Link>
-          </div>
-        </div>
-        <table className="w-full border-collapse text-[13px]">
-          <thead>
-            <tr className="border-b">
-              {["任务", "状态", "引擎", "目标进度", "在途", "最近活动"].map((h) => (
-                <th key={h} className="px-4 py-2 text-left text-[13px] font-medium text-muted-foreground first:pl-4">
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sortedTasks.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-[13px] text-muted-foreground">
-                  暂无任务
-                </td>
-              </tr>
-            ) : (
-              sortedTasks.map((t) => {
-                const goalsPct = t.goals_total ? Math.round(((t.goals_met ?? 0) / t.goals_total) * 100) : null;
-                return (
-                  <tr key={t.id} className="border-b last:border-0 transition-colors hover:bg-muted/30">
-                    <td className="max-w-xs px-4 py-3">
-                      <Link href={`/function/tasks/detail?id=${t.id}`} className="group flex flex-col">
-                        <span className="truncate font-medium group-hover:underline">{t.description}</span>
-                        <span className="mt-0.5 truncate font-mono text-[13px] text-muted-foreground">{t.id}</span>
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge domain="task" value={t.status} dot className="px-1.5 py-0 text-[13px]" />
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge
-                        domain="engine"
-                        value={t.engine_mode ?? "idle"}
-                        className="px-1.5 py-0 text-[13px]"
-                      />
-                    </td>
-                    <td className="px-4 py-3">
-                      {goalsPct !== null ? (
-                        <div className="flex items-center gap-2">
-                          <Progress value={goalsPct} className="h-1 w-14" />
-                          <span className="tabular-nums text-muted-foreground">
-                            {t.goals_met ?? 0}/{t.goals_total}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 tabular-nums">
-                      {(t.in_flight ?? 0) > 0 ? (
-                        <span className="font-semibold">{t.in_flight}</span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 tabular-nums text-muted-foreground">
-                      {fmtRel(t.last_activity_unix ?? t.created_unix)}
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </Card>
-
-      {/* ── Row 5: 资产分布 | 流量状态码 | 拦截 & 待审批 ── */}
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-        {/* 资产分布 */}
-        <Card className="p-4">
-          <SectionTitle icon={NetworkIcon} sub="按类型">
-            资产分布
-          </SectionTitle>
-
-          {assetByType.length === 0 ? (
-            <div className="py-6 text-center text-[13px] text-muted-foreground">暂无资产数据</div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {assetByType.map(([type, count]) => (
-                <div key={type} className="flex items-center gap-2 text-[13px]">
-                  <span className="w-8 shrink-0 text-right text-[13px] text-muted-foreground">
-                    {ASSET_TYPE_LABELS[type] ?? type}
-                  </span>
-                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className={cn("h-full rounded-full", ASSET_COLORS[type] ?? "bg-slate-400")}
-                      style={{ width: `${(count / assetMax) * 100}%` }}
-                    />
-                  </div>
-                  <span className="w-4 text-right tabular-nums">{count}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="mt-3 border-t pt-3 text-[13px] text-muted-foreground">共 {totalAssets} 节点</div>
-        </Card>
-
-        {/* 流量状态码 */}
-        <Card className="p-4">
-          <SectionTitle icon={ActivityIcon} sub={`${traffic.length} 次请求`}>
-            流量状态码
-          </SectionTitle>
-
-          {/* bar chart */}
-          {trafficByCodes.length === 0 ? (
-            <div className="py-6 text-center text-[13px] text-muted-foreground">暂无流量数据</div>
-          ) : (
-            <>
-              <div className="mb-3 flex items-end gap-2" style={{ height: 52 }}>
-                {trafficByCodes.map(({ code, n }) => (
-                  <div key={code} className="flex flex-1 flex-col items-center gap-1">
-                    <span className="text-[11px] tabular-nums text-muted-foreground">{n}</span>
-                    <div
-                      className={cn("w-full min-h-1 rounded-sm", statusBg(code), "opacity-80")}
-                      style={{ height: Math.max(4, (n / trafficMax) * 36) }}
-                    />
-                    <span className={cn("text-[11px] font-mono", statusColor(code))}>{code}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="border-t pt-2.5">
-                <div className="mb-1.5 text-[13px] text-muted-foreground">最近请求</div>
-                <div className="flex flex-col gap-1.5">
-                  {recentTraffic.map((e) => (
-                    <div key={e.id} className="flex items-center gap-1.5 text-[13px]">
-                      <span
-                        className={cn(
-                          "shrink-0 rounded border px-1 py-0 font-mono text-[11px]",
-                          e.method === "GET"
-                            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                            : "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300",
-                        )}
-                      >
-                        {e.method}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                        {e.host}
-                        {e.url.replace(/^https?:\/\/[^/]+/, "").substring(0, 30)}
-                      </span>
-                      <span className={cn("shrink-0 font-mono text-[11px]", statusColor(e.status))}>{e.status}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-        </Card>
-
-        {/* 系统状态 & 待审批 */}
-        <Card className="p-4">
-          <SectionTitle icon={ShieldCheckIcon}>系统状态</SectionTitle>
-
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2">
-              <div className="text-[13px] text-muted-foreground">LLM 配置</div>
-              <Badge
-                variant="outline"
-                className={cn(
-                  "text-[13px]",
-                  stats?.llm_configured
-                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                    : "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300",
-                )}
-              >
-                {stats?.llm_configured ? "已配置" : "未配置"}
-              </Badge>
-            </div>
-
-            <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2">
-              <div className="text-[13px] text-muted-foreground">流量捕获</div>
-              <Badge
-                variant="outline"
-                className={cn(
-                  "text-[13px]",
-                  settings?.traffic_capture
-                    ? "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300"
-                    : "text-muted-foreground",
-                )}
-              >
-                {settings?.traffic_capture ? "开启" : "关闭"}
-              </Badge>
-            </div>
-
-            {activeProfile && (
-              <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2">
-                <div className="text-[13px] text-muted-foreground">激活模型</div>
-                <span className="font-mono text-[13px]">{activeProfile.model}</span>
-              </div>
-            )}
-          </div>
-
-          {/* pending approvals */}
-          {pendingCount > 0 && (
-            <div className="mt-3">
-              <div className="mb-1.5 text-[13px] font-medium text-amber-700 dark:text-amber-300">
-                待审批 ({pendingCount})
-              </div>
-              <div className="flex flex-col gap-1.5">
-                {pending.slice(0, 3).map((p) => (
-                  <Link
-                    key={p.id}
-                    href="/system/intercept/approvals"
-                    className="flex items-center justify-between rounded-lg border border-amber-500/20 bg-amber-500/5 px-2.5 py-2 hover:bg-amber-500/10"
-                  >
-                    <div className="min-w-0">
-                      <div className="text-[13px] font-medium">{p.tool_name}</div>
-                      <div className="text-[11px] text-muted-foreground">{p.agent_name}</div>
-                    </div>
-                    <ArrowUpRightIcon className="size-3 shrink-0 text-amber-700 dark:text-amber-300" />
-                  </Link>
-                ))}
-                {pendingCount > 3 && (
-                  <Link
-                    href="/system/intercept/approvals"
-                    className="text-center text-[13px] text-muted-foreground hover:text-foreground"
-                  >
-                    还有 {pendingCount - 3} 条…
-                  </Link>
-                )}
-              </div>
-            </div>
-          )}
-
-          {pendingCount === 0 && (
-            <div className="mt-3 rounded-lg border bg-muted/10 px-3 py-3 text-center text-[13px] text-muted-foreground">
-              <ShieldCheckIcon className="mx-auto mb-1 size-4 text-emerald-500/50" />
-              无待审批拦截
-            </div>
-          )}
         </Card>
       </div>
 

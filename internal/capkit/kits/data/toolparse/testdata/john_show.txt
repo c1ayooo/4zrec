@@ -1,0 +1,4 @@
+administrator:Password1!:500:aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c:::
+jjones:P@ssw0rd!:1001:aad3b435b51404eeaad3b435b51404ee:32ed87bdb5fdc5e9cba88547376818d4:::
+
+2 password hashes cracked, 1 left.

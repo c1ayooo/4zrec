@@ -292,13 +292,84 @@ export interface AssetSyncSourceProject {
 }
 
 export interface AssetSyncRequest {
-  base_url: string;
-  api_key: string;
+  base_url?: string;
+  api_key?: string;
   source_project_id?: number;
   target_project_id?: number;
   catalog?: "all" | "verified";
   limit?: number;
   dry_run?: boolean;
+  /** 同时拉取站点路由（4zreark site_routes → 4zrec endpoint 资产）。 */
+  include_routes?: boolean;
+}
+
+// ---- 4zreark 平台集成 ----
+
+/** GET /api/assets/zreark/config：连接配置回显（key 只回掩码）。 */
+export interface ZrearkConfig {
+  base_url: string;
+  api_key_masked: string;
+  configured: boolean;
+  from_env: boolean;
+}
+
+export interface ZrearkDispatchRequest {
+  base_url?: string;
+  api_key?: string;
+  source_project_id: number;
+  name: string;
+  type: string;
+  targets: string[];
+  target_type: "domain" | "ip" | "url" | "cidr";
+  description?: string;
+  auto_start?: boolean;
+}
+
+export interface ZrearkDispatchResult {
+  task_id: string;
+  status: string;
+  targets: number;
+  started: boolean;
+  start_error?: string;
+}
+
+/** POST /api/assets/zreark/tasks：4zreark 远端任务归一化视图。 */
+export interface ZrearkTask {
+  id: string;
+  name: string;
+  type: string;
+  status: "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
+  progress: number;
+  target_count: number;
+  target_type: string;
+  discovered_assets: number;
+  discovered_ports: number;
+  last_error?: string;
+  created_at?: string;
+  completed_at?: string;
+}
+
+export interface ZrearkTaskResultsRequest {
+  base_url?: string;
+  api_key?: string;
+  task_id: string;
+  include?: ("service" | "crawler")[];
+  target_project_id?: number;
+  limit?: number;
+  dry_run?: boolean;
+}
+
+export interface ZrearkTaskResultsResult {
+  task_id: string;
+  fetched: number;
+  /** 指纹结果落库数（service 资产，含技术栈/指纹合并）。 */
+  services: number;
+  /** 爬虫路由落库数（endpoint 资产）。 */
+  endpoints: number;
+  assigned: number;
+  skipped: number;
+  errors: string[];
+  dry_run: boolean;
 }
 
 export interface AssetSyncSample {
@@ -315,6 +386,7 @@ export interface AssetSyncResult {
   would_import: number;
   imported: number;
   assigned: number;
+  routes: number;
   skipped: number;
   errors: string[];
   sample: AssetSyncSample[];
@@ -851,6 +923,7 @@ export interface Conversation {
   title: string;
   llm_profile_id?: number;
   project_id?: number; // 归属项目(挂载后资产围栏生效)
+  task_id?: number; // 关联任务(设置时通常同时把 project_id 对齐到任务所属项目)
   pinned?: boolean;
   pinned_at?: string | null;
   created_at: string;
@@ -1616,7 +1689,7 @@ export interface ReconRun {
 export interface ReconSchedule {
   id: number;
   name: string;
-  kind: "engine" | "pipeline";
+  kind: "engine" | "pipeline" | "zreark";
   config: Record<string, unknown> | null;
   interval_sec: number;
   project_id?: number | null;

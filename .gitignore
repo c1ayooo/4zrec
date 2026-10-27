@@ -73,3 +73,6 @@ Thumbs.db
 
 # 前端 taste/ui-ux 审计的截图对比缓存（本地产物，不提交）
 web/.taste-skill/
+
+# 根目录 Next.js 构建 缓存(误生成防护)
+/.next/

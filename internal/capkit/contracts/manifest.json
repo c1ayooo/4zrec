@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/c1ayooo/capkit/contracts/manifest.json",
+  "title": "Manifest",
+  "type": "object",
+  "required": ["name", "version", "api_version", "tools"],
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "version": { "type": "string", "minLength": 1 },
+    "api_version": { "type": "string", "minLength": 1 },
+    "requires": { "type": "array", "items": { "type": "string" } },
+    "tools": { "type": "array", "items": { "$ref": "tool.json" } },
+    "settings": { "type": "array", "items": { "$ref": "settings.json" } },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

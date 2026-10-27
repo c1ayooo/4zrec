@@ -50,12 +50,14 @@ GROUP BY c.id`)
 // Conversation is one ChatGPT-style chat thread bound to an agent key. It lives
 // independent of the pentest exploration graph — see schema.sql §I.
 type Conversation struct {
-	ID           int64  `json:"id"`
-	AgentKey     string `json:"agent_key"`
-	Title        string `json:"title"`
+	ID       int64  `json:"id"`
+	AgentKey string `json:"agent_key"`
+	Title    string `json:"title"`
 	LLMProfileID *int64 `json:"llm_profile_id,omitempty"`
 	// ProjectID 会话归属的项目;nil=未挂项目,资产围栏对该会话不启用。
-	ProjectID *int64     `json:"project_id,omitempty"`
+	ProjectID *int64 `json:"project_id,omitempty"`
+	// TaskID 会话关联的任务;nil=未关联。设置时通常同时把 ProjectID 对齐到任务所属项目。
+	TaskID    *int64     `json:"task_id,omitempty"`
 	Pinned    bool       `json:"pinned"`
 	PinnedAt  *time.Time `json:"pinned_at,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
@@ -67,14 +69,15 @@ type ConversationPatch struct {
 	Title     *string
 	Pinned    *bool
 	ProjectID *int64 // 设置/清除会话归属项目(指针语义:非nil=设置,指向0=清除)
+	TaskID    *int64 // 设置/清除会话关联任务(同上)
 }
 
-const convCols = `id, agent_key, title, llm_profile_id, project_id, pinned_at, created_at, updated_at`
+const convCols = `id, agent_key, title, llm_profile_id, project_id, task_id, pinned_at, created_at, updated_at`
 
 func scanConv(row interface{ Scan(...any) error }) (Conversation, error) {
 	var c Conversation
 	var pinnedAt sql.NullTime
-	err := row.Scan(&c.ID, &c.AgentKey, &c.Title, &c.LLMProfileID, &c.ProjectID, &pinnedAt, &c.CreatedAt, &c.UpdatedAt)
+	err := row.Scan(&c.ID, &c.AgentKey, &c.Title, &c.LLMProfileID, &c.ProjectID, &c.TaskID, &pinnedAt, &c.CreatedAt, &c.UpdatedAt)
 	if pinnedAt.Valid {
 		c.Pinned = true
 		c.PinnedAt = &pinnedAt.Time
@@ -172,9 +175,9 @@ func (d *DB) GetConversation(id int64) (*Conversation, error) {
 	return &c, nil
 }
 
-// UpdateConversation applies a partial title/pin/project mutation and returns the
+// UpdateConversation applies a partial title/pin/project/task mutation and returns the
 // updated row. Pinning an already-pinned conversation preserves its original pin order.
-// ProjectID 指针非 nil 时更新归属项目(指向 0 = 清除)。
+// ProjectID/TaskID 指针非 nil 时更新对应列(指向 0 = 清除)。
 func (d *DB) UpdateConversation(id int64, patch ConversationPatch) (*Conversation, error) {
 	c, err := scanConv(d.QueryRow(`UPDATE conversations SET
 	title = CASE WHEN $2::boolean THEN $3 ELSE title END,
@@ -183,9 +186,11 @@ func (d *DB) UpdateConversation(id int64, patch ConversationPatch) (*Conversatio
 		WHEN $4::boolean THEN COALESCE(pinned_at, now())
 		ELSE NULL
 	END,
-	project_id = CASE WHEN $5::boolean THEN NULLIF($6, 0) ELSE project_id END
+	project_id = CASE WHEN $5::boolean THEN NULLIF($6, 0) ELSE project_id END,
+	task_id = CASE WHEN $7::boolean THEN NULLIF($8, 0) ELSE task_id END
 WHERE id=$1
-RETURNING `+convCols, id, patch.Title != nil, patch.Title, patch.Pinned, patch.ProjectID != nil, patch.ProjectID))
+RETURNING `+convCols, id, patch.Title != nil, patch.Title, patch.Pinned, patch.ProjectID != nil, patch.ProjectID,
+		patch.TaskID != nil, patch.TaskID))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

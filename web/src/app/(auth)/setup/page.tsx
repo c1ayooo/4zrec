@@ -7,8 +7,8 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { api } from "@/lib/api";
 import { APP_CONFIG } from "@/config/app-config";
+import { api } from "@/lib/api";
 import { auth } from "@/lib/auth";
 
 export default function SetupPage() {
@@ -95,16 +95,16 @@ export default function SetupPage() {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-<div className="space-y-1.5">
-              <Label htmlFor="username">用户名</Label>
-              <Input
-                id="username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="登录用户名"
-                autoComplete="username"
-              />
-            </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="username">用户名</Label>
+                <Input
+                  id="username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="登录用户名"
+                  autoComplete="username"
+                />
+              </div>
               <div className="space-y-1.5">
                 <Label htmlFor="password">新密码</Label>
                 <Input

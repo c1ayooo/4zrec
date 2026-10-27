@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import type { EntCandidate, EntJob, Project } from "@/lib/types";
 
@@ -54,10 +55,7 @@ export default function EnterprisePage() {
     setLoading(true);
     try {
       const pf = projectFilter ? Number(projectFilter) : undefined;
-      const [j, c] = await Promise.all([
-        api.entJobs(pf),
-        api.entCandidates(statusFilter, page, pf),
-      ]);
+      const [j, c] = await Promise.all([api.entJobs(pf), api.entCandidates(statusFilter, page, pf)]);
       setJobs(j);
       setCandidates(c.candidates);
       setTotal(c.total);
@@ -93,11 +91,6 @@ export default function EnterprisePage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">企业采集</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
-          企业关联采集（BFS：分支机构 + 对外投资 → 候选域名池）。agent 的 enterprise_collect
-          发起任务后，进度与候选在这里看；数据源会话在{" "}
-          <span className="text-foreground">系统管理 → 企业数据源</span> 配置。
-        </p>
       </div>
 
       <Card>
@@ -128,7 +121,11 @@ export default function EnterprisePage() {
             </div>
           </div>
           {jobs === null ? (
-            <p className="text-muted-foreground px-4 pb-4 text-sm">加载中…</p>
+            <div className="text-muted-foreground px-4 pb-4 text-sm flex flex-col gap-3">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
           ) : jobs.length === 0 ? (
             <p className="text-muted-foreground px-4 pb-4 text-sm">
               暂无任务——在对话里让 agent 用 enterprise_company_search 找到企业后 enterprise_collect 发起。
@@ -195,7 +192,11 @@ export default function EnterprisePage() {
             <span className="text-muted-foreground text-xs">共 {total} 条</span>
           </div>
           {candidates === null ? (
-            <p className="text-muted-foreground px-4 pb-4 text-sm">加载中…</p>
+            <div className="text-muted-foreground px-4 pb-4 text-sm flex flex-col gap-3">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
           ) : candidates.length === 0 ? (
             <p className="text-muted-foreground px-4 pb-4 text-sm">暂无候选域名。</p>
           ) : (
@@ -237,7 +238,12 @@ export default function EnterprisePage() {
                 <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
                   上一页
                 </Button>
-                <Button variant="outline" size="sm" disabled={page >= Math.ceil(total / 50)} onClick={() => setPage((p) => p + 1)}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page >= Math.ceil(total / 50)}
+                  onClick={() => setPage((p) => p + 1)}
+                >
                   下一页
                 </Button>
               </div>

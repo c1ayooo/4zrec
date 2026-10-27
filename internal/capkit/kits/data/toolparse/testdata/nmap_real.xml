@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<?xml-stylesheet href="file:///usr/bin/../share/nmap/nmap.xsl" type="text/xsl"?>
+<!-- Nmap 7.94SVN scan initiated Fri Sep 25 03:28:28 2026 as: nmap -oX - -sT -p 18083 127.0.0.1 -->
+<nmaprun scanner="nmap" args="nmap -oX - -sT -p 18083 127.0.0.1" start="1790278108" startstr="Fri Sep 25 03:28:28 2026" version="7.94SVN" xmloutputversion="1.05">
+<scaninfo type="connect" protocol="tcp" numservices="1" services="18083"/>
+<verbose level="0"/>
+<debugging level="0"/>
+<hosthint><status state="up" reason="unknown-response" reason_ttl="0"/>
+<address addr="127.0.0.1" addrtype="ipv4"/>
+<hostnames>
+</hostnames>
+</hosthint>
+<host starttime="1790278108" endtime="1790278108"><status state="up" reason="conn-refused" reason_ttl="0"/>
+<address addr="127.0.0.1" addrtype="ipv4"/>
+<hostnames>
+<hostname name="localhost" type="PTR"/>
+</hostnames>
+<ports><port protocol="tcp" portid="18083"><state state="open" reason="syn-ack" reason_ttl="0"/></port>
+</ports>
+<times srtt="247" rttvar="3788" to="100000"/>
+</host>
+<runstats><finished time="1790278108" timestr="Fri Sep 25 03:28:28 2026" summary="Nmap done at Fri Sep 25 03:28:28 2026; 1 IP address (1 host up) scanned in 0.01 seconds" elapsed="0.01" exit="success"/><hosts up="1" down="0" total="1"/>
+</runstats>
+</nmaprun>

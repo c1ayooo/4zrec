@@ -680,6 +680,7 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	wk.SetRunTimeout(time.Duration(s.agentRunSeconds("worker")) * time.Second)
 	wk.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
 	wk.SetWebSearch(s.webSearchFor("worker"))
+	wk.SetTargetsEnv(s.targetsEnvForTask(t.ID)) // ZREC_TARGETS:项目授权目标注入 Bash(见 targets_env.go)
 	wk.SetConstraintInject(s.constraintInjectWorker) // 操作约束注入 worker(可配置,默认开)
 	pl := agent.NewPlanner(plannerRuntime, "task-router", s.m.dir, tx, plannerRuntime.CompactionWindow(), s.agentMaxTurns("planner"))
 	pl.SetFindingRecorder(s.evidenceStore())
@@ -691,6 +692,7 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	pl.SetSteerWork(s.engine.SteerWork)
 	pl.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
 	pl.SetWebSearch(s.webSearchFor("planner"))
+	pl.SetTargetsEnv(s.targetsEnvForTask(t.ID))
 	pl.SetConstraintInject(s.constraintInjectPlanner) // 操作约束注入 planner(可配置,默认开)
 	if t.Guard != nil {
 		// planner/mainagent 同样有 Bash/Read/Write，必须与 worker 共用同一套
@@ -710,6 +712,7 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	main.SetNoaEnabled(s.m.NoaCompactionEnabled) // 实验功能:noa 上下文压缩(平台级开关,每 run 读)
 	main.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
 	main.SetWebSearch(s.webSearchFor("mainagent"))
+	main.SetTargetsEnv(s.targetsEnvForTask(t.ID))
 	main.SetSteerWork(s.engine.SteerWork) // steer_work：人对运行中 work 实时纠偏
 	if t.Guard != nil {
 		main.SetGuardHooks(t.Guard.Hooks())

@@ -30,6 +30,7 @@ type Planner struct {
 	killWork          func(intentID int64) error             // engine callback to terminate a running work (nil = off)
 	steerWork         func(intentID int64, msg string) error // engine callback to steer a running work mid-run (nil = off)
 	proxyAddr         string                                 // recording proxy for WebFetch (empty = direct)
+	targetsEnvFn      targetsEnvResolver                     // 会话级目标变量(ZREC_TARGETS)解析器;nil=不注入
 	proxyCACert       string                                 // recording proxy's CA cert path (HTTPS verify)
 	webSearch         WebSearchOpts                          // web_search tool backend selection (off by default)
 	workDir           string                                 // shared work dir (surfaced in prompt as artifact-output target)
@@ -98,6 +99,11 @@ func (p *Planner) compactionWindow() int {
 // SetProxy points the planner's WebFetch at the recording proxy plus the CA cert
 // it trusts to verify HTTPS through it (empty addr = direct).
 func (p *Planner) SetProxy(addr, caCert string) { p.proxyAddr, p.proxyCACert = addr, caCert }
+
+// SetTargetsEnv 注入会话级目标环境变量解析器(ZREC_TARGETS,见 targets_env.go)。nil=不注入。
+func (p *Planner) SetTargetsEnv(fn func(sessionID string) []string) { p.targetsEnvFn = fn }
+
+func (p *Planner) targetsEnv(sessionID string) []string { return targetsEnv(p.targetsEnvFn, sessionID) }
 
 // SetWebSearch selects the web_search backend for the planner (off by default).
 func (p *Planner) SetWebSearch(o WebSearchOpts) { p.webSearch = o }
@@ -351,7 +357,7 @@ const plannerDefaultTmpl = `你是一个网络安全平台授权渗透测试系�
 
 func plannerSystem(goal, dataDir, workDir, assetSummary string) string {
 	body := renderSystem("planner", plannerDefaultTmpl, PlannerVars{Goal: goal, AssetSummary: assetSummary, DataDir: dataDir, Now: nowStr()})
-	return body + httpToolPolicyBlock() + diffProbePolicyBlock() + artifactSpec(workDir)
+	return body + httpToolPolicyBlock() + targetEnvPolicyBlock() + diffProbePolicyBlock() + artifactSpec(workDir)
 }
 
 // Plan runs one planning round. emit, if non-nil, receives the planner's execution
@@ -439,8 +445,8 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 			DeepSeekModel:   p.webSearch.DeepSeekModel,
 			Proxy:           p.webSearch.Proxy,
 		},
-		BashEnv:       proxyEnv(p.proxyAddr, p.proxyCACert), // Bash 子命令默认走代理+信任 CA
-		WorkingDir:    taskDir,                              // 本任务工作目录 <workDir>/tasks/<taskID>
+		BashEnv:       append(proxyEnv(p.proxyAddr, p.proxyCACert), p.targetsEnv(fmt.Sprintf("exp%d-planner", ts.ID()))...), // Bash 子命令默认走代理+信任 CA
+		WorkingDir:    taskDir,                                                                                              // 本任务工作目录 <workDir>/tasks/<taskID>
 		ToolOutputDir: cmdOutDir(taskDir),
 		MaxTurns:      p.maxTurns, // 0 = unlimited (configurable in agent management)
 		MaxDuration:   maxDur,     // 0=不限;有 deadline 时=距 deadline 剩余

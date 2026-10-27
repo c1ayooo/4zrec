@@ -1734,7 +1734,8 @@ export const activity: Activity[] = [
     kind: "tool_use",
     tool: "bash",
     tool_use_id: "t21",
-    summary: "curl -s -d 'username=admin&password=admin' https://admin.northstar.com/login -o /dev/null -w '%{http_code}'",
+    summary:
+      "curl -s -d 'username=admin&password=admin' https://admin.northstar.com/login -o /dev/null -w '%{http_code}'",
   },
   {
     seq: 22,
@@ -2614,7 +2615,8 @@ export const activity: Activity[] = [
     kind: "tool_use",
     tool: "bash",
     tool_use_id: "t13a",
-    summary: "net rpc group members 'Domain Admins' -U 'northstar.local/svc_deploy%Deploy@Northstar2024' -S 10.10.10.10",
+    summary:
+      "net rpc group members 'Domain Admins' -U 'northstar.local/svc_deploy%Deploy@Northstar2024' -S 10.10.10.10",
   },
   {
     seq: 392,
@@ -3994,7 +3996,12 @@ const WS_TREE: Record<string, { name: string; dir: boolean; size: number; conten
   ],
   "t-001": [
     { name: "i12", dir: true, size: 0 },
-    { name: "recon.txt", dir: false, size: 64, content: "northstar.com\nwww.northstar.com\napi.northstar.com\nadmin.northstar.com\n" },
+    {
+      name: "recon.txt",
+      dir: false,
+      size: 64,
+      content: "northstar.com\nwww.northstar.com\napi.northstar.com\nadmin.northstar.com\n",
+    },
   ],
   "t-001/i12": [
     {

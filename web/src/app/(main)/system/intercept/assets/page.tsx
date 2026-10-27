@@ -5,15 +5,16 @@ import * as React from "react";
 import { BanIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
@@ -45,11 +46,7 @@ function KindBadge({ kind }: { kind: AssetInterceptKind }) {
     <Badge
       variant="outline"
       className={
-        cidr
-          ? "border-sky-400 text-sky-600"
-          : fuzzy
-            ? "border-amber-400 text-amber-600"
-            : "border-emerald-400 text-emerald-600"
+        cidr ? "border-info/60 text-info" : fuzzy ? "border-warning/60 text-warning" : "border-success/60 text-success"
       }
     >
       {KIND_LABEL[kind]}
@@ -191,12 +188,7 @@ export default function AssetInterceptPage() {
       {/* header */}
       <div className="flex items-center gap-2.5">
         <BanIcon className="h-5 w-5 shrink-0" />
-        <div>
-          <h1 className="text-lg font-semibold leading-tight">资产拦截</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            全局资产黑名单：命中的域名 / IP / URL / 网段将被拦截，不对其执行任何操作
-          </p>
-        </div>
+        <h1 className="text-2xl font-semibold tracking-tight">资产拦截</h1>
       </div>
 
       <div className="flex items-center justify-between gap-3">
@@ -213,7 +205,11 @@ export default function AssetInterceptPage() {
       <Card>
         <CardContent className="p-0">
           {loading ? (
-            <p className="p-6 text-sm text-muted-foreground">加载中…</p>
+            <div className="p-6 text-sm text-muted-foreground flex flex-col gap-3">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
           ) : rules.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
               <BanIcon className="h-8 w-8 text-muted-foreground/40" />

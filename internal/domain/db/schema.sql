@@ -1787,6 +1787,10 @@ ALTER TABLE conversations ADD COLUMN IF NOT EXISTS project_id BIGINT REFERENCES 
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id) WHERE project_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_conversations_project ON conversations(project_id) WHERE project_id IS NOT NULL;
 
+-- 对话关联任务(纯引用,任务删除置空;设置时通常同时把 project_id 对齐到任务所属项目)。
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS task_id BIGINT REFERENCES tasks(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_conversations_task ON conversations(task_id) WHERE task_id IS NOT NULL;
+
 -- 资产归属项目 + 授权状态。project_id 是展示归属(UI 按项目筛选),围栏判定
 -- 不依赖它(按 project_scope 规则匹配 + authz 状态)。authz 语义见上,只升不降。
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS project_id BIGINT REFERENCES projects(id) ON DELETE SET NULL;

@@ -62,7 +62,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
@@ -136,6 +135,7 @@ import type {
   TaskStatus,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useProjectStore } from "@/stores/project/project-provider";
 
 // fmtBytes renders a human file size for the upload manifest.
 function fmtBytes(n: number): string {
@@ -304,6 +304,11 @@ function compareTasks(left: Task, right: Task, field: TaskSortField, direction: 
 }
 
 export default function TasksPage() {
+  // 全局项目上下文:左上角切换器选定后,本页只显示该项目的任务(?project_id= 深链对齐)。
+  const globalProjects = useProjectStore((s) => s.projects);
+  const globalProjectId = useProjectStore((s) => s.projectId);
+  const globalStatus = useProjectStore((s) => s.status);
+  const setGlobalProject = useProjectStore((s) => s.setProject);
   const [activeTab, setActiveTab] = React.useState("current");
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [categories, setCategories] = React.useState<TaskCategory[]>([]);
@@ -457,7 +462,7 @@ export default function TasksPage() {
 
   const load = React.useCallback(() => {
     api
-      .tasks()
+      .tasks(globalProjectId || undefined)
       .then((r) => {
         const next = r.tasks.map((t) => (t.id === r.active ? { ...t, active: true } : t));
         const sig = JSON.stringify(next);
@@ -468,19 +473,30 @@ export default function TasksPage() {
       .catch(() => {
         // Polling is best-effort; the next interval retries automatically.
       });
-  }, []);
+  }, [globalProjectId]);
 
-  // 项目名映射(一次性加载,任务行归属徽标用;项目数量小,无需轮询)。
-  const [projects, setProjects] = React.useState<Project[]>([]);
+  // 切换全局项目时清掉上一次轮询的签名，避免新列表因签名比对被误跳过。
   React.useEffect(() => {
-    api
-      .projects()
-      .then(setProjects)
-      .catch(() => setProjects([]));
-  }, []);
+    lastRef.current = "";
+  }, [globalProjectId]);
+
+  // 深链对齐:/function/tasks?project_id=N 直接把全局上下文切过去(store 持久化),
+  // 用掉即清参数,刷新只看全局选中。
+  React.useEffect(() => {
+    if (globalStatus !== "ready") return;
+    const q = new URLSearchParams(window.location.search);
+    const pid = Number(q.get("project_id")) || 0;
+    if (!pid) return;
+    window.history.replaceState(null, "", window.location.pathname);
+    if (pid !== globalProjectId && globalProjects.some((p) => p.id === pid)) {
+      setGlobalProject(pid);
+    }
+  }, [globalStatus, globalProjectId, globalProjects, setGlobalProject]);
+
+  // 项目名映射来自全局 store(切换器已拉取,不重复请求)。
   const projectNameOf = React.useCallback(
-    (id?: number) => (id ? (projects.find((p) => p.id === id)?.name ?? "") : ""),
-    [projects],
+    (id?: number) => (id ? (globalProjects.find((p) => p.id === id)?.name ?? "") : ""),
+    [globalProjects],
   );
 
   const loadCategories = React.useCallback(() => {
@@ -835,256 +851,260 @@ export default function TasksPage() {
           <TabsTrigger value="archived">已归档</TabsTrigger>
         </TabsList>
         <TabsContent value="current">
-          <Card>
-            <CardContent className="flex flex-col gap-4 px-0 pt-6">
-              <div className="flex flex-wrap items-center gap-2 px-4 lg:px-6">
-                <div className="relative w-full sm:max-w-xs">
-                  <SearchIcon className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
-                  <Input
-                    placeholder="搜索描述 / 目标 / ID"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    className="pl-8"
-                  />
-                  {query && (
-                    <button
-                      type="button"
-                      onClick={() => setQuery("")}
-                      aria-label="清除搜索"
-                      className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
+          <div className="flex flex-col gap-4 pt-6">
+            <div className="flex flex-wrap items-center gap-2 px-4 lg:px-6">
+              <div className="relative w-full sm:max-w-xs">
+                <SearchIcon className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
+                <Input
+                  placeholder="搜索描述 / 目标 / ID"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  className="pl-8"
+                />
+                {query && (
+                  <button
+                    type="button"
+                    onClick={() => setQuery("")}
+                    aria-label="清除搜索"
+                    className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
+                  >
+                    <XIcon className="size-4" />
+                  </button>
+                )}
+              </div>
+              <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as TaskStatus | "all")}>
+                <SelectTrigger className="w-36">
+                  <SelectValue placeholder="状态" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="all">全部状态</SelectItem>
+                    {STATUS_OPTIONS.map((s) => (
+                      <SelectItem key={s.value} value={s.value}>
+                        {s.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                <SelectTrigger className="w-40">
+                  <SelectValue placeholder="任务分类" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="all">全部分类</SelectItem>
+                    <SelectItem value={UNCATEGORIZED_VALUE}>未分类</SelectItem>
+                    {categories.map((category) => (
+                      <SelectItem key={category.id} value={String(category.id)}>
+                        {category.name}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <span className="text-muted-foreground text-xs tabular-nums">
+                {filtered.length}/{tasks.length} 条
+              </span>
+              <AlertDialog open={pauseAllOpen} onOpenChange={setPauseAllOpen}>
+                <AlertDialogTrigger asChild>
+                  <Button size="sm" variant="outline" disabled={batchControlling !== null}>
+                    {batchControlling === "pause" ? (
+                      <Spinner data-icon="inline-start" />
+                    ) : (
+                      <PauseIcon data-icon="inline-start" />
+                    )}
+                    全部暂停
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>暂停全部运行中的任务？</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      所有非终态任务会立即暂停，正在执行的 planner/worker 工具调用会被取消。之后可逐个继续。
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>取消</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => {
+                        setPauseAllOpen(false);
+                        void pauseAllTasks();
+                      }}
                     >
-                      <XIcon className="size-4" />
-                    </button>
-                  )}
-                </div>
-                <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as TaskStatus | "all")}>
-                  <SelectTrigger className="w-36">
-                    <SelectValue placeholder="状态" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="all">全部状态</SelectItem>
-                      {STATUS_OPTIONS.map((s) => (
-                        <SelectItem key={s.value} value={s.value}>
-                          {s.label}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                  <SelectTrigger className="w-40">
-                    <SelectValue placeholder="任务分类" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="all">全部分类</SelectItem>
-                      <SelectItem value={UNCATEGORIZED_VALUE}>未分类</SelectItem>
-                      {categories.map((category) => (
-                        <SelectItem key={category.id} value={String(category.id)}>
-                          {category.name}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-                <span className="text-muted-foreground text-xs tabular-nums">
-                  {filtered.length}/{tasks.length} 条
-                </span>
-                <AlertDialog open={pauseAllOpen} onOpenChange={setPauseAllOpen}>
-                  <AlertDialogTrigger asChild>
-                    <Button size="sm" variant="outline" disabled={batchControlling !== null}>
+                      确认暂停
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+              {selectedIds.size > 0 && (
+                <>
+                  <span className="text-xs tabular-nums">已选 {selectedIds.size} 个</span>
+                  <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
+                    取消选择
+                  </Button>
+                  {pausableTaskIDs.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={batchControlling !== null}
+                      onClick={() => void controlSelectedTasks("pause", pausableTaskIDs)}
+                    >
                       {batchControlling === "pause" ? (
                         <Spinner data-icon="inline-start" />
                       ) : (
                         <PauseIcon data-icon="inline-start" />
                       )}
-                      全部暂停
+                      暂停 {pausableTaskIDs.length}
                     </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>暂停全部运行中的任务？</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        所有非终态任务会立即暂停，正在执行的 planner/worker 工具调用会被取消。之后可逐个继续。
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>取消</AlertDialogCancel>
-                      <AlertDialogAction
-                        onClick={() => {
-                          setPauseAllOpen(false);
-                          void pauseAllTasks();
-                        }}
-                      >
-                        确认暂停
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-                {selectedIds.size > 0 && (
-                  <>
-                    <span className="text-xs tabular-nums">已选 {selectedIds.size} 个</span>
-                    <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
-                      取消选择
+                  )}
+                  {resumableTaskIDs.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={batchControlling !== null}
+                      onClick={() => void controlSelectedTasks("resume", resumableTaskIDs)}
+                    >
+                      {batchControlling === "resume" ? (
+                        <Spinner data-icon="inline-start" />
+                      ) : (
+                        <PlayIcon data-icon="inline-start" />
+                      )}
+                      继续 {resumableTaskIDs.length}
                     </Button>
-                    {pausableTaskIDs.length > 0 && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={batchControlling !== null}
-                        onClick={() => void controlSelectedTasks("pause", pausableTaskIDs)}
-                      >
-                        {batchControlling === "pause" ? (
-                          <Spinner data-icon="inline-start" />
-                        ) : (
-                          <PauseIcon data-icon="inline-start" />
-                        )}
-                        暂停 {pausableTaskIDs.length}
-                      </Button>
-                    )}
-                    {resumableTaskIDs.length > 0 && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={batchControlling !== null}
-                        onClick={() => void controlSelectedTasks("resume", resumableTaskIDs)}
-                      >
-                        {batchControlling === "resume" ? (
-                          <Spinner data-icon="inline-start" />
-                        ) : (
-                          <PlayIcon data-icon="inline-start" />
-                        )}
-                        继续 {resumableTaskIDs.length}
-                      </Button>
-                    )}
-                    {archivableTaskIDs.length > 0 && (
-                      <ArchiveConfirmDialog
-                        count={archivableTaskIDs.length}
-                        onConfirm={archiveSelectedTasks}
-                        trigger={
-                          <Button size="sm" variant="outline">
-                            <ArchiveIcon data-icon="inline-start" />
-                            归档 {archivableTaskIDs.length}
-                          </Button>
-                        }
-                      />
-                    )}
-                    <MoveTasksCategoryDialog
-                      categories={categories}
-                      count={selectedIds.size}
-                      moving={movingCategory}
-                      onMove={moveSelectedTasksCategory}
+                  )}
+                  {archivableTaskIDs.length > 0 && (
+                    <ArchiveConfirmDialog
+                      count={archivableTaskIDs.length}
+                      onConfirm={archiveSelectedTasks}
+                      trigger={
+                        <Button size="sm" variant="outline">
+                          <ArchiveIcon data-icon="inline-start" />
+                          归档 {archivableTaskIDs.length}
+                        </Button>
+                      }
                     />
-                    <BulkDeleteTasksDialog ids={[...selectedIds]} onDelete={deleteTasks} />
-                  </>
-                )}
-                <ConcurrencySettingsDialog />
-                <CategoryManagementSheet
-                  categories={categories}
-                  tasks={tasks}
-                  onChanged={refreshCategoriesAndTasks}
-                  onTaskMoved={applyTaskCategoryMove}
-                />
-              </div>
-
-              {tasks.length === 0 ? (
-                <div className="text-muted-foreground mx-4 flex items-center justify-center rounded-lg border border-dashed py-20 text-sm lg:mx-6">
-                  暂无任务，点击右上角「新建任务」开始。
-                </div>
-              ) : filtered.length === 0 ? (
-                <div className="text-muted-foreground mx-4 flex items-center justify-center rounded-lg border border-dashed py-20 text-sm lg:mx-6">
-                  没有匹配的任务。
-                </div>
-              ) : (
-                <Table className="**:data-[slot='table-cell']:px-4 **:data-[slot='table-head']:px-4">
-                  <TableHeader className="[&_tr]:border-t">
-                    <TableRow>
-                      <TableHead className="w-10">
-                        <Checkbox
-                          checked={headerChecked}
-                          onCheckedChange={(checked) => toggleSelectedPage(checked === true)}
-                          aria-label="选择本页全部任务"
-                        />
-                      </TableHead>
-                      <SortableTaskHead
-                        field="id"
-                        label="ID"
-                        activeField={sortField}
-                        direction={sortDirection}
-                        className="font-mono"
-                        onSort={sortTasksBy}
-                      />
-                      <TableHead>名称</TableHead>
-                      <TableHead>描述</TableHead>
-                      <TableHead>目标</TableHead>
-                      <SortableTaskHead
-                        field="status"
-                        label="状态"
-                        activeField={sortField}
-                        direction={sortDirection}
-                        onSort={sortTasksBy}
-                      />
-                      <TableHead className="text-center">目标进度</TableHead>
-                      <TableHead className="text-center" title="严重 / 高 / 中 / 低">
-                        漏洞 <span className="text-muted-foreground font-normal">严/高/中/低</span>
-                      </TableHead>
-                      <TableHead className="text-center">运行中 Worker</TableHead>
-                      <SortableTaskHead
-                        field="created"
-                        label="创建时间"
-                        activeField={sortField}
-                        direction={sortDirection}
-                        align="right"
-                        onSort={sortTasksBy}
-                      />
-                      <SortableTaskHead
-                        field="duration"
-                        label="运行时长"
-                        activeField={sortField}
-                        direction={sortDirection}
-                        align="right"
-                        onSort={sortTasksBy}
-                      />
-                      <TableHead className="text-right">Token</TableHead>
-                      <TableHead className="sticky right-0 z-10 bg-card text-right shadow-[-1px_0_0_0_hsl(var(--border))]">
-                        操作
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {paginated.map((task) => (
-                      <TaskRow
-                        key={task.id}
-                        task={task}
-                        // running 任务才吃 nowSec;其余行传 0 —— props 不变,memo 就能拦下每秒 tick
-                        // 带来的整表重渲染,只让在跑的那几行走时长。
-                        nowSec={task.status === "running" ? nowSec : 0}
-                        projectName={projectNameOf(task.project_id) || undefined}
-                        onDelete={deleteTask}
-                        onControl={controlTask}
-                        onRename={renameTask}
-                        onTogglePinned={toggleTaskPinned}
-                        onArchive={queueTaskArchive}
-                        selected={selectedIds.has(task.id)}
-                        onSelectedChange={toggleSelected}
-                      />
-                    ))}
-                  </TableBody>
-                </Table>
+                  )}
+                  <MoveTasksCategoryDialog
+                    categories={categories}
+                    count={selectedIds.size}
+                    moving={movingCategory}
+                    onMove={moveSelectedTasksCategory}
+                  />
+                  <BulkDeleteTasksDialog ids={[...selectedIds]} onDelete={deleteTasks} />
+                </>
               )}
-              <TablePagination
-                page={page}
-                pageSize={pageSize}
-                total={filtered.length}
-                onPageChange={setPage}
-                onPageSizeChange={(nextPageSize) => {
-                  setPageSize(nextPageSize);
-                  setPage(1);
-                }}
+              <ConcurrencySettingsDialog />
+              <CategoryManagementSheet
+                categories={categories}
+                tasks={tasks}
+                onChanged={refreshCategoriesAndTasks}
+                onTaskMoved={applyTaskCategoryMove}
               />
-            </CardContent>
-          </Card>
+            </div>
+
+            {tasks.length === 0 ? (
+              <Empty className="mx-4 border border-dashed lg:mx-6">
+                <EmptyHeader>
+                  <EmptyTitle>暂无任务</EmptyTitle>
+                  <EmptyDescription>点击右上角「新建任务」开始。</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            ) : filtered.length === 0 ? (
+              <Empty className="mx-4 border border-dashed lg:mx-6">
+                <EmptyHeader>
+                  <EmptyTitle>没有匹配的任务</EmptyTitle>
+                  <EmptyDescription>调整筛选条件后重试。</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            ) : (
+              <Table className="**:data-[slot='table-cell']:px-4 **:data-[slot='table-head']:px-4">
+                <TableHeader className="[&_tr]:border-t">
+                  <TableRow>
+                    <TableHead className="w-10">
+                      <Checkbox
+                        checked={headerChecked}
+                        onCheckedChange={(checked) => toggleSelectedPage(checked === true)}
+                        aria-label="选择本页全部任务"
+                      />
+                    </TableHead>
+                    <SortableTaskHead
+                      field="id"
+                      label="ID"
+                      activeField={sortField}
+                      direction={sortDirection}
+                      className="font-mono"
+                      onSort={sortTasksBy}
+                    />
+                    <TableHead>名称</TableHead>
+                    <TableHead>描述</TableHead>
+                    <TableHead>目标</TableHead>
+                    <SortableTaskHead
+                      field="status"
+                      label="状态"
+                      activeField={sortField}
+                      direction={sortDirection}
+                      onSort={sortTasksBy}
+                    />
+                    <TableHead className="text-center">目标进度</TableHead>
+                    <TableHead className="text-center" title="严重 / 高 / 中 / 低">
+                      漏洞 <span className="text-muted-foreground font-normal">严/高/中/低</span>
+                    </TableHead>
+                    <TableHead className="text-center">运行中 Worker</TableHead>
+                    <SortableTaskHead
+                      field="created"
+                      label="创建时间"
+                      activeField={sortField}
+                      direction={sortDirection}
+                      align="right"
+                      onSort={sortTasksBy}
+                    />
+                    <SortableTaskHead
+                      field="duration"
+                      label="运行时长"
+                      activeField={sortField}
+                      direction={sortDirection}
+                      align="right"
+                      onSort={sortTasksBy}
+                    />
+                    <TableHead className="text-right">Token</TableHead>
+                    <TableHead className="sticky right-0 z-10 bg-card text-right shadow-[-1px_0_0_0_hsl(var(--border))]">
+                      操作
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {paginated.map((task) => (
+                    <TaskRow
+                      key={task.id}
+                      task={task}
+                      // running 任务才吃 nowSec;其余行传 0 —— props 不变,memo 就能拦下每秒 tick
+                      // 带来的整表重渲染,只让在跑的那几行走时长。
+                      nowSec={task.status === "running" ? nowSec : 0}
+                      projectName={projectNameOf(task.project_id) || undefined}
+                      onDelete={deleteTask}
+                      onControl={controlTask}
+                      onRename={renameTask}
+                      onTogglePinned={toggleTaskPinned}
+                      onArchive={queueTaskArchive}
+                      selected={selectedIds.has(task.id)}
+                      onSelectedChange={toggleSelected}
+                    />
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+            <TablePagination
+              page={page}
+              pageSize={pageSize}
+              total={filtered.length}
+              onPageChange={setPage}
+              onPageSizeChange={(nextPageSize) => {
+                setPageSize(nextPageSize);
+                setPage(1);
+              }}
+            />
+          </div>
         </TabsContent>
         <TabsContent value="archived">
           <TaskArchivesPanel onChanged={load} />
@@ -1272,7 +1292,7 @@ const TaskRow = React.memo(function TaskRow({
       <TableCell className="font-medium">
         <div className="flex max-w-xs items-center gap-2">
           <TaskNameEditor task={task} onRename={onRename} />
-          {task.active && <StarIcon className="size-4 shrink-0 fill-amber-400 text-amber-400" />}
+          {task.active && <StarIcon className="size-4 shrink-0 fill-warning text-warning" />}
           {taskIsPinned(task) && <PinIcon className="text-primary size-4 shrink-0" aria-label="已置顶" />}
           {projectName && task.project_id && (
             <Link
@@ -1317,13 +1337,13 @@ const TaskRow = React.memo(function TaskRow({
           const seg = (n: number, cls: string) => <span className={n > 0 ? cls : "text-muted-foreground"}>{n}</span>;
           return (
             <span className="font-medium whitespace-nowrap" title="严重 / 高 / 中 / 低">
-              {seg(f.critical, "text-rose-600 dark:text-rose-400")}
+              {seg(f.critical, "text-destructive")}
               <span className="text-muted-foreground">/</span>
-              {seg(f.high, "text-red-600 dark:text-red-400")}
+              {seg(f.high, "text-destructive")}
               <span className="text-muted-foreground">/</span>
-              {seg(f.medium, "text-amber-600 dark:text-amber-400")}
+              {seg(f.medium, "text-warning")}
               <span className="text-muted-foreground">/</span>
-              {seg(f.low, "text-slate-600 dark:text-slate-400")}
+              {seg(f.low, "text-info")}
             </span>
           );
         })()}
@@ -1876,227 +1896,222 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
   }
 
   return (
-    <Card>
-      <CardContent className="flex flex-col gap-4 px-0 pt-6">
-        <div className="flex flex-wrap items-center gap-2 px-4 lg:px-6">
-          <div className="relative w-full sm:max-w-xs">
-            <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(event) => {
-                setQuery(event.target.value);
-                setPage(1);
-              }}
-              placeholder="搜索任务名称 / 描述 / ID"
-              className="pl-8"
-            />
-          </div>
-          <Select
-            value={stateFilter}
-            onValueChange={(value) => {
-              setStateFilter(value);
+    <div className="flex flex-col gap-4 pt-6">
+      <div className="flex flex-wrap items-center gap-2 px-4 lg:px-6">
+        <div className="relative w-full sm:max-w-xs">
+          <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
               setPage(1);
             }}
-          >
-            <SelectTrigger className="w-36">
-              <SelectValue placeholder="处理状态" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value="all">全部状态</SelectItem>
-                <SelectItem value="archive_queued">等待归档</SelectItem>
-                <SelectItem value="archiving">归档中</SelectItem>
-                <SelectItem value="ready">可还原</SelectItem>
-                <SelectItem value="restore_queued">等待还原</SelectItem>
-                <SelectItem value="restoring">还原中</SelectItem>
-                <SelectItem value="delete_queued">等待删除</SelectItem>
-                <SelectItem value="deleting">删除中</SelectItem>
-                <SelectItem value="archive_failed">归档失败</SelectItem>
-                <SelectItem value="restore_failed">还原失败</SelectItem>
-                <SelectItem value="delete_failed">删除失败</SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-          <span className="text-muted-foreground text-xs tabular-nums">{total} 个归档</span>
-          {selectedArchives.length > 0 && (
-            <>
-              <span className="text-xs tabular-nums">已选 {selectedArchives.length} 个</span>
-              {restorable.length > 0 && (
-                <Button size="sm" variant="outline" onClick={() => void restoreMany(restorable)}>
-                  <Undo2Icon data-icon="inline-start" />
-                  还原 {restorable.length}
-                </Button>
-              )}
-              {deletable.length > 0 && (
-                <ArchiveDeleteDialog
-                  archives={deletable}
-                  onConfirm={() => deleteMany(deletable)}
-                  trigger={
-                    <Button size="sm" variant="destructive">
-                      <Trash2Icon data-icon="inline-start" />
-                      永久删除 {deletable.length}
-                    </Button>
-                  }
-                />
-              )}
-            </>
-          )}
+            placeholder="搜索任务名称 / 描述 / ID"
+            className="pl-8"
+          />
         </div>
-        {loading ? (
-          <div className="flex justify-center py-20">
-            <Spinner />
-          </div>
-        ) : archives.length === 0 ? (
-          <Empty className="mx-4 border border-dashed lg:mx-6">
-            <EmptyHeader>
-              <EmptyTitle>暂无任务归档</EmptyTitle>
-              <EmptyDescription>暂停或终态任务可从当前任务列表归档。</EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        ) : (
-          <Table className="**:data-[slot='table-cell']:px-4 **:data-[slot='table-head']:px-4">
-            <TableHeader className="[&_tr]:border-t">
-              <TableRow>
-                <TableHead className="w-10">
-                  <Checkbox
-                    checked={selectedAll || (selectedSome ? "indeterminate" : false)}
-                    onCheckedChange={(checked) =>
-                      setSelected(checked === true ? new Set(selectable.map((archive) => archive.id)) : new Set())
-                    }
-                    aria-label="选择当前页归档"
-                  />
-                </TableHead>
-                <TableHead>任务</TableHead>
-                <TableHead>原状态</TableHead>
-                <TableHead>分类</TableHead>
-                <TableHead>归档时间</TableHead>
-                <TableHead>压缩大小</TableHead>
-                <TableHead>数据量</TableHead>
-                <TableHead className="min-w-44">处理状态</TableHead>
-                <TableHead className="text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {archives.map((archive) => {
-                const processing = ARCHIVE_PROCESSING_STATES.has(archive.state);
-                const canRestore = archive.state === "ready" || archive.state === "restore_failed";
-                const canDelete = archive.state === "ready" || archive.state === "delete_failed";
-                return (
-                  <TableRow key={archive.id} data-state={selected.has(archive.id) ? "selected" : undefined}>
-                    <TableCell>
-                      <Checkbox
-                        checked={selected.has(archive.id)}
-                        disabled={processing}
-                        onCheckedChange={(checked) =>
-                          setSelected((current) => {
-                            const next = new Set(current);
-                            if (checked === true) next.add(archive.id);
-                            else next.delete(archive.id);
-                            return next;
-                          })
-                        }
-                        aria-label={`选择任务归档 #${archive.task_id}`}
-                      />
-                    </TableCell>
-                    <TableCell className="max-w-sm">
-                      <div className="flex min-w-0 flex-col gap-0.5">
-                        <span className="truncate font-medium">
-                          {archive.task_name || archive.task_description || `任务 #${archive.task_id}`}
-                        </span>
-                        <span className="text-muted-foreground truncate text-xs">
-                          #{archive.task_id} · {archive.task_description}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge domain="task" value={archive.original_status} dot />
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{archive.category_name || "未分类"}</TableCell>
-                    <TableCell className="text-muted-foreground whitespace-nowrap text-xs">
-                      {archiveDate(archive.archived_at || archive.requested_at)}
-                    </TableCell>
-                    <TableCell
-                      className="whitespace-nowrap text-xs"
-                      title={`压缩前 ${formatArchiveBytes(archive.original_size)}`}
-                    >
-                      {archiveCompressionLabel(archive)}
-                    </TableCell>
-                    <TableCell className="text-xs tabular-nums">{archiveDataTotal(archive).toLocaleString()}</TableCell>
-                    <TableCell>
-                      <div className="flex min-w-0 flex-col gap-1.5">
-                        <ArchiveStateBadge state={archive.state} />
-                        {processing && <Progress value={archive.progress} />}
-                        {archive.error && (
-                          <p className="text-destructive text-xs [overflow-wrap:anywhere]">{archive.error}</p>
-                        )}
-                        {[...new Set(archive.warnings ?? [])].map((warning) => (
-                          <p
-                            key={warning}
-                            className="text-amber-700 text-xs [overflow-wrap:anywhere] dark:text-amber-400"
-                          >
-                            {warning}
-                          </p>
-                        ))}
-                        <span className="text-muted-foreground text-xs">
-                          {archive.phase} · {archive.progress}%
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-0.5">
-                        {ARCHIVE_FAILED_STATES.has(archive.state) && (
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => void retry(archive)}
-                            aria-label="重试归档操作"
-                            title="重试"
-                          >
-                            <Undo2Icon />
-                          </Button>
-                        )}
-                        {canRestore && (
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => void restoreMany([archive])}
-                            aria-label="还原任务"
-                            title="还原任务"
-                          >
-                            <Undo2Icon />
-                          </Button>
-                        )}
-                        {canDelete && (
-                          <ArchiveDeleteDialog
-                            archives={[archive]}
-                            onConfirm={() => deleteMany([archive])}
-                            trigger={
-                              <Button size="icon" variant="ghost" aria-label="永久删除归档" title="永久删除">
-                                <Trash2Icon />
-                              </Button>
-                            }
-                          />
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        )}
-        <TablePagination
-          page={page}
-          pageSize={pageSize}
-          total={total}
-          onPageChange={setPage}
-          onPageSizeChange={(size) => {
-            setPageSize(size);
+        <Select
+          value={stateFilter}
+          onValueChange={(value) => {
+            setStateFilter(value);
             setPage(1);
           }}
-        />
-      </CardContent>
-    </Card>
+        >
+          <SelectTrigger className="w-36">
+            <SelectValue placeholder="处理状态" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem value="all">全部状态</SelectItem>
+              <SelectItem value="archive_queued">等待归档</SelectItem>
+              <SelectItem value="archiving">归档中</SelectItem>
+              <SelectItem value="ready">可还原</SelectItem>
+              <SelectItem value="restore_queued">等待还原</SelectItem>
+              <SelectItem value="restoring">还原中</SelectItem>
+              <SelectItem value="delete_queued">等待删除</SelectItem>
+              <SelectItem value="deleting">删除中</SelectItem>
+              <SelectItem value="archive_failed">归档失败</SelectItem>
+              <SelectItem value="restore_failed">还原失败</SelectItem>
+              <SelectItem value="delete_failed">删除失败</SelectItem>
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+        <span className="text-muted-foreground text-xs tabular-nums">{total} 个归档</span>
+        {selectedArchives.length > 0 && (
+          <>
+            <span className="text-xs tabular-nums">已选 {selectedArchives.length} 个</span>
+            {restorable.length > 0 && (
+              <Button size="sm" variant="outline" onClick={() => void restoreMany(restorable)}>
+                <Undo2Icon data-icon="inline-start" />
+                还原 {restorable.length}
+              </Button>
+            )}
+            {deletable.length > 0 && (
+              <ArchiveDeleteDialog
+                archives={deletable}
+                onConfirm={() => deleteMany(deletable)}
+                trigger={
+                  <Button size="sm" variant="destructive">
+                    <Trash2Icon data-icon="inline-start" />
+                    永久删除 {deletable.length}
+                  </Button>
+                }
+              />
+            )}
+          </>
+        )}
+      </div>
+      {loading ? (
+        <div className="flex justify-center py-20">
+          <Spinner />
+        </div>
+      ) : archives.length === 0 ? (
+        <Empty className="mx-4 border border-dashed lg:mx-6">
+          <EmptyHeader>
+            <EmptyTitle>暂无任务归档</EmptyTitle>
+            <EmptyDescription>暂停或终态任务可从当前任务列表归档。</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : (
+        <Table className="**:data-[slot='table-cell']:px-4 **:data-[slot='table-head']:px-4">
+          <TableHeader className="[&_tr]:border-t">
+            <TableRow>
+              <TableHead className="w-10">
+                <Checkbox
+                  checked={selectedAll || (selectedSome ? "indeterminate" : false)}
+                  onCheckedChange={(checked) =>
+                    setSelected(checked === true ? new Set(selectable.map((archive) => archive.id)) : new Set())
+                  }
+                  aria-label="选择当前页归档"
+                />
+              </TableHead>
+              <TableHead>任务</TableHead>
+              <TableHead>原状态</TableHead>
+              <TableHead>分类</TableHead>
+              <TableHead>归档时间</TableHead>
+              <TableHead>压缩大小</TableHead>
+              <TableHead>数据量</TableHead>
+              <TableHead className="min-w-44">处理状态</TableHead>
+              <TableHead className="text-right">操作</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {archives.map((archive) => {
+              const processing = ARCHIVE_PROCESSING_STATES.has(archive.state);
+              const canRestore = archive.state === "ready" || archive.state === "restore_failed";
+              const canDelete = archive.state === "ready" || archive.state === "delete_failed";
+              return (
+                <TableRow key={archive.id} data-state={selected.has(archive.id) ? "selected" : undefined}>
+                  <TableCell>
+                    <Checkbox
+                      checked={selected.has(archive.id)}
+                      disabled={processing}
+                      onCheckedChange={(checked) =>
+                        setSelected((current) => {
+                          const next = new Set(current);
+                          if (checked === true) next.add(archive.id);
+                          else next.delete(archive.id);
+                          return next;
+                        })
+                      }
+                      aria-label={`选择任务归档 #${archive.task_id}`}
+                    />
+                  </TableCell>
+                  <TableCell className="max-w-sm">
+                    <div className="flex min-w-0 flex-col gap-0.5">
+                      <span className="truncate font-medium">
+                        {archive.task_name || archive.task_description || `任务 #${archive.task_id}`}
+                      </span>
+                      <span className="text-muted-foreground truncate text-xs">
+                        #{archive.task_id} · {archive.task_description}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <StatusBadge domain="task" value={archive.original_status} dot />
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{archive.category_name || "未分类"}</TableCell>
+                  <TableCell className="text-muted-foreground whitespace-nowrap text-xs">
+                    {archiveDate(archive.archived_at || archive.requested_at)}
+                  </TableCell>
+                  <TableCell
+                    className="whitespace-nowrap text-xs"
+                    title={`压缩前 ${formatArchiveBytes(archive.original_size)}`}
+                  >
+                    {archiveCompressionLabel(archive)}
+                  </TableCell>
+                  <TableCell className="text-xs tabular-nums">{archiveDataTotal(archive).toLocaleString()}</TableCell>
+                  <TableCell>
+                    <div className="flex min-w-0 flex-col gap-1.5">
+                      <ArchiveStateBadge state={archive.state} />
+                      {processing && <Progress value={archive.progress} />}
+                      {archive.error && (
+                        <p className="text-destructive text-xs [overflow-wrap:anywhere]">{archive.error}</p>
+                      )}
+                      {[...new Set(archive.warnings ?? [])].map((warning) => (
+                        <p key={warning} className="text-warning text-xs [overflow-wrap:anywhere]">
+                          {warning}
+                        </p>
+                      ))}
+                      <span className="text-muted-foreground text-xs">
+                        {archive.phase} · {archive.progress}%
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-0.5">
+                      {ARCHIVE_FAILED_STATES.has(archive.state) && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => void retry(archive)}
+                          aria-label="重试归档操作"
+                          title="重试"
+                        >
+                          <Undo2Icon />
+                        </Button>
+                      )}
+                      {canRestore && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => void restoreMany([archive])}
+                          aria-label="还原任务"
+                          title="还原任务"
+                        >
+                          <Undo2Icon />
+                        </Button>
+                      )}
+                      {canDelete && (
+                        <ArchiveDeleteDialog
+                          archives={[archive]}
+                          onConfirm={() => deleteMany([archive])}
+                          trigger={
+                            <Button size="icon" variant="ghost" aria-label="永久删除归档" title="永久删除">
+                              <Trash2Icon />
+                            </Button>
+                          }
+                        />
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      )}
+      <TablePagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          setPage(1);
+        }}
+      />
+    </div>
   );
 }
 
@@ -3171,6 +3186,10 @@ function CreateTaskSheet({
   const [projects, setProjects] = React.useState<Project[]>([]);
   // 归属项目(授权根):undefined=不挂(围栏不启用)
   const [projectID, setProjectID] = React.useState<number | undefined>(undefined);
+  // 打开面板时默认挂到全局当前项目(围栏即授权根);?create=1&project_id= 深链仍优先。
+  const globalProjectId = useProjectStore((s) => s.projectId);
+  const globalStatus = useProjectStore((s) => s.status);
+  const prevOpenRef = React.useRef(false);
   const [sourceTaskIDs, setSourceTaskIDs] = React.useState<string[]>([]);
   const [llmProfileIDs, setLLMProfileIDs] = React.useState<string[]>([]);
   const [creating, setCreating] = React.useState(false);
@@ -3210,6 +3229,14 @@ function CreateTaskSheet({
       window.history.replaceState(null, "", window.location.pathname);
     }
   }, []);
+
+  // 打开瞬间(非每次 projectID 变化)补默认值:显式选「不挂项目」不被覆盖。
+  React.useEffect(() => {
+    if (open && !prevOpenRef.current && globalStatus === "ready" && globalProjectId > 0) {
+      setProjectID((cur) => cur ?? globalProjectId);
+    }
+    prevOpenRef.current = open;
+  }, [open, globalStatus, globalProjectId]);
 
   // pickFiles uploads the chosen files into this draft's staging dir and appends their
   // absolute paths to the description; the task's agents open them by path via Read/Bash.

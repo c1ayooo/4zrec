@@ -45,6 +45,8 @@ func (s *Server) hostTools() ([]actool.CoreTool, map[string][]string) {
 	tools = append(tools, s.spacemapTools()...)       // 空间测绘引擎查询(信息收集原生能力)
 	tools = append(tools, s.spacemapExpandTools()...) // ICP/证书/ASN 三路反查扩资产
 	tools = append(tools, s.reconTools()...)          // 被动子域枚举 + 子域名爆破 + 端口扫描 + 流水线
+	tools = append(tools, s.crawlTools()...)          // 同域爬虫 + 目录探测(本地保底采集)
+	tools = append(tools, s.zrearkCollectTools()...)  // 4zreark 增强通道:任务结果回流(需已配置连接)
 	tools = append(tools, s.atomicTools()...)         // 原子判定:CDN源站/边缘分类/遗留猎人/接管
 	tools = append(tools, s.entTools()...)            // 企业关系采集(BFS+候选池)
 	tools = append(tools, s.credTools()...)           // 凭据验证:云AK/DB/SSH实连+GitHub泄露
@@ -173,6 +175,15 @@ func (s *Server) delegateToTask(ctx context.Context, in json.RawMessage, pick fu
 	if !ok {
 		return actool.Errorf("task 不存在: " + head.TaskID), nil
 	}
+	// 项目隔离:挂项目的会话/任务上下文里,跨项目任务一律不可见(读/写同一口径,
+	// 越权统一报「不在当前项目范围内」,不泄露其它项目是否存在该 id)。
+	if scope := s.roeProjectID(ctx, 0); scope > 0 {
+		if id, perr := strconv.ParseInt(strings.TrimSpace(head.TaskID), 10, 64); perr == nil && id > 0 {
+			if tp, terr := s.m.pg.TaskProjectID(id); terr == nil && tp != scope {
+				return actool.Errorf(fmt.Sprintf("任务 %s 不在当前项目范围内", head.TaskID)), nil
+			}
+		}
+	}
 	var m map[string]json.RawMessage
 	_ = json.Unmarshal(in, &m)
 	delete(m, "task_id")
@@ -192,7 +203,7 @@ func (s *Server) toolListTasks() actool.CoreTool {
 	return roTool("list_tasks",
 		"列出所有任务(id/描述/目标/状态/运行时长/父任务/LLM 配置)，编排 agent 用它掌握全局、看哪些任务卡太久、各自用哪个 LLM。运行时长：运行中=创建→现在，终态=创建→最后活动(秒)。llm_profile：任务 planner/worker 用的配置名，(激活配置)=跟随全局激活。",
 		objSchema(map[string]any{}),
-		func(context.Context, json.RawMessage) (actool.Result, error) {
+		func(ctx context.Context, _ json.RawMessage) (actool.Result, error) {
 			lastAct, _ := s.m.PG().LastActivityAll()
 			// id -> name to resolve each task's pinned LLM profile.
 			profName := map[int64]string{}
@@ -201,8 +212,13 @@ func (s *Server) toolListTasks() actool.CoreTool {
 					profName[p.ID] = p.Name
 				}
 			}
+			// 项目隔离:挂项目的会话只列本项目的任务(未挂 = 全局助手,看全部)。
+			scopeProject := s.roeProjectID(ctx, 0)
 			out := make([]map[string]any, 0)
 			for _, t := range s.m.List() {
+				if scopeProject > 0 && t.ProjectID != nil && *t.ProjectID != scopeProject {
+					continue
+				}
 				status := s.deriveTaskStatus(t)
 				end := lastAct[t.ExpID]
 				if live := s.engine.LastActivity(t.ID); live > end {
@@ -537,6 +553,8 @@ func (s *Server) seedOrchestrationTools() {
 	s.seedReconAgent()                // 预置「信息收集」agent + 任务创建触发器(一次性)
 	s.seedNucleiTools()               // 项目内 nuclei 工具播种 + recon 等 agent 补绑(一次性)
 	s.rebindReconToolsV2()            // recon 补绑新增收集工具族(一次性)
+	s.rebindReconToolsV3()            // recon 补绑 web_crawl/dir_scan/zreark_sync_results(一次性)
+	s.ensureZrearkMCPServer()         // 4zreark MCP 接入种子(已配置连接时幂等注册+授权)
 	s.rebindHTTPProbeAgents()         // http_probe 补绑 pentest/planner(一次性)
 	s.mergeHTTPProbeSchema()          // http_probe 新增参数合并进存量工具行(一次性)
 	s.promoteCoreAgentsBuiltin()      // reporter/recon 提升内置角色(一次性)
@@ -811,7 +829,9 @@ func (s *Server) seedReconAgent() {
 		OnTaskCreate: true,
 		TaskCreateMessage: "新任务已创建。请按你的开局清扫剧本执行：先 list_assets 摸底该任务项目授权范围内的资产现状，" +
 			"再对授权根域跑 space_search_batch(已配置引擎)与 subdomain_enum 被动枚举，有备案/证书/ASN 线索就反查扩一圈，" +
-			"缺口明显且确有必要的根域经确认后 subdomain_brute。范围外结果只入库待审批，不主动探测。完成后汇总新增与覆盖缺口。",
+			"缺口明显且确有必要的根域经确认后 subdomain_brute。若 info_collect_capabilities 显示 4zreark 已配置，" +
+			"批量子域/端口/指纹/爬虫采集可经 MCP 调 mcp__zreark__* 工具下发，完成后 zreark_sync_results 入库。" +
+			"范围外结果只入库待审批，不主动探测。完成后汇总新增与覆盖缺口。",
 	}); err != nil {
 		log.Printf("[recon] 创建触发器失败: %v", err)
 	}
@@ -921,6 +941,7 @@ func (s *Server) collectToolNames() []string {
 	var all []actool.CoreTool
 	all = slices.Concat(
 		s.spacemapTools(), s.spacemapExpandTools(), s.reconTools(),
+		s.crawlTools(), s.zrearkCollectTools(),
 		s.atomicTools(), s.entTools(), s.credTools(),
 		s.webreconTools(), s.coverageTools(), s.oobTools(),
 		s.probeTools(), s.connTools(),
@@ -948,6 +969,24 @@ func (s *Server) rebindReconToolsV2() {
 		return
 	}
 	log.Printf("[recon] 已补绑新增收集工具族(一次性)")
+}
+
+// rebindReconToolsV3 存量库迁移:recon agent 补绑爬虫/目录探测工具族
+// (本地保底采集补齐)与 4zreark 结果回流工具。幂等,flag 守卫只做一次。
+func (s *Server) rebindReconToolsV3() {
+	const flag = "recon_agent_tools_v3"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	defer func() { _ = s.m.pg.SetSetting(flag, "true") }()
+	if a, _ := s.m.pg.GetAgentByKey("recon"); a == nil {
+		return
+	}
+	if err := s.m.pg.AddAgentToToolBinding("recon", []string{"web_crawl", "dir_scan", "zreark_sync_results"}); err != nil {
+		log.Printf("[recon] 工具重绑失败: %v", err)
+		return
+	}
+	log.Printf("[recon] 已补绑 web_crawl/dir_scan/zreark_sync_results(一次性)")
 }
 
 // rebindHTTPProbeAgents 存量库迁移:把结构化 HTTP 工具 http_probe 补绑给独立

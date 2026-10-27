@@ -80,12 +80,13 @@ const TABLE: Record<string, string> = {
   "taskDetail.report.download": "下载 Word 报告",
   "taskDetail.report.genFailed": "报告生成失败：{{msg}}",
   "common.loading": "加载中…",
-  "taskDetail.report.docxHint": "「生成 Word 报告」调用 AI 将发现改写为专业中文叙述，并用 python-docx 排版成交付级 .docx；下方为 Markdown 快速预览。",
+  "taskDetail.report.docxHint":
+    "「生成 Word 报告」调用 AI 将发现改写为专业中文叙述，并用 python-docx 排版成交付级 .docx；下方为 Markdown 快速预览。",
   "taskDetail.report.empty": "暂无报告",
   "common.cancel": "取消",
   "taskDetail.report.copyToast": "已复制 Markdown",
   "taskDetail.report.title": "渗透测试报告（Markdown）",
-  "taskDetail.copy": "复制"
+  "taskDetail.copy": "复制",
 };
 
 export function t(key: string, opts?: Record<string, unknown>): string {

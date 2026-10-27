@@ -35,6 +35,7 @@ import {
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
@@ -148,13 +149,20 @@ function FindingDetailInner() {
   if (!finding) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 p-10 text-center">
-        <p className="text-muted-foreground">{loaded ? `未找到发现 ${id}` : "加载中…"}</p>
-        {loaded && (
-          <Button asChild variant="outline">
-            <Link href="/function/findings">
-              <ArrowLeftIcon /> 返回发现列表
-            </Link>
-          </Button>
+        {loaded ? (
+          <>
+            <p className="text-muted-foreground">未找到发现 {id}</p>
+            <Button asChild variant="outline">
+              <Link href="/function/findings">
+                <ArrowLeftIcon /> 返回发现列表
+              </Link>
+            </Button>
+          </>
+        ) : (
+          <div className="flex w-full max-w-xl flex-col gap-3">
+            <Skeleton className="h-6 w-64" />
+            <Skeleton className="h-48 w-full" />
+          </div>
         )}
       </div>
     );

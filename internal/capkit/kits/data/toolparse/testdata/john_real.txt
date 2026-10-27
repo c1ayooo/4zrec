@@ -1,0 +1,12 @@
+Created directory: /root/.john
+Warning: detected hash type: "NT", but the string format looks like a pwdump dump
+Loaded 3 password hashes with no different salts (NT [MD4 128/128 AVX2 4x3])
+Cost 1 (iteration count) is 1024 for all loaded hashes
+Press 'q' or Ctrl-C to abort, almost any other key for status
+Password1!         (administrator)
+P@ssw0rd!          (jjones)
+almostdone         (svc_sql)
+guesses: 3  time: 0:00:00:05  c/s: 12345  trying: almostdone - P@ssw0rd!
+Session completed.
+$NT$8846f7eaee8fb117ad06bdd830b7586c:Password1!
+$krb5tgs$23$*sqlservice$CORP.LOCAL$MSSQLSvc/srv-sql.corp.local:1433*$4f9c3b8e7a2d5c6f$3b8e7a2d5c6f1e0a9b8c7d6e5f4a4f9c3b8e7a2d5c6f1e0a9b8c7d6e5f4a4f9c:ServicePass2023!

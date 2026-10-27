@@ -1,0 +1,18 @@
+<?xml version="1.0" ?>
+<!DOCTYPE niktoscan SYSTEM "nikto.dtd">
+<niktoscan hoststest="0" scanstart="2026-09-25 03:22:01" scanend="2026-09-25 03:22:14">
+<scantime>12.53 seconds</scantime>
+<scaninfo target="http://127.0.0.1:18083/" port="18083">
+<item id="11111" osvdb="578" osvdbid="OSVDB-578" method="GET">
+<description><![CDATA[The anti-clickjacking X-Frame-Options header is not present.]]></description>
+<uri><![CDATA[/]]></uri>
+<namelink><![CDATA[http://127.0.0.1:18083/]]></namelink>
+<iplink><![CDATA[http://127.0.0.1]]></iplink>
+</item>
+<item id="22222" osvdb="11204" osvdbid="OSVDB-11204" method="GET">
+<description><![CDATA[Server may leak inodes via ETags, header found with file /, inode: 1234, size: 34.]]></description>
+<uri><![CDATA[/]]></uri>
+<namelink><![CDATA[http://127.0.0.1:18083/]]></namelink>
+</item>
+</scaninfo>
+</niktoscan>

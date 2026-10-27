@@ -1,0 +1,8 @@
+id: CVE-2021-44228
+name: Log4Shell
+kind: nuclei
+engine: nuclei
+product: [log4j]
+severity: critical
+tags: [rce, log4j]
+cve: CVE-2021-44228

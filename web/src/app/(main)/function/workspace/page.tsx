@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+
 import {
   DownloadIcon,
   FileIcon,
@@ -14,36 +15,17 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { ConfirmDialog } from "@/components/confirm-dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Sheet,
-  SheetContent,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { WorkspaceEntry, WorkspaceFile } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 function fmtSize(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -80,20 +62,17 @@ export default function WorkspacePage() {
   const [deleting, setDeleting] = React.useState(false);
   const uploadRef = React.useRef<HTMLInputElement>(null);
 
-  const load = React.useCallback(
-    (p: string) => {
-      setLoading(true);
-      api
-        .workspaceList(p)
-        .then((r) => {
-          setEntries(r.entries);
-          setPath(r.path);
-        })
-        .catch((e) => toast.error(`读取目录失败：${(e as Error).message}`))
-        .finally(() => setLoading(false));
-    },
-    [],
-  );
+  const load = React.useCallback((p: string) => {
+    setLoading(true);
+    api
+      .workspaceList(p)
+      .then((r) => {
+        setEntries(r.entries);
+        setPath(r.path);
+      })
+      .catch((e) => toast.error(`读取目录失败：${(e as Error).message}`))
+      .finally(() => setLoading(false));
+  }, []);
 
   React.useEffect(() => {
     load("");
@@ -213,13 +192,7 @@ export default function WorkspacePage() {
           <Button variant="ghost" size="icon" className="size-8" onClick={() => load(path)} title="刷新">
             <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} />
           </Button>
-          <input
-            ref={uploadRef}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={(e) => doUpload(e.target.files)}
-          />
+          <input ref={uploadRef} type="file" multiple className="hidden" onChange={(e) => doUpload(e.target.files)} />
         </div>
       </div>
 
@@ -251,7 +224,7 @@ export default function WorkspacePage() {
                       className="flex items-center gap-2 text-left hover:underline"
                     >
                       {e.dir ? (
-                        <FolderIcon className="size-4 shrink-0 text-blue-500" />
+                        <FolderIcon className="size-4 shrink-0 text-info" />
                       ) : (
                         <FileIcon className="text-muted-foreground size-4 shrink-0" />
                       )}
@@ -270,7 +243,11 @@ export default function WorkspacePage() {
                           size="icon"
                           className="size-7"
                           title="下载"
-                          onClick={() => api.workspaceDownload(e.path).catch((err) => toast.error(`下载失败：${(err as Error).message}`))}
+                          onClick={() =>
+                            api
+                              .workspaceDownload(e.path)
+                              .catch((err) => toast.error(`下载失败：${(err as Error).message}`))
+                          }
                         >
                           <DownloadIcon className="size-3.5" />
                         </Button>
@@ -280,7 +257,8 @@ export default function WorkspacePage() {
                         size="icon"
                         className="text-destructive size-7"
                         title="删除"
-                        onClick={() => del(e)}                      >
+                        onClick={() => del(e)}
+                      >
                         <Trash2Icon className="size-3.5" />
                       </Button>
                     </div>
@@ -329,10 +307,7 @@ export default function WorkspacePage() {
                   <SheetFooter className="flex-row items-center justify-between border-t p-3">
                     <span className="text-muted-foreground text-xs">{edit.dirty ? "未保存的修改" : "已同步"}</span>
                     <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        onClick={() => api.workspaceDownload(edit.file.path)}
-                      >
+                      <Button variant="outline" onClick={() => api.workspaceDownload(edit.file.path)}>
                         <DownloadIcon /> 下载
                       </Button>
                       <Button onClick={saveFile} disabled={!edit.dirty || edit.saving}>

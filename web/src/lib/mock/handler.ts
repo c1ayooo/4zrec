@@ -1665,6 +1665,83 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     return D.stats(task, { tasks: mockTasks, findings: mockFindings, activeTask: mockActiveTask });
   }
 
+  // ── projects ──
+  if (path === "/projects" && m === "GET") {
+    const scope = (projectID: number, values: string[], kind = "domain") =>
+      values.map((value, index) => ({
+        id: projectID * 100 + index,
+        project_id: projectID,
+        kind,
+        domain: kind === "domain" ? value : undefined,
+        net: kind === "ip" ? value : undefined,
+        raw: value,
+        created_at: "2026-10-26T21:08:00Z",
+      }));
+    return {
+      projects: [
+        {
+          id: 1,
+          name: "理想src",
+          description: "理想 SRC 资产面（4zreark 同步）",
+          status: "active",
+          asset_count: 968,
+          pending_count: 21,
+          task_count: 1,
+          scope: scope(1, ["lixiang.com"]),
+          created_at: "2026-10-26T21:08:00Z",
+          updated_at: "2026-10-26T21:08:00Z",
+        },
+        {
+          id: 2,
+          name: "印尼主机",
+          description: "印尼地方政府 JasperReports Server Webshell 二次渗透测试（13 台主机，20 个 Web 端点）",
+          status: "active",
+          asset_count: 72,
+          pending_count: 6,
+          task_count: 1,
+          scope: scope(
+            2,
+            Array.from({ length: 19 }, (_, index) => `182.253.${204 + Math.floor(index / 4)}.${index + 1}`),
+            "ip",
+          ),
+          created_at: "2026-10-20T10:45:00Z",
+          updated_at: "2026-10-20T10:45:00Z",
+        },
+        {
+          id: 3,
+          name: "虎牙src",
+          description: "虎牙 SRC 授权域与边缘资产",
+          status: "active",
+          asset_count: 1007,
+          pending_count: 0,
+          task_count: 1,
+          scope: scope(3, ["huya.com"]),
+          created_at: "2026-10-17T14:34:00Z",
+          updated_at: "2026-10-17T14:34:00Z",
+        },
+        {
+          id: 4,
+          name: "蜗牛",
+          description: "蜗牛游戏资产面与关联域",
+          status: "active",
+          asset_count: 99,
+          pending_count: 0,
+          task_count: 0,
+          scope: scope(4, [
+            "woniuxy.com",
+            "fanyunedu.com",
+            "woniux.com",
+            "fanyunedu.cn",
+            "thunderman.cn",
+            "woniugame.com",
+          ]),
+          created_at: "2026-10-17T03:24:00Z",
+          updated_at: "2026-10-17T03:24:00Z",
+        },
+      ],
+    };
+  }
+
   // ── assets ──
   if (path === "/assets/sync/projects" && m === "POST") {
     return {

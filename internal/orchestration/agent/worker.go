@@ -54,16 +54,17 @@ type Worker struct {
 	findingRecorder FindingRecorder
 	// prov is the run's chat model (model.ToolCallingChatModel); agents share one
 	// instance so the rate limiter and the llmrec recorder stay shared.
-	prov        model.ToolCallingChatModel
-	model       string
-	workDir     string
-	proxyAddr   string
-	proxyCACert string            // recording proxy's CA cert path (for WebFetch HTTPS verify)
-	webSearch   WebSearchOpts     // web_search tool backend selection (off by default)
-	tx          *transcript.Store // raw LLM conversation persistence (nil = off)
-	window      int               // context window in tokens (for compaction)
-	windowFn    func() int        // optional dynamic task-chain minimum
-	maxTurns    int               // max agent turns per run (0 = unlimited)
+	prov         model.ToolCallingChatModel
+	model        string
+	workDir      string
+	proxyAddr    string
+	targetsEnvFn targetsEnvResolver // 会话级目标变量(ZREC_TARGETS)解析器;nil=不注入
+	proxyCACert  string             // recording proxy's CA cert path (for WebFetch HTTPS verify)
+	webSearch    WebSearchOpts      // web_search tool backend selection (off by default)
+	tx           *transcript.Store  // raw LLM conversation persistence (nil = off)
+	window       int                // context window in tokens (for compaction)
+	windowFn     func() int         // optional dynamic task-chain minimum
+	maxTurns     int                // max agent turns per run (0 = unlimited)
 	// runTimeout is the wall-clock budget for the main exploration of one intent
 	// (0 = unlimited). When it fires, the run is cut and a settlement round is
 	// forced so already-identified facts get written back instead of being lost.
@@ -189,6 +190,11 @@ func (w *Worker) compactionWindow() int {
 // that MITM proxy. Empty addr disables the hint.
 func (w *Worker) SetProxy(addr, caCert string) { w.proxyAddr, w.proxyCACert = addr, caCert }
 
+// SetTargetsEnv 注入会话级目标环境变量解析器(ZREC_TARGETS,见 targets_env.go)。nil=不注入。
+func (w *Worker) SetTargetsEnv(fn func(sessionID string) []string) { w.targetsEnvFn = fn }
+
+func (w *Worker) targetsEnv(sessionID string) []string { return targetsEnv(w.targetsEnvFn, sessionID) }
+
 // SetWebSearch selects the web_search backend for this worker (off by default).
 func (w *Worker) SetWebSearch(o WebSearchOpts) { w.webSearch = o }
 
@@ -291,7 +297,7 @@ func workerSystem(proxyAddr, caCert, dataDir, runDir string) string {
 	// caCert is present only when the recording MITM is on, which is exactly when
 	// the traffic_* tools are registered — so it gates the traffic-tool note.
 	// Optional finding guidance is added for every role after tool resolution.
-	return body + httpToolPolicyBlock() + diffProbePolicyBlock() + workerTrafficBlock(caCert != "") + workerArtifactSpec(runDir)
+	return body + httpToolPolicyBlock() + targetEnvPolicyBlock() + diffProbePolicyBlock() + workerTrafficBlock(caCert != "") + workerArtifactSpec(runDir)
 }
 
 // renderIntentTask formats the claimed intent for the worker's launch USER message:
@@ -454,7 +460,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 			Proxy:           w.webSearch.Proxy,
 		},
 		// Bash 子命令的 HTTP 默认走记录代理 + 信任其 CA（工具无需 -x/-k）。
-		BashEnv:    proxyEnv(w.proxyAddr, w.proxyCACert),
+		BashEnv:    append(proxyEnv(w.proxyAddr, w.proxyCACert), w.targetsEnv(WorkerSessionID(ts.ID(), intent.ID))...),
 		WorkingDir: runDir,
 		MaxTurns:   w.maxTurns, // 0 = unlimited (configurable in agent management)
 		// 墙钟预算,到点打断在跑工具并就地进收尾;0 = 不限。有任务级 deadline 时夹逼到
