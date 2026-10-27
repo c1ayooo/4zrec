@@ -154,7 +154,7 @@ export function FindingsTable({
             />
           </TableHead>
           <TableHead className="w-8" />
-          <TableHead className="w-20">严重度</TableHead>
+          <TableHead className="w-24">严重度</TableHead>
           <TableHead>漏洞名称</TableHead>
           <TableHead className="w-44">资产</TableHead>
           <TableHead className="w-28">状态</TableHead>
@@ -197,12 +197,16 @@ export function FindingsTable({
                   />
                 </TableCell>
                 <TableCell>
-                  <StatusBadge domain="severity" value={f.severity} dot />
-                  {f.confidence && (
-                    <Badge variant="outline" className="ml-1 align-middle text-[11px]" title="服务端证据等级">
-                      {f.confidence === "verified" ? "已验证" : f.confidence === "partial" ? "部分验证" : "推断"}
-                    </Badge>
-                  )}
+                  {/* 纵向堆叠:置信度章与严重度章同列,横向排会超出固定列宽、
+                      直接压到相邻漏洞名称列的文字上(table-fixed 溢出可见)。 */}
+                  <div className="flex flex-col items-start gap-1">
+                    <StatusBadge domain="severity" value={f.severity} dot />
+                    {f.confidence && (
+                      <Badge variant="outline" className="text-xs" title="服务端证据等级">
+                        {f.confidence === "verified" ? "已验证" : f.confidence === "partial" ? "部分验证" : "推断"}
+                      </Badge>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell className="max-w-md">
                   <div className="flex min-w-0 flex-col gap-0.5">
