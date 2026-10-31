@@ -507,7 +507,13 @@ export default function LLMRecordsPage() {
               >
                 原文
               </Button>
-              <Button variant="ghost" size="icon" className="size-7 shrink-0" onClick={() => setSelected(null)}>
+              <Button
+                aria-label="关闭详情"
+                variant="ghost"
+                size="icon"
+                className="size-7 shrink-0"
+                onClick={() => setSelected(null)}
+              >
                 <XIcon />
               </Button>
             </div>

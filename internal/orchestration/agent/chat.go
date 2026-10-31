@@ -35,6 +35,11 @@ type ChatAgent struct {
 	nonStreamingFn func() bool  // resolver: use non-streaming model path? (nil = streaming)
 	noaEnabledFn   func() bool  // resolver: use experimental noa compaction? (nil = off)
 	maxTokensFn    func() int   // resolver: per-reply output cap (nil/0 = send no cap)
+	// platformToolsFn/bindingSpecFn 由宿主（server）按会话注入：平台操作工具
+	// （列项目/列任务/绑定，sessionID 形如 conv-<id>）与 system prompt 的绑定说明。
+	// nil = 不注入。
+	platformToolsFn func(sessionID string) []actool.CoreTool
+	bindingSpecFn   func(sessionID string) string
 }
 
 func NewChatAgent(prov model.ToolCallingChatModel, model, workDir string, tx *transcript.Store, window int) *ChatAgent {
@@ -80,6 +85,20 @@ func (c *ChatAgent) SetWebSearch(o WebSearchOpts) { c.webSearch = o }
 // SetGuard attaches a guard (with user-configured intercept rules) to this chat
 // agent. Must be called before Chat; safe to call multiple times.
 func (c *ChatAgent) SetGuard(g *guard.Guard) { c.guard = g }
+
+// SetPlatformTools 注入按会话解析的平台工具（list_projects/list_tasks/
+// bind_conversation/get_binding）。返回 nil 表示该会话不注入。
+func (c *ChatAgent) SetPlatformTools(fn func(sessionID string) []actool.CoreTool) { c.platformToolsFn = fn }
+
+// SetBindingSpec 注入每轮重读的会话绑定说明（拼进 system prompt 末尾）。
+func (c *ChatAgent) SetBindingSpec(fn func(sessionID string) string) { c.bindingSpecFn = fn }
+
+func (c *ChatAgent) bindingBlock(sessionID string) string {
+	if c.bindingSpecFn == nil {
+		return ""
+	}
+	return c.bindingSpecFn(sessionID)
+}
 
 // chatWorkDirSpec returns a working-directory notice appended to every chat
 // agent's system prompt. Mirrors artifactSpec but without pentest-specific
@@ -135,11 +154,16 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 	// visible skills/MCP and lets the DB tools table filter/override. DefaultTools
 	// have no tools-table rows, so they always pass through.
 	base := actool.DefaultTools()
+	if c.platformToolsFn != nil {
+		if pt := c.platformToolsFn(sessionID); len(pt) > 0 {
+			base = append(base, pt...) // 同为无行宿主工具，ToolResolve 原样放行
+		}
+	}
 	ctx = WithRunInfo(ctx, RunInfo{SessionID: sessionID})
 	tools, def, cleanup := AugmentTools(ctx, agentKey, base)
 	defer cleanup()
 
-	system := deferredSystem(chatSystem(agentKey, c.workDir, sessionWorkDir), def)
+	system := deferredSystem(chatSystem(agentKey, c.workDir, sessionWorkDir)+c.bindingBlock(sessionID), def)
 	// 会话级临时待办（TodoWrite）+ 后台任务工具：norma 内核自动注入的两类会话工具，
 	// askernel 交给宿主装配（sessionTools）。
 	todos := actool.NewTodoStore()

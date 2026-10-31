@@ -7,9 +7,6 @@ import Link from "next/link";
 import { CheckIcon, RefreshCwIcon, ShieldAlertIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,6 +17,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -204,8 +204,8 @@ export default function ApprovalsPage() {
 
   return (
     <div className="flex flex-col gap-4 p-4">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0">
           <h1 className="text-2xl font-semibold tracking-tight">资产审批</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -370,7 +370,9 @@ export default function ApprovalsPage() {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={bulkBusy}>取消</AlertDialogCancel>
             <AlertDialogAction
-              className={bulkAction === "reject" ? "bg-destructive/15 text-destructive hover:bg-destructive/20" : undefined}
+              className={
+                bulkAction === "reject" ? "bg-destructive/15 text-destructive hover:bg-destructive/20" : undefined
+              }
               disabled={bulkBusy}
               onClick={(e) => {
                 e.preventDefault();

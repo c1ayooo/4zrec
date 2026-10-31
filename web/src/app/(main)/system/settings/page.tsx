@@ -8,6 +8,7 @@ import {
   CpuIcon,
   FlaskConicalIcon,
   KeyboardIcon,
+  MessageSquareIcon,
   RadioTowerIcon,
   ScanSearchIcon,
   SearchIcon,
@@ -23,7 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { CHAT_SEND_MODE_OPTIONS, type ChatSendMode, setChatSendMode, useChatSendMode } from "@/lib/chat-send-mode";
-import type { NucleiStatus, ProxyProfile, ProxySelections, Settings } from "@/lib/types";
+import type { ImBotSettingsInput, NucleiStatus, ProxyProfile, ProxySelections, Settings } from "@/lib/types";
 
 import { ProxyLibrary } from "./_components/proxy-library";
 import { UpdateCard } from "./_components/update-card";
@@ -80,6 +81,32 @@ export default function SystemSettingsPage() {
   const [proxyCustom, setProxyCustom] = React.useState<Record<string, boolean>>({});
   const [updateProxyInput, setUpdateProxyInput] = React.useState("");
   const [savingUpdateProxy, setSavingUpdateProxy] = React.useState(false);
+  // IM 接入网关：四平台开关 + 凭据（密钥类只回 *_set，输入框只在覆盖时上送）。
+  const [imAgent, setImAgent] = React.useState("auto");
+  const [imFeishuOn, setImFeishuOn] = React.useState(false);
+  const [imFeishuAppID, setImFeishuAppID] = React.useState("");
+  const [imFeishuSecret, setImFeishuSecret] = React.useState("");
+  const [imFeishuSecretSet, setImFeishuSecretSet] = React.useState(false);
+  const [imDingtalkOn, setImDingtalkOn] = React.useState(false);
+  const [imDingtalkID, setImDingtalkID] = React.useState("");
+  const [imDingtalkSecret, setImDingtalkSecret] = React.useState("");
+  const [imDingtalkSecretSet, setImDingtalkSecretSet] = React.useState(false);
+  const [imTelegramOn, setImTelegramOn] = React.useState(false);
+  const [imTelegramToken, setImTelegramToken] = React.useState("");
+  const [imTelegramTokenSet, setImTelegramTokenSet] = React.useState(false);
+  const [imTelegramProxy, setImTelegramProxy] = React.useState("");
+  const [imWecomOn, setImWecomOn] = React.useState(false);
+  const [imWecomCorpID, setImWecomCorpID] = React.useState("");
+  const [imWecomSecret, setImWecomSecret] = React.useState("");
+  const [imWecomSecretSet, setImWecomSecretSet] = React.useState(false);
+  const [imWecomAgentID, setImWecomAgentID] = React.useState("");
+  const [imWecomCallbackToken, setImWecomCallbackToken] = React.useState("");
+  const [imWecomCallbackTokenSet, setImWecomCallbackTokenSet] = React.useState(false);
+  const [imWecomAESKey, setImWecomAESKey] = React.useState("");
+  const [imWecomAESKeySet, setImWecomAESKeySet] = React.useState(false);
+  const [imWecomCallbackURL, setImWecomCallbackURL] = React.useState("");
+  const [imWecomBaseURLSet, setImWecomBaseURLSet] = React.useState(false);
+  const [savingIM, setSavingIM] = React.useState("");
   // 纯前端偏好：不走 /api/settings，直接读写 localStorage。
   const sendMode = useChatSendMode();
 
@@ -108,6 +135,25 @@ export default function SystemSettingsPage() {
     setProxySelections(s.proxy_selections ?? EMPTY_PROXY_SELECTIONS);
     setProxyUrls(s.proxy_urls ?? EMPTY_PROXY_SELECTIONS);
     setUpdateProxyInput(s.update_proxy ?? "");
+    const im = s.im_bot;
+    setImAgent(im?.agent_key || "auto");
+    setImFeishuOn(!!im?.feishu?.enabled);
+    setImFeishuAppID(im?.feishu?.app_id ?? "");
+    setImFeishuSecretSet(!!im?.feishu?.app_secret_set);
+    setImDingtalkOn(!!im?.dingtalk?.enabled);
+    setImDingtalkID(im?.dingtalk?.client_id ?? "");
+    setImDingtalkSecretSet(!!im?.dingtalk?.client_secret_set);
+    setImTelegramOn(!!im?.telegram?.enabled);
+    setImTelegramTokenSet(!!im?.telegram?.bot_token_set);
+    setImTelegramProxy(im?.telegram?.proxy ?? "");
+    setImWecomOn(!!im?.wecom?.enabled);
+    setImWecomCorpID(im?.wecom?.corp_id ?? "");
+    setImWecomSecretSet(!!im?.wecom?.corp_secret_set);
+    setImWecomAgentID(String(im?.wecom?.agent_id ?? ""));
+    setImWecomCallbackTokenSet(!!im?.wecom?.callback_token_set);
+    setImWecomAESKeySet(!!im?.wecom?.encoding_aes_key_set);
+    setImWecomCallbackURL(im?.wecom?.callback_url ?? "");
+    setImWecomBaseURLSet(!!im?.wecom?.base_url_set);
   }, []);
 
   const isProxyCustom = (slot: keyof ProxySelections) =>
@@ -406,6 +452,55 @@ export default function SystemSettingsPage() {
       .catch((e) => toast.error("保存失败：" + (e as Error).message))
       .finally(() => setSavingTavilyKey(false));
   };
+
+  // IM 接入：按平台保存（密钥留空=不改），后端保存即全停重起对应平台的收发循环。
+  async function saveIM(platform: "feishu" | "dingtalk" | "telegram" | "wecom") {
+    const bot: ImBotSettingsInput = { agent_key: imAgent.trim() || "auto" };
+    if (platform === "feishu") {
+      bot.feishu = {
+        enabled: imFeishuOn,
+        app_id: imFeishuAppID.trim(),
+        ...(imFeishuSecret ? { app_secret: imFeishuSecret } : {}),
+      };
+    } else if (platform === "dingtalk") {
+      bot.dingtalk = {
+        enabled: imDingtalkOn,
+        client_id: imDingtalkID.trim(),
+        ...(imDingtalkSecret ? { client_secret: imDingtalkSecret } : {}),
+      };
+    } else if (platform === "telegram") {
+      bot.telegram = {
+        enabled: imTelegramOn,
+        proxy: imTelegramProxy.trim(),
+        ...(imTelegramToken ? { bot_token: imTelegramToken } : {}),
+      };
+    } else {
+      bot.wecom = {
+        enabled: imWecomOn,
+        corp_id: imWecomCorpID.trim(),
+        agent_id: Number.parseInt(imWecomAgentID, 10) || 0,
+        ...(imWecomSecret ? { corp_secret: imWecomSecret } : {}),
+        ...(imWecomCallbackToken ? { callback_token: imWecomCallbackToken } : {}),
+        ...(imWecomAESKey ? { encoding_aes_key: imWecomAESKey } : {}),
+      };
+    }
+    setSavingIM(platform);
+    try {
+      const s = await api.setIMBot(bot);
+      apply(s);
+      setImFeishuSecret("");
+      setImDingtalkSecret("");
+      setImTelegramToken("");
+      setImWecomSecret("");
+      setImWecomCallbackToken("");
+      setImWecomAESKey("");
+      toast.success("已保存 IM 接入配置");
+    } catch (e) {
+      toast.error("保存失败：" + (e as Error).message);
+    } finally {
+      setSavingIM("");
+    }
+  }
 
   const saveProxy = () => {
     setSavingProxy(true);
@@ -1118,6 +1213,242 @@ export default function SystemSettingsPage() {
                 ))}
               </SelectContent>
             </Select>
+          </CardContent>
+        </Card>
+
+        <Card className="mb-4 break-inside-avoid md:mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <MessageSquareIcon className="size-4" />
+              IM 接入
+            </CardTitle>
+            <CardDescription>
+              在 IM 里直接和平台对话：<code>/bond</code> 绑定项目与任务，<code>/new</code> 新会话，自然语言同样可用。
+              <br />
+              飞书、钉钉走官方长连接，Telegram 走长轮询，均不需公网地址；企业微信回调地址需公网可达。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col divide-y">
+            <div className="flex items-center gap-3 pb-4">
+              <Label htmlFor="im-agent" className="w-24 shrink-0 text-sm font-normal text-muted-foreground">
+                对话 Agent
+              </Label>
+              <Input
+                id="im-agent"
+                value={imAgent}
+                onChange={(e) => setImAgent(e.target.value)}
+                placeholder="auto"
+                className="h-8 w-40 font-mono"
+              />
+              <span className="text-muted-foreground text-xs">IM 新会话使用的 agent key，随下方任一保存生效</span>
+            </div>
+
+            <div className="flex flex-col gap-3 py-4">
+              <div className="flex items-center justify-between gap-4">
+                <Label className="text-sm font-normal text-muted-foreground">
+                  飞书{imFeishuOn ? " · 已开启" : " · 已关闭"}
+                </Label>
+                <Switch checked={imFeishuOn} disabled={savingIM !== ""} onCheckedChange={setImFeishuOn} />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="im-feishu-appid" className="w-24 shrink-0 text-sm font-normal text-muted-foreground">
+                    App ID
+                  </Label>
+                  <Input
+                    id="im-feishu-appid"
+                    value={imFeishuAppID}
+                    onChange={(e) => setImFeishuAppID(e.target.value)}
+                    placeholder="cli_xxx"
+                    className="h-8 font-mono"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="im-feishu-secret" className="w-24 shrink-0 text-sm font-normal text-muted-foreground">
+                    App Secret
+                  </Label>
+                  <Input
+                    id="im-feishu-secret"
+                    type="password"
+                    value={imFeishuSecret}
+                    onChange={(e) => setImFeishuSecret(e.target.value)}
+                    placeholder={imFeishuSecretSet ? "已保存，留空不改" : ""}
+                    className="h-8"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <Button size="sm" variant="outline" disabled={savingIM !== ""} onClick={() => void saveIM("feishu")}>
+                  保存飞书
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3 py-4">
+              <div className="flex items-center justify-between gap-4">
+                <Label className="text-sm font-normal text-muted-foreground">
+                  钉钉{imDingtalkOn ? " · 已开启" : " · 已关闭"}
+                </Label>
+                <Switch checked={imDingtalkOn} disabled={savingIM !== ""} onCheckedChange={setImDingtalkOn} />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="im-ding-id" className="w-24 shrink-0 text-sm font-normal text-muted-foreground">
+                    Client ID
+                  </Label>
+                  <Input
+                    id="im-ding-id"
+                    value={imDingtalkID}
+                    onChange={(e) => setImDingtalkID(e.target.value)}
+                    placeholder="AppKey"
+                    className="h-8 font-mono"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="im-ding-secret" className="w-24 shrink-0 text-sm font-normal text-muted-foreground">
+                    Client Secret
+                  </Label>
+                  <Input
+                    id="im-ding-secret"
+                    type="password"
+                    value={imDingtalkSecret}
+                    onChange={(e) => setImDingtalkSecret(e.target.value)}
+                    placeholder={imDingtalkSecretSet ? "已保存，留空不改" : ""}
+                    className="h-8"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <Button size="sm" variant="outline" disabled={savingIM !== ""} onClick={() => void saveIM("dingtalk")}>
+                  保存钉钉
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3 py-4">
+              <div className="flex items-center justify-between gap-4">
+                <Label className="text-sm font-normal text-muted-foreground">
+                  Telegram{imTelegramOn ? " · 已开启" : " · 已关闭"}
+                </Label>
+                <Switch checked={imTelegramOn} disabled={savingIM !== ""} onCheckedChange={setImTelegramOn} />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="im-tg-token" className="w-24 shrink-0 text-sm font-normal text-muted-foreground">
+                    Bot Token
+                  </Label>
+                  <Input
+                    id="im-tg-token"
+                    type="password"
+                    value={imTelegramToken}
+                    onChange={(e) => setImTelegramToken(e.target.value)}
+                    placeholder={imTelegramTokenSet ? "已保存，留空不改" : "123456:ABC-DEF…"}
+                    className="h-8 font-mono"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="im-tg-proxy" className="w-24 shrink-0 text-sm font-normal text-muted-foreground">
+                    出口代理
+                  </Label>
+                  <Input
+                    id="im-tg-proxy"
+                    value={imTelegramProxy}
+                    onChange={(e) => setImTelegramProxy(e.target.value)}
+                    placeholder="http://127.0.0.1:7897（空=直连）"
+                    className="h-8 font-mono"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <Button size="sm" variant="outline" disabled={savingIM !== ""} onClick={() => void saveIM("telegram")}>
+                  保存 Telegram
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3 pt-4">
+              <div className="flex items-center justify-between gap-4">
+                <Label className="text-sm font-normal text-muted-foreground">
+                  企业微信{imWecomOn ? " · 已开启" : " · 已关闭"}
+                </Label>
+                <Switch checked={imWecomOn} disabled={savingIM !== ""} onCheckedChange={setImWecomOn} />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="im-wecom-corp" className="w-24 shrink-0 text-sm font-normal text-muted-foreground">
+                    Corp ID
+                  </Label>
+                  <Input
+                    id="im-wecom-corp"
+                    value={imWecomCorpID}
+                    onChange={(e) => setImWecomCorpID(e.target.value)}
+                    className="h-8 font-mono"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="im-wecom-agent" className="w-24 shrink-0 text-sm font-normal text-muted-foreground">
+                    AgentID
+                  </Label>
+                  <Input
+                    id="im-wecom-agent"
+                    value={imWecomAgentID}
+                    onChange={(e) => setImWecomAgentID(e.target.value)}
+                    placeholder="1000002"
+                    className="h-8 font-mono"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="im-wecom-secret" className="w-24 shrink-0 text-sm font-normal text-muted-foreground">
+                    应用 Secret
+                  </Label>
+                  <Input
+                    id="im-wecom-secret"
+                    type="password"
+                    value={imWecomSecret}
+                    onChange={(e) => setImWecomSecret(e.target.value)}
+                    placeholder={imWecomSecretSet ? "已保存，留空不改" : ""}
+                    className="h-8"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="im-wecom-token" className="w-24 shrink-0 text-sm font-normal text-muted-foreground">
+                    回调 Token
+                  </Label>
+                  <Input
+                    id="im-wecom-token"
+                    type="password"
+                    value={imWecomCallbackToken}
+                    onChange={(e) => setImWecomCallbackToken(e.target.value)}
+                    placeholder={imWecomCallbackTokenSet ? "已保存，留空不改" : ""}
+                    className="h-8"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="im-wecom-aes" className="w-24 shrink-0 text-sm font-normal text-muted-foreground">
+                    EncodingAESKey
+                  </Label>
+                  <Input
+                    id="im-wecom-aes"
+                    type="password"
+                    value={imWecomAESKey}
+                    onChange={(e) => setImWecomAESKey(e.target.value)}
+                    placeholder={imWecomAESKeySet ? "已保存，留空不改" : "43 位"}
+                    className="h-8"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Label className="w-24 shrink-0 text-sm font-normal text-muted-foreground">回调地址</Label>
+                <code className="text-muted-foreground min-w-0 truncate font-mono text-xs">
+                  {imWecomBaseURLSet ? imWecomCallbackURL : "先在「漏洞推送」里设置回链地址（notify_public_base_url）"}
+                </code>
+              </div>
+              <div className="flex justify-end">
+                <Button size="sm" variant="outline" disabled={savingIM !== ""} onClick={() => void saveIM("wecom")}>
+                  保存企业微信
+                </Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>

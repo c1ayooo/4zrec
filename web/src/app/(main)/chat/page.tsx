@@ -600,6 +600,11 @@ function DraftChat({
   async function send() {
     const msg = input.trim();
     if (!msg || !agentKey || sending) return;
+    if (msg.toLowerCase() === "/new") {
+      // 草稿本身就是新会话，无需再建，清空输入即可。
+      setInput("");
+      return;
+    }
     setSending(true);
     try {
       const c = await api.createConversation(agentKey, "", llmProfileId);
@@ -730,6 +735,7 @@ function ChatView({
   initial,
   onTitleMaybeChanged,
   onConvUpdated,
+  onSelectConversation,
 }: {
   conv: Conversation;
   agents: Agent[];
@@ -738,7 +744,9 @@ function ChatView({
   // created this conversation via the paperclip (consumed once, on mount).
   initial?: { input?: string; attachments?: ChatAttachment[] };
   onTitleMaybeChanged: () => void;
-  onConvUpdated: () => void;
+  onConvUpdated: () => void | Promise<void>;
+  // /new 由后端建好新会话并返回 id，前端负责切过去。
+  onSelectConversation: (id: number) => void;
 }) {
   const approvalFocus = useApprovalFocus({ conversationId: conv.id });
   const [messages, setMessages] = React.useState<Activity[]>([]);
@@ -762,7 +770,7 @@ function ChatView({
   async function changeProfile(id: number | null) {
     try {
       await api.updateConversationProfile(conv.id, id);
-      onConvUpdated();
+      void onConvUpdated();
     } catch (e) {
       toast.error("切换 LLM 失败：" + (e as Error).message);
     }
@@ -772,7 +780,7 @@ function ChatView({
     try {
       // PATCH 语义:project_id 指向 0 = 取消挂载;省略 = 不改。
       await api.updateConversation(conv.id, { project_id: id ?? 0 });
-      onConvUpdated();
+      void onConvUpdated();
     } catch (e) {
       toast.error("挂载项目失败：" + (e as Error).message);
     }
@@ -785,7 +793,7 @@ function ChatView({
       if (taskId != null && taskProjectId) patch.project_id = taskProjectId;
       await api.updateConversation(conv.id, patch);
       toast.success(taskId != null ? "已关联任务,项目已对齐" : "已解除任务关联");
-      onConvUpdated();
+      void onConvUpdated();
     } catch (e) {
       toast.error("关联任务失败：" + (e as Error).message);
     }
@@ -1009,10 +1017,22 @@ function ChatView({
     setInput("");
     setAttachments([]);
     try {
-      await api.sendConversationMessage(conv.id, msg, atts.length ? atts : undefined);
-      // The live loop pulls the persisted human turn immediately. Sharing that
-      // fetch avoids racing a separate post-send request against the poller.
-      setRunning(true);
+      const r = await api.sendConversationMessage(conv.id, msg, atts.length ? atts : undefined);
+      if (r.new_conversation_id) {
+        // /new：平台已建好新会话（回复写在新会话里）。先刷列表再切换，
+        // 避免列表未就绪时新会话短暂渲染成草稿页；旧会话保持干净。
+        await onConvUpdated();
+        onSelectConversation(r.new_conversation_id);
+      } else if (r.status === "handled") {
+        // 斜杠命令：指令+回复已同步落库，拉一次尾部即可，不进入运行轮询。
+        const tail = await api.conversationMessages(conv.id, cursorRef.current);
+        if (tail.items.length) setMessages((prev) => mergeActivities(prev, tail.items));
+        cursorRef.current = Math.max(cursorRef.current, tail.cursor);
+      } else {
+        // The live loop pulls the persisted human turn immediately. Sharing that
+        // fetch avoids racing a separate post-send request against the poller.
+        setRunning(true);
+      }
     } catch (e) {
       toast.error("发送失败：" + (e as Error).message);
       setInput(msg); // restore so the user doesn't lose their text
@@ -1888,6 +1908,7 @@ export default function ChatPage() {
               initial={pendingByConv[selected.id]}
               onTitleMaybeChanged={reloadConvs}
               onConvUpdated={reloadConvs}
+              onSelectConversation={selectConversation}
             />
           ) : sourceRequested ? (
             <div role="status" className="p-6 text-sm text-muted-foreground">

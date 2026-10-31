@@ -385,7 +385,7 @@ function TaskDetailInner() {
       <header className="sticky top-0 z-10 flex flex-col gap-2 border-b bg-background/95 px-4 py-2.5 backdrop-blur lg:px-6">
         <div className="flex items-center gap-2">
           <SidebarTrigger className="-ml-1" />
-          <Button asChild variant="ghost" size="icon" className="size-7">
+          <Button asChild variant="ghost" size="icon" className="size-7" aria-label="返回任务列表">
             <Link href="/function/tasks">
               <ArrowLeftIcon />
             </Link>

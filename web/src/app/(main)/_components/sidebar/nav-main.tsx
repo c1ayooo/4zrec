@@ -88,12 +88,16 @@ function hasSubItems(item: NavMainItem): item is NavMainParentItem {
 export function NavMain({ items }: NavMainProps) {
   const rawPath = usePathname();
   // 路由段含中文，pathname 可能是百分号编码，解码后再与导航 url 比较，保证高亮命中。
+  // trailingSlash 导出下 pathname 带尾斜杠，先去掉，否则顶级项（url 无尾斜杠）永远不高亮。
   const path = (() => {
-    try {
-      return decodeURIComponent(rawPath);
-    } catch {
-      return rawPath;
-    }
+    const p = (() => {
+      try {
+        return decodeURIComponent(rawPath);
+      } catch {
+        return rawPath;
+      }
+    })();
+    return p.replace(/\/+$/, "") || "/";
   })();
 
   const isItemActive = (item: NavMainItem) => {

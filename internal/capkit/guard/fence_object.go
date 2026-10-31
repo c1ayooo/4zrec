@@ -39,7 +39,34 @@ func ExtractFenceTargetsWithDir(text, workDir string) fenceTargets {
 			t.Reason = reason
 		}
 	}
+	// Opaque 命令的字面目标兜底扫描：heredoc/解释器脚本体在命令对象分析阶段被
+	// 剥离，但写死在脚本体里的 IP/URL 是静态可见的目标——收进结果，围栏才能对
+	// 「全部字面目标均在授权范围内」的场景自动放行，审批卡片也能展示真实目标。
+	// 结果仍标 Opaque：动态构造的目标依旧不可见，fail-closed 语义不变。
+	if t.Opaque {
+		mergeFenceTargets(&t, sweepLiteralTargets(text))
+	}
 	return t
+}
+
+// reIPv4Literal 匹配 IPv4 四组字面量；	validFenceIPv4 再做 octet 与保留段校验。
+var reIPv4Literal = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
+
+// sweepLiteralTargets 对原始文本（含 heredoc 体）做字面目标兜底扫描。
+// 只收高置信形态——IPv4 四组字面量与 scheme://host 的 URL host（复用
+// addHost/addIP 的归一与公共基础设施过滤），不收泛域名与裸单词，
+// 避免把版本号、普通单词误当目标。
+func sweepLiteralTargets(text string) fenceTargets {
+	c := newFenceCollector(collectVars(text))
+	for _, m := range reIPv4Literal.FindAllString(text, -1) {
+		if validFenceIPv4(m) {
+			c.addIP(m)
+		}
+	}
+	for _, u := range reURLObject.FindAllString(text, -1) {
+		c.addHost(u)
+	}
+	return c.result()
 }
 
 var (
@@ -83,6 +110,9 @@ var localOnlyCommands = map[string]bool{
 	"nano": true, "emacs": true, "man": true, "info": true, "help": true,
 	"apropos": true, "whatis": true, "shellcheck": true, "bat": true, "fd": true,
 	"rg": true, "tree": true, "pandoc": true,
+	// 本地漏洞库检索(exploitdb 离线数据),不出网;此前在出网命令表里,
+	// `searchsploit apache 2.4.49` 会把 "apache" 提成域名目标。
+	"searchsploit": true,
 }
 
 // infraCommands 是工具链/包管理器这类“基础设施出网”，不是对目标的测试流量。
@@ -138,85 +168,249 @@ func baseCommand(s string) string {
 	return s
 }
 
+// loopBind 一层活跃的 for 循环:变量名 → 候选值(词表字面量,或工作目录内
+// glob 展开出的文件)。循环体按候选逐一展开分析,目标取并集。
+type loopBind struct {
+	name   string
+	values []string
+}
+
+// loopVariantsCap 展开候选数上限:超过就放弃展开、按未展开文本分析
+// (动态占位符路径会走 Opaque,fail-closed 而不是爆炸)。
+const loopVariantsCap = 64
+
+// loopLeadPrefixes 循环头识别前可剥的语句前缀:外层 `;`/换行切分后,
+// 嵌套结构与 if 分支体会带这些前缀。
+var loopLeadPrefixes = map[string]bool{"do": true, "then": true, "else": true, "!": true}
+
 // analyzeCommandObjects 是对象解析主入口。
 func analyzeCommandObjects(text, workDir string, depth int) (fenceTargets, bool, string) {
 	var out fenceTargets
 	if depth > 3 {
 		return out, true, "命令嵌套过深，无法静态确定网络对象"
 	}
-	for _, seg := range splitCommands(stripHeredocs(text)) {
-		args := Tokenize(seg)
+	// 变量赋值按整段命令收集(d="x"; dig "$d" 跨段引用),供目标参数代入;
+	// 代入不了的($d 来自循环)在动态占位符检查里 fail-closed。
+	vars := collectVars(text)
+	var loops []loopBind
+	for _, seg := range splitCommandSegments(stripHeredocs(text)) {
+		// 注释行：以 # 开头的段是注释，不是命令（2026-10-29 实锤误伤）。
+		s := strings.TrimSpace(seg.Text)
+		if strings.HasPrefix(s, "#") {
+			continue
+		}
+		// 子 shell 包装残片：splitCommands 在 `;` 处把 (cmd1; cmd2) 拆开后，
+		// 首段带前导 "("、末段带尾随 ")"——剥掉后按普通段分析（$() 命令替换
+		// 已在下方单独跳过，不受影响）。
+		if strings.HasPrefix(s, "(") {
+			s = strings.TrimRight(strings.TrimLeft(s, "( "), ") ")
+			if s == "" {
+				continue
+			}
+		}
+		args := Tokenize(s)
 		if len(args) == 0 {
 			continue
 		}
-		// WebFetch 等工具直接给一个裸 URL，没有命令前缀；目标已由旧提取器
-		// 提取，不能把 URL 当未知命令判 Opaque。
-		if strings.Contains(seg, "://") && !strings.ContainsAny(seg, " \t\n;|&") {
-			continue
+		// for 头:登记循环变量与候选值;done 弹出。词表不可静态解析
+		// ($(seq ...) 等)就不绑定,循环体按原行为分析(动态占位符 fail-closed)。
+		// 嵌套循环的头是 `do for b in x y`(外层 ; 切分后带 do 前缀),识别前
+		// 只剥 do/then/else/! 这类语句前缀——不能剥整个 shellControlKeywords,
+		// for/in 本身就在关键字表里。
+		lead := 0
+		for lead < len(args) && loopLeadPrefixes[args[lead]] {
+			lead++
 		}
-		// 命令替换由旧提取器递归处理；这里跳过外层文本，避免把替换体里的
-		// 代码当未知命令误判。
-		if strings.Contains(seg, "$(") || strings.Contains(seg, "`") {
-			continue
+		head := args[lead:]
+		if len(head) > 0 {
+			if head[0] == "for" {
+				if lb, ok := parseForHeader(head, workDir); ok {
+					loops = append(loops, lb)
+				}
+				continue
+			}
+			if head[0] == "done" {
+				if len(loops) > 0 {
+					loops = loops[:len(loops)-1]
+				}
+				continue
+			}
 		}
-		// 函数定义：分析 { 之后真正会执行的命令体，而不是把函数名当命令。
-		if body := functionBody(seg); body != "" {
-			sub, cop, creason := analyzeCommandObjects(body, workDir, depth+1)
+		if len(loops) == 0 {
+			sub, cop, creason := analyzeSegment(s, seg.Piped, workDir, depth, vars)
 			mergeFenceTargets(&out, sub)
 			if cop {
 				return out, true, creason
 			}
 			continue
 		}
-		cmd, rest, inner, opaque, reason := PeelCommand(args)
-		if opaque {
-			return out, true, reason
-		}
-		if inner != "" {
-			sub, cop, creason := analyzeCommandObjects(inner, workDir, depth+1)
+		// 循环体:每个候选值都可能是实际取值——逐一分析求并集;任一候选
+		// 不可判定 → 整体 fail-closed。
+		for _, variant := range loopVariants(s, loops) {
+			sub, cop, creason := analyzeSegment(variant, seg.Piped, workDir, depth, vars)
 			mergeFenceTargets(&out, sub)
 			if cop {
 				return out, true, creason
 			}
-			continue
-		}
-		switch {
-		case cmd == "":
-			// 纯 shell 语法/重定向；字面目标已由旧提取器处理。
-		case cmd == "__shell_script__":
-			if len(rest) == 0 {
-				return out, true, "shell 脚本路径缺失，无法确定网络对象"
-			}
-			data, ok := readFenceFile(workDir, rest[0])
-			if !ok {
-				return out, true, fmt.Sprintf("无法读取 shell 脚本 %q（仅允许任务工作目录内文件）", rest[0])
-			}
-			sub, cop, creason := analyzeCommandObjects(string(data), workDir, depth+1)
-			mergeFenceTargets(&out, sub)
-			if cop {
-				return out, true, creason
-			}
-		case interpreterCommands[cmd]:
-			sub, cop, creason := analyzeInterpreter(cmd, rest, workDir)
-			mergeFenceTargets(&out, sub)
-			if cop {
-				return out, true, creason
-			}
-		case connectionCommands[cmd]:
-			sub, cop, creason := analyzeKnownCommand(cmd, rest, workDir)
-			mergeFenceTargets(&out, sub)
-			if cop {
-				return out, true, creason
-			}
-		case urlOnlyCommands[cmd]:
-			mergeFenceTargets(&out, extractURLsFromText(strings.Join(rest, " ")))
-		case localOnlyCommands[cmd], infraCommands[cmd], shellControlKeywords[cmd]:
-			// 明确本地/基础设施命令，不产生目标。
-		default:
-			return out, true, fmt.Sprintf("未识别的命令 %q：无法静态确定其网络对象", cmd)
 		}
 	}
 	return out, false, ""
+}
+
+// parseForHeader 解析 `for VAR in W1 W2 ...` 头（Tokenize 后的 token）。
+// 词表全部可静态解析（无 $/命令替换/子 shell）才登记绑定；含 glob 的词按
+// 工作目录展开（只留文件）。展开为空保留字面词，后续读取失败自然 Opaque。
+func parseForHeader(args []string, workDir string) (loopBind, bool) {
+	if len(args) < 4 || args[2] != "in" || !isForVarName(args[1]) {
+		return loopBind{}, false
+	}
+	words := args[3:]
+	if words[len(words)-1] == "do" {
+		words = words[:len(words)-1]
+	}
+	if len(words) == 0 {
+		return loopBind{}, false
+	}
+	for _, w := range words {
+		if strings.ContainsAny(w, "$`(") {
+			return loopBind{}, false
+		}
+	}
+	lb := loopBind{name: args[1]}
+	for _, w := range words {
+		lb.values = append(lb.values, expandLoopWord(w, workDir)...)
+		if len(lb.values) > loopVariantsCap {
+			return loopBind{}, false
+		}
+	}
+	return lb, true
+}
+
+// isForVarName 循环变量必须是 shell 标识符(排除 C 风格 for ((i=0;...)) 残片)。
+func isForVarName(s string) bool {
+	if s == "" || !isNameStart(s[0]) {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		if !isNameChar(s[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// expandLoopWord 展开循环词:含 glob 通配符时按工作目录展开为绝对路径
+// (只留普通文件);无 glob 或不可展开时原样返回。
+func expandLoopWord(word, workDir string) []string {
+	if !strings.ContainsAny(word, "*?[") || workDir == "" {
+		return []string{word}
+	}
+	matches, err := filepath.Glob(filepath.Join(workDir, word))
+	if err != nil {
+		return []string{word}
+	}
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		if info, err := os.Stat(m); err == nil && !info.IsDir() {
+			out = append(out, m)
+		}
+	}
+	if len(out) == 0 {
+		return []string{word}
+	}
+	return out
+}
+
+// loopVariants 对循环体文本做逐层变量代入,产出候选变体(嵌套循环取笛卡尔
+// 积)。候选数超上限放弃展开,返回原文——按动态占位符 fail-closed。
+func loopVariants(text string, loops []loopBind) []string {
+	variants := []string{text}
+	for _, lb := range loops {
+		next := make([]string, 0, len(variants)*len(lb.values))
+		for _, v := range variants {
+			for _, val := range lb.values {
+				next = append(next, substituteVars(v, map[string]string{lb.name: val}))
+			}
+		}
+		if len(next) > loopVariantsCap {
+			return []string{text}
+		}
+		variants = next
+	}
+	return variants
+}
+
+// analyzeSegment 分析单个简单命令段（已切分）。piped 表示段前有管道；
+// vars 供目标/脚本路径的变量代入。返回本段目标与 Opaque 判定。
+func analyzeSegment(text string, piped bool, workDir string, depth int, vars map[string]string) (fenceTargets, bool, string) {
+	// WebFetch 等工具直接给一个裸 URL，没有命令前缀；目标已由旧提取器
+	// 提取，不能把 URL 当未知命令判 Opaque。
+	if strings.Contains(text, "://") && !strings.ContainsAny(text, " \t\n;|&") {
+		return fenceTargets{}, false, ""
+	}
+	// 命令替换由旧提取器递归处理；这里跳过外层文本，避免把替换体里的
+	// 代码当未知命令误判。
+	if strings.Contains(text, "$(") || strings.Contains(text, "`") {
+		return fenceTargets{}, false, ""
+	}
+	// 函数定义：分析 { 之后真正会执行的命令体，而不是把函数名当命令。
+	if body := functionBody(text); body != "" {
+		return analyzeCommandObjects(body, workDir, depth+1)
+	}
+	args := Tokenize(text)
+	if len(args) == 0 {
+		return fenceTargets{}, false, ""
+	}
+	cmd, rest, inner, opaque, reason := PeelCommand(args)
+	if opaque {
+		return fenceTargets{}, true, reason
+	}
+	if inner != "" {
+		return analyzeCommandObjects(inner, workDir, depth+1)
+	}
+	switch {
+	case cmd == "":
+		// 纯 shell 语法/重定向；字面目标已由旧提取器处理。
+		return fenceTargets{}, false, ""
+	case cmd == "__shell_script__":
+		if len(rest) == 0 {
+			return fenceTargets{}, true, "shell 脚本路径缺失，无法确定网络对象"
+		}
+		data, ok := readFenceFile(workDir, substituteVars(rest[0], vars))
+		if !ok {
+			return fenceTargets{}, true, fmt.Sprintf("无法读取 shell 脚本 %q（仅允许任务工作目录内文件）", rest[0])
+		}
+		return analyzeCommandObjects(string(data), workDir, depth+1)
+	case interpreterCommands[cmd]:
+		return analyzeInterpreter(cmd, rest, workDir, vars)
+	case isConnectionCommand(cmd):
+		sub, cop, creason := analyzeKnownCommand(cmd, rest, workDir, vars)
+		if cop {
+			return sub, true, creason
+		}
+		// 管道末端的连接类命令若没有显式目标参数,目标来自 stdin
+		// (cat subs.txt | httpx 是 recon 流水线的标准形态)——静态
+		// 不可见,fail-closed 转人工;与 xargs 的 stdin 规则同口径。
+		if sub.empty() && piped {
+			return sub, true, fmt.Sprintf("%s 无显式目标参数：目标来自管道输入，无法静态确定网络对象", cmd)
+		}
+		return sub, false, ""
+	case urlOnlyCommands[cmd]:
+		return extractURLsFromText(strings.Join(rest, " ")), false, ""
+	case localOnlyCommands[cmd], infraCommands[cmd], shellControlKeywords[cmd]:
+		// 明确本地/基础设施命令，不产生目标。
+		return fenceTargets{}, false, ""
+	default:
+		// 长尾本地工具（pgrep/lsof/strace…数百个）不可能枚举穷尽，
+		// 按「有无网络特征」判定而非按名单打地鼠（2026-10-29：pgrep 白名单
+		// 漏项把纯本地查询挡进审批）。无特征 → 按本地放行（此时段内字面
+		// IP/域名【不会】被提取——字面兜底扫描只在 Opaque 时运行，这是
+		// 「宁漏勿扰」的既定取舍）；有特征 → 维持 fail-closed 转人工。
+		if reNetworkIndicator.MatchString(strings.Join(rest, " ")) || reNetworkIndicator.MatchString(cmd) {
+			return fenceTargets{}, true, fmt.Sprintf("未识别的命令 %q：包含网络调用特征，无法静态确定其网络对象", cmd)
+		}
+		return fenceTargets{}, false, ""
+	}
 }
 
 // peelCommand 剥掉包装命令，返回真正执行动作的命令。
@@ -314,7 +508,7 @@ func PeelCommand(args []string) (cmd string, rest []string, inner string, opaque
 			}
 			// xargs 把 stdin 追加到内部命令后面；内部命令是出网命令且没有
 			// 显式目标时，对象来自 stdin，静态不可知 → fail-closed。
-			if connectionCommands[baseCommand(rest[0])] {
+			if isConnectionCommand(baseCommand(rest[0])) {
 				explicit := false
 				for _, a := range rest[1:] {
 					if a != "" && !strings.HasPrefix(a, "-") {
@@ -482,11 +676,12 @@ func findExecCommand(args []string) []string {
 }
 
 // analyzeKnownCommand 处理已知出网命令：先读目标列表文件，再交给旧提取器
-// 按该命令的旗标/位置参数取对象。
-func analyzeKnownCommand(cmd string, rest []string, workDir string) (fenceTargets, bool, string) {
+// 按该命令的旗标/位置参数取对象。vars 是整段命令的变量赋值表(dig "$d" 的
+// 目标在变量里,代入后才可见)。
+func analyzeKnownCommand(cmd string, rest []string, workDir string, vars map[string]string) (fenceTargets, bool, string) {
 	// 先按命令自身的对象规则扫描参数（已剥包装，sh -c/xargs/find -exec 的
 	// 内部命令也会走到这里）。
-	c := newFenceCollector(nil)
+	c := newFenceCollector(vars)
 	scanCommandTargets(cmd, rest, c)
 	out := c.result()
 	if flags := targetFileFlags[cmd]; len(flags) > 0 {
@@ -497,7 +692,8 @@ func analyzeKnownCommand(cmd string, rest []string, workDir string) (fenceTarget
 			if i+1 >= len(rest) {
 				return out, true, fmt.Sprintf("%s %s 缺少文件路径", cmd, rest[i])
 			}
-			data, ok := readFenceFile(workDir, rest[i+1])
+			// 清单路径可能来自变量(nmap -iL "$list"),代入后再读。
+			data, ok := readFenceFile(workDir, substituteVars(rest[i+1], vars))
 			if !ok {
 				return out, true, fmt.Sprintf("无法读取目标列表 %q（仅允许任务工作目录内文件）", rest[i+1])
 			}
@@ -566,7 +762,9 @@ func analyzeKnownCommand(cmd string, rest []string, workDir string) (fenceTarget
 
 // analyzeInterpreter 处理 python/node/...：能读到代码/脚本时提取 URL 对象；
 // 出现网络调用则保留 Opaque（动态目标无法穷举）；读不到脚本则 fail-closed。
-func analyzeInterpreter(cmd string, rest []string, workDir string) (fenceTargets, bool, string) {
+// vars 供脚本路径/-c 代码的变量代入（f=scan.py; python3 "$f" 与
+// for f in *.py; do python3 "$f"; done 两类形态都靠它落到真实文件）。
+func analyzeInterpreter(cmd string, rest []string, workDir string, vars map[string]string) (fenceTargets, bool, string) {
 	var out fenceTargets
 	code, script, module := interpreterInput(rest)
 	if module != "" {
@@ -576,8 +774,13 @@ func analyzeInterpreter(cmd string, rest []string, workDir string) (fenceTargets
 	if code == "" && script == "" && harmlessInterpreterInvocation(rest) {
 		return out, false, ""
 	}
+	code = substituteVars(code, vars)
+	script = substituteVars(script, vars)
 	if code != "" {
 		out = extractURLsFromText(code)
+		// 字面兜底（与命令文本路径同款）：脚本体内写死的 IPv4/URL 要进结果，
+		// 围栏才能对「全部字面目标均已授权」自动放行（如 HOST="49.51.48.17" 元组赋值）。
+		mergeFenceTargets(&out, sweepLiteralTargets(code))
 		if reNetworkIndicator.MatchString(code) {
 			return out, true, fmt.Sprintf("%s 内联代码包含网络调用，静态只识别到部分目标", cmd)
 		}
@@ -586,10 +789,16 @@ func analyzeInterpreter(cmd string, rest []string, workDir string) (fenceTargets
 	if script != "" {
 		data, ok := readFenceFile(workDir, script)
 		if !ok {
+			// 动态路径与目录外文件是两种不同的情况,审批文案要能区分:
+			// 前者人也没法替 agent 读,只能按脚本能去任何地方来裁决。
+			if strings.Contains(script, "$") {
+				return out, true, fmt.Sprintf("%s 脚本路径 %q 含变量，静态无法读取脚本内容", cmd, script)
+			}
 			return out, true, fmt.Sprintf("无法读取 %s 脚本 %q（仅允许任务工作目录内文件）", cmd, script)
 		}
 		text := string(data)
 		out = extractURLsFromText(text)
+		mergeFenceTargets(&out, sweepLiteralTargets(text))
 		if reNetworkIndicator.MatchString(text) {
 			return out, true, fmt.Sprintf("%s 脚本包含网络调用，静态只识别到部分目标", cmd)
 		}

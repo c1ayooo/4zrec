@@ -87,7 +87,25 @@ export function fmtTime(ts: string) {
   });
 }
 
-const COLUMN_COUNT = 9;
+const findingsBreakpoints = ["(min-width: 640px)", "(min-width: 768px)", "(min-width: 1024px)", "(min-width: 1280px)"];
+
+function subscribeFindingsColumns(onChange: () => void) {
+  const queries = findingsBreakpoints.map((query) => window.matchMedia(query));
+  for (const query of queries) query.addEventListener("change", onChange);
+  return () => {
+    for (const query of queries) query.removeEventListener("change", onChange);
+  };
+}
+
+function visibleFindingsColumnCount() {
+  const matches = findingsBreakpoints.map((query) => window.matchMedia(query).matches);
+  // 常显 4 列(选择/展开/严重度/漏洞名称),响应式补 资产(sm)、状态+时间(lg)、所属任务+操作(xl)。
+  return 4 + Number(matches[0]) + 2 * Number(matches[2]) + 2 * Number(matches[3]);
+}
+
+function serverFindingsColumnCount() {
+  return 9;
+}
 
 interface FindingsTableProps {
   items: Finding[];
@@ -132,6 +150,11 @@ export function FindingsTable({
   onDelete,
   selectAllLabel = "选择当前页全部",
 }: FindingsTableProps) {
+  const columns = React.useSyncExternalStore(
+    subscribeFindingsColumns,
+    visibleFindingsColumnCount,
+    serverFindingsColumnCount,
+  );
   const selectableIds = items.map((finding) => finding.finding_id).filter((id): id is string => Boolean(id));
   const selectedCount = selectableIds.filter((id) => selectedIds.has(id)).length;
   let headerChecked: boolean | "indeterminate" = false;
@@ -142,8 +165,8 @@ export function FindingsTable({
   }
 
   return (
-    /* 固定列宽保证展开内容不撑开表格；窄屏只在表格内部横向滚动。 */
-    <Table className="min-w-[60rem] table-fixed">
+    /* 固定列宽保证展开内容不撑开表格；列按断点存活（见 findingsBreakpoints），窄屏不再横向滚动。 */
+    <Table className="table-fixed">
       <TableHeader>
         <TableRow>
           <TableHead className="w-8">
@@ -156,11 +179,11 @@ export function FindingsTable({
           <TableHead className="w-8" />
           <TableHead className="w-24">严重度</TableHead>
           <TableHead>漏洞名称</TableHead>
-          <TableHead className="w-44">资产</TableHead>
-          <TableHead className="w-28">状态</TableHead>
-          <TableHead className="w-32">所属任务</TableHead>
-          <TableHead className="w-24">时间</TableHead>
-          <TableHead className="w-48">操作</TableHead>
+          <TableHead className="hidden sm:table-cell w-44">资产</TableHead>
+          <TableHead className="hidden lg:table-cell w-28">状态</TableHead>
+          <TableHead className="hidden xl:table-cell w-32">所属任务</TableHead>
+          <TableHead className="hidden lg:table-cell w-24">时间</TableHead>
+          <TableHead className="hidden xl:table-cell w-48">操作</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -226,7 +249,7 @@ export function FindingsTable({
                     <Badge variant="outline">流量证据 {f.traffic_count ?? 0} 条</Badge>
                   </div>
                 </TableCell>
-                <TableCell>
+                <TableCell className="hidden sm:table-cell">
                   {f.assets && f.assets.length > 0 ? (
                     <div className="flex flex-wrap gap-1">
                       {f.assets.slice(0, 3).map((a) => (
@@ -246,7 +269,7 @@ export function FindingsTable({
                     <span className="text-muted-foreground">—</span>
                   )}
                 </TableCell>
-                <TableCell onClick={(e) => e.stopPropagation()}>
+                <TableCell className="hidden lg:table-cell" onClick={(e) => e.stopPropagation()}>
                   {f.finding_id ? (
                     <Select value={f.status} onValueChange={(v) => onStatusChange(f, v as FindingStatus)}>
                       <SelectTrigger size="sm" className="h-7 w-full border-none px-1 shadow-none focus-visible:ring-0">
@@ -264,7 +287,7 @@ export function FindingsTable({
                     <StatusBadge domain="finding" value={f.status} dot />
                   )}
                 </TableCell>
-                <TableCell>
+                <TableCell className="hidden xl:table-cell">
                   {f.task_id ? (
                     <Link
                       href={`/function/tasks/detail?id=${f.task_id}`}
@@ -279,8 +302,10 @@ export function FindingsTable({
                     <span className="text-muted-foreground">—</span>
                   )}
                 </TableCell>
-                <TableCell className="text-xs text-muted-foreground tabular-nums">{fmtTime(f.ts)}</TableCell>
-                <TableCell onClick={(e) => e.stopPropagation()}>
+                <TableCell className="hidden text-xs text-muted-foreground tabular-nums lg:table-cell">
+                  {fmtTime(f.ts)}
+                </TableCell>
+                <TableCell className="hidden xl:table-cell" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center gap-1">
                     {retest ? (
                       <Button asChild size="sm" variant="ghost">
@@ -339,7 +364,7 @@ export function FindingsTable({
                 <TableRow className="hover:bg-transparent">
                   {/* whitespace-normal 覆盖 TableCell 默认的 nowrap,否则展开区文字
                       被强制单行、直接溢出单元格。 */}
-                  <TableCell colSpan={COLUMN_COUNT} className="bg-muted/30 whitespace-normal">
+                  <TableCell colSpan={columns} className="bg-muted/30 whitespace-normal">
                     <div className="flex flex-col gap-2 px-2 py-1">
                       {/* 行内编辑:名称/类别/严重等级,可改并保存(仅独立 finding 行)。 */}
                       {f.finding_id && edit && (
@@ -459,7 +484,7 @@ export function FindingsTable({
         })}
         {items.length === 0 && (
           <TableRow>
-            <TableCell colSpan={COLUMN_COUNT} className="py-12 text-center text-sm text-muted-foreground">
+            <TableCell colSpan={columns} className="py-12 text-center text-sm text-muted-foreground">
               没有匹配的发现。
             </TableCell>
           </TableRow>

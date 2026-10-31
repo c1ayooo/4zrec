@@ -37,7 +37,11 @@ type InterceptPending struct {
 	ToolInput      json.RawMessage `json:"tool_input"`
 	// Targets 是资产围栏类审批的结构化目标 {"domains":[...],"ips":[...]};
 	// 规则/模型审批为 NULL。审批页据此渲染逐目标复选框。
-	Targets        json.RawMessage `json:"targets,omitempty"`
+	Targets json.RawMessage `json:"targets,omitempty"`
+	// ToolTargets 是服务端按工具输入静态提取的展示目标(不落库,读取出口
+	// 现场回填):围栏审批已有 targets 时为空,其余审批用它显示「命令打谁」。
+	// 与 Targets(围栏授权语义,决定接口按勾选子集登记)严格分离。
+	ToolTargets    json.RawMessage `json:"tool_targets,omitempty"`
 	Status         string          `json:"status"`
 	DecisionSource string          `json:"decision_source"`
 	Reason         string          `json:"reason"` // 规则 message 或模型判定理由(前缀 [模型])

@@ -1215,6 +1215,43 @@ export interface Settings {
   notify_enabled?: boolean; // 推送总开关，默认开；用于维护期一键止血
   notify_public_base_url?: string; // 漏洞详情回链的外部访问地址；空=消息不带回链
   notify_digest_interval_min?: number; // 汇总模式周期（分钟），默认 30
+  // ---- IM 接入网关（对话式绑定：IM 里 /bond 绑定项目任务、/new 新会话）----
+  im_bot?: ImBotSettings;
+}
+
+// IM 接入各平台的凭据回显：密钥类只回 *_set（值永不返回）；PUT 时对应字段
+// 省略=不改、空串=清除。
+export interface ImBotSettings {
+  agent_key: string;
+  feishu: { enabled: boolean; app_id: string; app_secret_set: boolean };
+  dingtalk: { enabled: boolean; client_id: string; client_secret_set: boolean };
+  telegram: { enabled: boolean; bot_token_set: boolean; proxy: string };
+  wecom: {
+    enabled: boolean;
+    corp_id: string;
+    corp_secret_set: boolean;
+    agent_id: number;
+    callback_token_set: boolean;
+    encoding_aes_key_set: boolean;
+    callback_url: string;
+    base_url_set: boolean;
+  };
+}
+
+// PUT /settings 里 im_bot 的写入形状（write-only 密钥字段）。
+export interface ImBotSettingsInput {
+  agent_key?: string;
+  feishu?: { enabled: boolean; app_id?: string; app_secret?: string };
+  dingtalk?: { enabled: boolean; client_id?: string; client_secret?: string };
+  telegram?: { enabled: boolean; bot_token?: string; proxy?: string };
+  wecom?: {
+    enabled: boolean;
+    corp_id?: string;
+    corp_secret?: string;
+    agent_id?: number;
+    callback_token?: string;
+    encoding_aes_key?: string;
+  };
 }
 
 // nuclei_status 接口返回：项目内二进制的安装/更新状态。
@@ -1887,8 +1924,11 @@ export interface InterceptPending {
   tool_input: Record<string, any>;
   status: "pending" | "allowed" | "denied" | "timeout";
   reason: string; // 规则 message 或模型判定理由(模型判定带 [模型] 前缀)
-  // 资产围栏审批的结构化目标;规则/模型审批为空。
+  // 资产围栏审批的结构化目标(未授权子集,决定时按勾选子集授权);规则/模型审批为空。
   targets?: { domains?: string[]; ips?: string[] } | null;
+  // 服务端按工具输入静态提取的展示目标(不落库,围栏审批为空):审批列表第一眼
+  // 看到「命令打谁」,不用读整条原始命令。仅展示,不参与授权判定。
+  tool_targets?: { domains?: string[]; ips?: string[] } | null;
   decided_at?: string;
   created_at: string;
 }

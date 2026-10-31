@@ -359,10 +359,22 @@ export default function ProjectsPage() {
                           <EyeIcon />
                         </Link>
                       </Button>
-                      <Button variant="ghost" size="icon" className="size-7" onClick={() => openEdit(p)}>
+                      <Button
+                        aria-label="编辑项目"
+                        variant="ghost"
+                        size="icon"
+                        className="size-7"
+                        onClick={() => openEdit(p)}
+                      >
                         <PencilIcon />
                       </Button>
-                      <Button variant="ghost" size="icon" className="size-7" onClick={() => openDelete(p)}>
+                      <Button
+                        aria-label="删除项目"
+                        variant="ghost"
+                        size="icon"
+                        className="size-7"
+                        onClick={() => openDelete(p)}
+                      >
                         <Trash2Icon />
                       </Button>
                     </div>

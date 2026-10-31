@@ -574,11 +574,12 @@ func (s *Server) checkFindingScope(w http.ResponseWriter, r *http.Request, ids .
 }
 
 // requireAuth wraps h with JWT / API-key validation.
-// /api/auth/* and /api/health are exempt.
+// /api/auth/* and /api/health are exempt. /api/im/wecom/callback 豁免——企业微信
+// 回调无法携带 JWT，端点内部用回调配置的 Token/EncodingAESKey 自验签。
 func (s *Server) requireAuth(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if strings.HasPrefix(p, "/api/auth/") || p == "/api/health" {
+		if strings.HasPrefix(p, "/api/auth/") || p == "/api/health" || p == imWecomURLVerify {
 			h.ServeHTTP(w, r)
 			return
 		}

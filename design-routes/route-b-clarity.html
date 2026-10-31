@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>路线 B · 天青净版 CLARITY — 4zrec 设计打样</title>
+<style>
+:root{
+  --bg:#f6f8fb;            /* 冷白 */
+  --surface:#ffffff;
+  --line:#e5eaf1;
+  --line-2:#eef1f6;
+  --ink:#111827;
+  --muted:#5b6472;
+  --faint:#9aa3b2;
+  --acc:#2a6df5;           /* 单一天青钴蓝 */
+  --acc-deep:#1e56cf;
+  --acc-soft:#edf3fe;
+  --ok:#12996e;
+  --ok-soft:#e8f7f1;
+  --warn:#b07d10;
+  --warn-soft:#fdf4e3;
+  --danger:#d4382e;
+  --danger-soft:#fdeeed;
+  --info:#5b7fa6;
+  --sans:-apple-system,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+  --mono:"JetBrains Mono","SF Mono",ui-monospace,Consolas,monospace;
+  --sh-xs:0 1px 2px rgba(17,24,39,.05);
+  --sh-sm:0 1px 3px rgba(17,24,39,.06),0 1px 2px rgba(17,24,39,.04);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{font:13px/1.6 var(--sans);color:var(--ink);background:var(--bg);overflow:hidden;-webkit-font-smoothing:antialiased}
+.app{display:flex;height:100vh}
+
+/* ── 侧栏 ─────────────────────────── */
+.side{width:218px;flex:none;background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column}
+.brand{padding:16px;display:flex;align-items:center;gap:10px}
+.brand .logo{width:28px;height:28px;border-radius:8px;background:var(--acc);color:#fff;display:grid;place-items:center;font:700 11px var(--mono)}
+.brand b{font-size:14px;font-weight:700;letter-spacing:.01em}
+.brand span{margin-left:auto;font-size:10.5px;color:var(--faint)}
+nav{flex:1;overflow:auto;padding:2px 10px 10px}
+.grp{margin:16px 6px 5px;font-size:11px;font-weight:600;color:var(--faint);letter-spacing:.02em}
+.itm{display:flex;align-items:center;gap:9px;padding:6.5px 10px;margin:1px 0;border-radius:8px;color:var(--muted);cursor:pointer;font-size:13px}
+.itm:hover{color:var(--ink);background:var(--line-2)}
+.itm.on{color:var(--acc-deep);background:var(--acc-soft);font-weight:600}
+.itm svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.7;opacity:.7;flex:none}
+.itm .k{margin-left:auto;font:11px var(--mono);color:var(--faint)}
+.itm .k.hot{color:#fff;background:var(--acc);border-radius:99px;padding:0 6.5px;font-weight:600}
+.side-foot{padding:12px 16px;border-top:1px solid var(--line);font-size:11px;color:var(--faint);display:flex;align-items:center;gap:7px}
+.side-foot i{width:7px;height:7px;border-radius:50%;background:var(--ok)}
+
+/* ── 主区 ─────────────────────────── */
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.top{height:50px;flex:none;display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--surface);border-bottom:1px solid var(--line)}
+.crumb{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
+.crumb b{color:var(--ink);font-weight:600}
+.cmdbar{margin-left:auto;width:230px;height:31px;display:flex;align-items:center;gap:8px;padding:0 11px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--faint);font-size:12.5px;cursor:pointer}
+.cmdbar:hover{border-color:#d3dae6;color:var(--muted)}
+.cmdbar kbd{margin-left:auto;font:10.5px var(--mono);color:var(--faint);border:1px solid var(--line);border-radius:5px;padding:1px 5px;background:var(--surface)}
+.avatar{width:28px;height:28px;border-radius:50%;background:var(--acc-soft);color:var(--acc-deep);display:grid;place-items:center;font-size:11px;font-weight:700}
+.btn{font:12.5px/1 var(--sans);font-weight:600;height:31px;padding:0 15px;border-radius:9px;border:1px solid transparent;cursor:pointer}
+.btn.primary{background:var(--acc);color:#fff;box-shadow:var(--sh-xs)}
+.btn.primary:hover{background:var(--acc-deep)}
+.btn.ghost{background:var(--surface);color:var(--muted);border-color:var(--line)}
+.btn.ghost:hover{color:var(--ink);border-color:#d3dae6}
+.btn.sm{height:27px;font-size:12px;padding:0 12px;border-radius:8px}
+.btn.sm.ok{background:var(--ok);color:#fff}
+.btn.sm.ok:hover{background:#0d7f5a}
+.btn.sm.danger{background:var(--surface);color:var(--danger);border-color:#f0c9c6}
+.btn.sm.danger:hover{background:var(--danger-soft)}
+
+/* 态势条：白胶囊 */
+.pulsebar{flex:none;display:flex;align-items:center;gap:22px;margin:16px 20px 0;height:44px;padding:0 18px;background:var(--surface);border:1px solid var(--line);border-radius:999px;box-shadow:var(--sh-sm)}
+.pb-item{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted)}
+.pb-item b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+.dot.live{background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft)}
+.dot.hot{background:var(--acc)}
+.pb-item .acc{color:var(--acc-deep);font-weight:600}
+.pb-meta{margin-left:auto;display:flex;align-items:center;gap:6px;font:11px var(--mono);color:var(--faint)}
+
+.content{flex:1;overflow:auto;padding:16px 20px 24px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:15px 17px;box-shadow:var(--sh-xs)}
+.stat .lb{font-size:12.5px;color:var(--muted);display:flex;align-items:center;justify-content:space-between}
+.stat .lb .delta{font-size:11.5px;font-weight:600;color:var(--ok);background:var(--ok-soft);border-radius:99px;padding:1px 8px}
+.stat .lb .delta.hot{color:var(--warn);background:var(--warn-soft)}
+.stat .v{margin-top:8px;font-size:26px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.stat .v .u{font-size:13px;font-weight:500;color:var(--faint);margin-left:3px}
+.stat .v.acc{color:var(--acc-deep)}
+.stat .v.dan{color:var(--danger)}
+.stat .d{margin-top:4px;font-size:11.5px;color:var(--faint)}
+
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 348px;gap:12px;align-items:start}
+.rcol{display:grid;gap:12px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--sh-xs);overflow:hidden}
+.ptitle{display:flex;align-items:center;gap:8px;padding:13px 17px;border-bottom:1px solid var(--line-2);font-size:13.5px;font-weight:700}
+.ptitle .meta{margin-left:auto;font-size:11.5px;font-weight:400;color:var(--faint)}
+.ptitle .meta .live{color:var(--ok);font-weight:600}
+.link{margin-left:12px;font-size:12px;font-weight:500;color:var(--acc);cursor:pointer}
+.link:hover{color:var(--acc-deep)}
+
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;padding:8px 17px;font-size:11.5px;font-weight:600;color:var(--faint);border-bottom:1px solid var(--line-2)}
+td{padding:10px 17px;border-bottom:1px solid var(--line-2);font-variant-numeric:tabular-nums}
+tbody tr{cursor:pointer}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover{background:#f9fbfd}
+.tname{color:var(--ink);font-weight:500}
+.ttarget{color:var(--muted);font-family:var(--mono);font-size:11.5px}
+.pbar{width:110px;height:4px;border-radius:99px;background:var(--line-2);position:relative;overflow:hidden;display:inline-block;vertical-align:middle}
+.pbar i{position:absolute;inset:0;right:auto;border-radius:99px;background:var(--acc)}
+.pbar.done i{background:var(--ok)}
+.pbar.fail i{background:var(--danger)}
+.pct{font-size:11.5px;color:var(--muted);margin-left:8px}
+.chip{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:500}
+.chip i{width:5px;height:5px;border-radius:50%}
+.chip.run{color:var(--acc-deep);background:var(--acc-soft)}
+.chip.run i{background:var(--acc)}
+.chip.done{color:var(--muted);background:var(--line-2)}
+.chip.done i{background:var(--faint)}
+.chip.que{color:var(--faint);background:var(--line-2)}
+.chip.que i{background:var(--faint)}
+.chip.fail{color:var(--danger);background:var(--danger-soft)}
+.chip.fail i{background:var(--danger)}
+
+/* 审批 */
+.apv{padding:13px 17px;border-bottom:1px solid var(--line-2)}
+.apv:last-child{border-bottom:none}
+.apv .t{display:flex;gap:8px;align-items:center;font-size:13px}
+.apv .t b{font-weight:600}
+.kind{font-size:10.5px;font-weight:700;letter-spacing:.04em;padding:2.5px 8px;border-radius:6px}
+.kind.exp{color:#fff;background:var(--danger)}
+.kind.px{color:var(--acc-deep);background:var(--acc-soft)}
+.apv .m{margin-top:4px;font:11.5px var(--mono);color:var(--muted)}
+.apv .act{margin-top:10px;display:flex;gap:8px}
+
+/* 发现 */
+.fd{display:flex;gap:11px;padding:12px 17px;border-bottom:1px solid var(--line-2);align-items:flex-start}
+.fd:last-child{border-bottom:none}
+.fd:hover{background:#f9fbfd}
+.sev{flex:none;font-size:11.5px;font-weight:600;height:21px;display:inline-flex;align-items:center;padding:0 9px;border-radius:7px}
+.sev.crit{color:var(--danger);background:var(--danger-soft)}
+.sev.high{color:var(--warn);background:var(--warn-soft)}
+.sev.mid{color:var(--info);background:#eef3f8}
+.fd .t{font-size:13px;font-weight:500}
+.fd .m{font:11.5px var(--mono);color:var(--muted);margin-top:1px}
+.fd .host{margin-left:auto;font:11px var(--mono);color:var(--faint);white-space:nowrap;padding-top:3px}
+
+::-webkit-scrollbar{width:8px}
+::-webkit-scrollbar-thumb{background:#d3dae6;border-radius:4px}
+::-webkit-scrollbar-track{background:transparent}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <aside class="side">
+    <div class="brand"><span class="logo">4Z</span><b>4zrec</b><span>v0.5.2</span></div>
+    <nav>
+      <div class="grp">导航</div>
+      <div class="itm on"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>仪表盘</div>
+      <div class="itm"><svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H4l2.5-2.5A8 8 0 1 1 21 12Z"/></svg>对话</div>
+      <div class="itm"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>任务</div>
+      <div class="itm"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>发现</div>
+      <div class="itm"><svg viewBox="0 0 24 24"><path d="M3 7l9-4 9 4-9 4-9-4Z"/><path d="M3 7v10l9 4 9-4V7"/></svg>项目</div>
+      <div class="grp">信息收集</div>
+      <div class="itm"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8.5"/></svg>子域名</div>
+      <div class="itm"><svg viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></svg>端口服务</div>
+      <div class="itm"><svg viewBox="0 0 24 24"><path d="M12 3l2.5 5.5L20 9l-4 4 1 5.5-5-3-5 3 1-5.5-4-4 5.5-.5Z"/></svg>指纹</div>
+      <div class="grp">连接管理</div>
+      <div class="itm"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M7 20h10"/></svg>SSH 会话</div>
+      <div class="itm"><svg viewBox="0 0 24 24"><path d="M4 17c3 0 3-10 8-10s5 10 8 10"/></svg>代理池</div>
+      <div class="grp">流量与执行</div>
+      <div class="itm"><svg viewBox="0 0 24 24"><path d="M8 3v4M16 3v4M8 11h8M8 15h5"/></svg>流量回放</div>
+      <div class="itm"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3.5 8-7 10-3.5-2-7-5-7-10V6Z"/></svg>拦截审批<span class="k hot">3</span></div>
+      <div class="grp">系统管理</div>
+      <div class="itm"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>LLM 配置</div>
+      <div class="itm"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M21 20c0-2.6-1.8-4.5-4-5.2"/></svg>成员</div>
+    </nav>
+    <div class="side-foot"><i></i>OPERATOR · c1ay</div>
+  </aside>
+
+  <div class="main">
+    <header class="top">
+      <div class="crumb">hq-dc<span style="color:var(--faint)">/</span><b>仪表盘</b></div>
+      <div class="cmdbar">搜索任务、资产、发现…<kbd>⌘K</kbd></div>
+      <span class="avatar">C1</span>
+    </header>
+
+    <div class="pulsebar">
+      <span class="pb-item"><span class="dot live"></span><b>6</b> 任务运行</span>
+      <span class="pb-item"><span class="dot hot"></span><b>3</b> 待审批</span>
+      <span class="pb-item">LLM <span class="acc">在线 · claude-sonnet</span></span>
+      <span class="pb-item">流量探针 <b>已接管</b></span>
+      <span class="pb-meta">最后刷新 12:04:30</span>
+    </div>
+
+    <div class="content">
+      <div class="stats">
+        <div class="stat"><div class="lb">存活资产<span class="delta">+46 今日</span></div><div class="v">1,284</div><div class="d">较昨日 +3.7%</div></div>
+        <div class="stat"><div class="lb">运行任务</div><div class="v">6<span class="u">/ 队列 2</span></div><div class="d">全部代理健康</div></div>
+        <div class="stat"><div class="lb">未处理发现<span class="delta hot">严重 2</span></div><div class="v acc">23</div><div class="d">高危 7 · 中危 14</div></div>
+        <div class="stat"><div class="lb">待审批</div><div class="v dan">3</div><div class="d">含 exploit 下发 1</div></div>
+      </div>
+
+      <div class="grid">
+        <section class="panel">
+          <div class="ptitle">任务队列<span class="meta"><span class="live">●</span> 30s 自动刷新</span><span class="link">查看全部 →</span></div>
+          <table>
+            <thead><tr><th>任务</th><th>目标</th><th style="width:180px">进度</th><th>状态</th></tr></thead>
+            <tbody>
+              <tr><td class="tname">nuclei 服务识别</td><td class="ttarget">192.168.8.0/22</td><td><span class="pbar"><i style="width:62%"></i></span><span class="pct">62%</span></td><td><span class="chip run"><i></i>运行中</span></td></tr>
+              <tr><td class="tname">http_probe 存活探测</td><td class="ttarget">3,411 targets</td><td><span class="pbar"><i style="width:81%"></i></span><span class="pct">81%</span></td><td><span class="chip run"><i></i>运行中</span></td></tr>
+              <tr><td class="tname">nmap TOP1000</td><td class="ttarget">10.6.0.0/16</td><td><span class="pbar"><i style="width:34%"></i></span><span class="pct">34%</span></td><td><span class="chip run"><i></i>运行中</span></td></tr>
+              <tr><td class="tname">子域名收集 subspace</td><td class="ttarget">example.com</td><td><span class="pbar done"><i style="width:100%"></i></span><span class="pct">100%</span></td><td><span class="chip done"><i></i>完成</span></td></tr>
+              <tr><td class="tname">dirsearch 目录爆破</td><td class="ttarget">app.example.com</td><td><span class="pbar"><i style="width:0%"></i></span><span class="pct">—</span></td><td><span class="chip que"><i></i>排队</span></td></tr>
+              <tr><td class="tname">fscan 内网段扫描</td><td class="ttarget">10.6.0.0/16</td><td><span class="pbar fail"><i style="width:17%"></i></span><span class="pct">17%</span></td><td><span class="chip fail"><i></i>失败 · 代理断开</span></td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <div class="rcol">
+          <section class="panel">
+            <div class="ptitle">待审批<span class="meta" style="color:var(--danger);font-weight:600">3</span></div>
+            <div class="apv">
+              <div class="t"><span class="kind exp">EXPLOIT</span><b>漏洞利用下发</b></div>
+              <div class="m">app.example.com · SQLi /api/v1/user</div>
+              <div class="act"><button class="btn sm ok">批准</button><button class="btn sm danger">驳回</button></div>
+            </div>
+            <div class="apv">
+              <div class="t"><span class="kind px">PROXY</span><b>拦截请求放行</b></div>
+              <div class="m">POST /admin/export · ops.example.com</div>
+              <div class="act"><button class="btn sm ok">放行</button><button class="btn sm danger">丢弃</button></div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="ptitle">新发现<span class="link">全部 →</span></div>
+            <div class="fd"><span class="sev crit">严重</span><div><div class="t">SQL 注入</div><div class="m">GET /api/v1/user?id=1</div></div><span class="host">app.example.com</span></div>
+            <div class="fd"><span class="sev high">高危</span><div><div class="t">未授权访问</div><div class="m">Actuator /env</div></div><span class="host">ops.example.com</span></div>
+            <div class="fd"><span class="sev high">高危</span><div><div class="t">Redis 弱口令</div><div class="m">6379/tcp requirepass</div></div><span class="host">10.6.2.14</span></div>
+            <div class="fd"><span class="sev mid">中危</span><div><div class="t">.git 目录泄露</div><div class="m">GET /.git/HEAD 200</div></div><span class="host">dev.example.com</span></div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

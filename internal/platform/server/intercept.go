@@ -234,34 +234,38 @@ func (s *Server) interceptListPending(w http.ResponseWriter, r *http.Request) {
 	}
 	fence := guard.NewAssetFence(pg)
 	for i := range pending {
-		s.fillLegacyFenceTarget(fence, &pending[i])
+		s.fillApprovalTargets(fence, &pending[i])
 	}
 	writeJSON(w, 200, map[string]any{"pending": pending})
 }
 
-// fillLegacyFenceTarget 给旧围栏审批记录补出结构化目标(该列上线前的行):
-// 重新提取一次工具输入并回填,让审批页对历史挂起记录也能逐目标勾选。
-func (s *Server) fillLegacyFenceTarget(fence *guard.AssetFence, p *db.InterceptPending) {
+// fillApprovalTargets 补齐审批记录的目标信息(仅改响应内存,不落库):
+//  1. 围栏旧记录(该列上线前):重新提取目标回填 targets,逐目标勾选授权依赖它;
+//  2. 其余记录:按同一提取口径静态解析展示目标到 tool_targets——审批页第一眼
+//     看到的是「命令打谁」,而不是整条原始命令。授权语义不受影响(决定接口
+//     读库里的 targets,不读这里回填的字段)。
+func (s *Server) fillApprovalTargets(fence *guard.AssetFence, p *db.InterceptPending) {
 	if fence == nil || p == nil {
 		return
 	}
-	if len(p.Targets) > 0 || !strings.Contains(p.Reason, "【资产围栏】") {
-		return
+	if len(p.Targets) == 0 && strings.Contains(p.Reason, "【资产围栏】") {
+		domains, ips := fence.PendingTargets(*p)
+		if len(domains) > 0 || len(ips) > 0 {
+			if raw, err := json.Marshal(map[string]any{"domains": domains, "ips": ips}); err == nil {
+				p.Targets = raw
+			}
+		}
 	}
-	domains, ips := fence.PendingTargets(*p)
-	if len(domains) == 0 && len(ips) == 0 {
-		return
-	}
-	if raw, err := json.Marshal(map[string]any{"domains": domains, "ips": ips}); err == nil {
-		p.Targets = raw
+	if len(p.ToolTargets) == 0 && len(p.Targets) == 0 {
+		p.ToolTargets = guard.ToolDisplayTargets(p.ToolName, p.ToolInput)
 	}
 }
 
-// fillLegacyFenceTargetsForRows 是审批历史行列表的批量版本。
-func (s *Server) fillLegacyFenceTargetsForRows(pg *db.DB, rows []db.InterceptApprovalRow) {
+// fillApprovalTargetsForRows 是审批历史行列表的批量版本。
+func (s *Server) fillApprovalTargetsForRows(pg *db.DB, rows []db.InterceptApprovalRow) {
 	fence := guard.NewAssetFence(pg)
 	for i := range rows {
-		s.fillLegacyFenceTarget(fence, &rows[i].InterceptPending)
+		s.fillApprovalTargets(fence, &rows[i].InterceptPending)
 	}
 }
 
@@ -284,12 +288,14 @@ func (s *Server) interceptGetOne(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "not found")
 		return
 	}
+	fence := guard.NewAssetFence(pg)
 	if sc := APIScopeFrom(r.Context()); !sc.Global {
-		if guard.NewAssetFence(pg).PendingProject(*p) != sc.ProjectID {
-			writeErr(w, 404, "not found")
+		if fence.PendingProject(*p) != sc.ProjectID {
+			writeJSON(w, 404, "not found")
 			return
 		}
 	}
+	s.fillApprovalTargets(fence, p)
 	writeJSON(w, 200, p)
 }
 
@@ -321,7 +327,7 @@ func (s *Server) interceptListTaskItems(w http.ResponseWriter, r *http.Request) 
 		if items == nil {
 			items = []db.InterceptApprovalRow{}
 		}
-		s.fillLegacyFenceTargetsForRows(pg, items)
+		s.fillApprovalTargetsForRows(pg, items)
 		writeJSON(w, 200, map[string]any{"items": items, "total": len(items)})
 		return
 	}
@@ -334,7 +340,7 @@ func (s *Server) interceptListTaskItems(w http.ResponseWriter, r *http.Request) 
 	if items == nil {
 		items = []db.InterceptApprovalRow{}
 	}
-	s.fillLegacyFenceTargetsForRows(pg, items)
+	s.fillApprovalTargetsForRows(pg, items)
 	writeJSON(w, 200, map[string]any{"items": items, "total": total, "page": page, "page_size": size})
 }
 
@@ -369,7 +375,7 @@ func (s *Server) interceptListProjectItems(w http.ResponseWriter, r *http.Reques
 	if items == nil {
 		items = []db.InterceptApprovalRow{}
 	}
-	s.fillLegacyFenceTargetsForRows(pg, items)
+	s.fillApprovalTargetsForRows(pg, items)
 	writeJSON(w, 200, map[string]any{"items": items, "total": total, "page": page, "page_size": size})
 }
 
@@ -397,6 +403,7 @@ func (s *Server) interceptHistory(w http.ResponseWriter, r *http.Request) {
 		if items == nil {
 			items = []db.InterceptApprovalRow{}
 		}
+		s.fillApprovalTargetsForRows(pg, items)
 		writeJSON(w, 200, map[string]any{"items": items, "total": len(items)})
 		return
 	}
@@ -409,6 +416,7 @@ func (s *Server) interceptHistory(w http.ResponseWriter, r *http.Request) {
 	if items == nil {
 		items = []db.InterceptApprovalRow{}
 	}
+	s.fillApprovalTargetsForRows(pg, items)
 	writeJSON(w, 200, map[string]any{"items": items, "total": total, "page": page, "page_size": size})
 }
 
@@ -682,9 +690,10 @@ func (s *Server) interceptDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if detail == nil {
-		writeErr(w, 404, "not found")
+		writeJSON(w, 404, "not found")
 		return
 	}
+	s.fillApprovalTargets(guard.NewAssetFence(pg), &detail.InterceptApprovalRow.InterceptPending)
 	writeJSON(w, 200, detail)
 }
 

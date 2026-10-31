@@ -295,10 +295,20 @@ function ModelReviewContext({ input }: { input: InterceptReviewInput }) {
 
 type Decide = (id: number, decision: "allowed" | "denied", targets?: string[]) => Promise<void>;
 
-// targetList 展开审批记录里的结构化目标:域名与 IP 分列(同一条审批可能混合)。
-function targetList(row: InterceptApprovalRow): { value: string; kind: "域名" | "IP" }[] {
+// authTargetList 围栏审批的授权目标(targets 字段 = 未授权子集):决定接口按
+// 它的勾选子集登记 approved 资产。规则/模型审批没有授权语义,恒为空。
+function authTargetList(row: InterceptApprovalRow): { value: string; kind: "域名" | "IP" }[] {
   const domains = (row.targets?.domains ?? []).map((value) => ({ value, kind: "域名" as const }));
   const ips = (row.targets?.ips ?? []).map((value) => ({ value, kind: "IP" as const }));
+  return [...domains, ...ips];
+}
+
+// targetList 展示目标:围栏审批读 targets(待决定的对象);其余审批读服务端
+// 静态提取的 tool_targets——提不出目标(纯本地命令)时为空,展示回退原始命令。
+function targetList(row: InterceptApprovalRow): { value: string; kind: "域名" | "IP" }[] {
+  const t = row.targets ?? row.tool_targets;
+  const domains = (t?.domains ?? []).map((value) => ({ value, kind: "域名" as const }));
+  const ips = (t?.ips ?? []).map((value) => ({ value, kind: "IP" as const }));
   return [...domains, ...ips];
 }
 
@@ -376,10 +386,11 @@ function TargetCell({ row }: { row: InterceptApprovalRow }) {
   );
 }
 
-// StaticTargets 已决记录的授权目标静态展示:对象是谁一目了然,不再渲染
-// 勾选框(已决记录的勾选不产生任何效果)。
+// StaticTargets 已决围栏记录的授权目标静态展示:对象是谁一目了然,不再渲染
+// 勾选框(已决记录的勾选不产生任何效果)。只认 targets;tool_targets 是展示
+// 字段,已由对象列与命令内容覆盖。
 function StaticTargets({ row }: { row: InterceptApprovalRow }) {
-  const targets = targetList(row);
+  const targets = authTargetList(row);
   if (!targets.length) return null;
   return (
     <section className="flex min-w-0 flex-col gap-2" aria-label="授权目标">
@@ -407,7 +418,7 @@ function FenceTargets({
   selected: Set<string>;
   onChange: (next: Set<string>) => void;
 }) {
-  const targets = targetList(row);
+  const targets = authTargetList(row);
   if (!targets.length) return null;
   const allSelected = targets.every((t) => selected.has(t.value));
   const toggle = (value: string) => {
@@ -461,7 +472,7 @@ function DecisionActions({
   selected: Set<string>;
 }) {
   if (row.status !== "pending") return null;
-  const hasTargets = targetList(row).length > 0;
+  const hasTargets = authTargetList(row).length > 0;
   return (
     <div className="flex flex-wrap gap-2">
       <Button
@@ -503,15 +514,15 @@ export function ApprovalDetail({
   const [more, setMore] = React.useState(defaultExpanded);
   // 围栏审批的逐目标授权选择;默认全选,记录变化时重置。用值签名做依赖,
   // 5s 轮询重建的对象不会把用户已取消的勾选冲掉。
-  const targetsKey = targetList(row)
+  const targetsKey = authTargetList(row)
     .map((t) => t.value)
     .join("\u0000");
   const [selectedTargets, setSelectedTargets] = React.useState<Set<string>>(
-    () => new Set(targetList(row).map((t) => t.value)),
+    () => new Set(authTargetList(row).map((t) => t.value)),
   );
   // biome-ignore lint/correctness/useExhaustiveDependencies: row.id/targetsKey 变化才重置勾选。
   React.useEffect(() => {
-    setSelectedTargets(new Set(targetList(row).map((t) => t.value)));
+    setSelectedTargets(new Set(authTargetList(row).map((t) => t.value)));
   }, [row.id, targetsKey]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: Status, refresh and retry invalidate details without closing the panel.
@@ -554,23 +565,31 @@ export function ApprovalDetail({
     <div className="flex min-w-0 flex-col gap-4 p-3 sm:p-5">
       <div className="grid min-w-0 gap-5 rounded-xl border bg-muted/20 p-4 lg:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-3">
-          <CodeBlock
-            label={`${current.agent_name || current.conv_agent_key || "Agent"} · 工具请求`}
-            text={JSON.stringify(row.tool_input ?? {}, null, 2)}
-          />
+          {/* 命令是给人看的,放最前;完整 JSON 是排错用的,收进折叠。 */}
           {command ? (
-            <Collapsible>
-              <CollapsibleTrigger asChild>
-                <Button variant="ghost" size="sm">
-                  <ChevronDownIcon data-icon="inline-start" />
-                  查看命令内容
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="pt-2">
-                <CodeBlock label="命令内容" text={command} />
-              </CollapsibleContent>
-            </Collapsible>
-          ) : null}
+            <>
+              <CodeBlock label="命令内容" text={command} />
+              <Collapsible>
+                <CollapsibleTrigger asChild>
+                  <Button variant="ghost" size="sm">
+                    <ChevronDownIcon data-icon="inline-start" />
+                    查看完整工具请求
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-2">
+                  <CodeBlock
+                    label={`${current.agent_name || current.conv_agent_key || "Agent"} · 工具请求`}
+                    text={JSON.stringify(row.tool_input ?? {}, null, 2)}
+                  />
+                </CollapsibleContent>
+              </Collapsible>
+            </>
+          ) : (
+            <CodeBlock
+              label={`${current.agent_name || current.conv_agent_key || "Agent"} · 工具请求`}
+              text={JSON.stringify(row.tool_input ?? {}, null, 2)}
+            />
+          )}
           <p className="text-muted-foreground text-xs">
             执行结果：<span className="text-foreground">{detail ? execution : "加载中…"}</span>
           </p>
@@ -867,6 +886,156 @@ function ApprovalTable({
   );
 }
 
+// 待处理队列列存活:常显 展开/目标/操作 3 列,sm 补工具,md 补来源,lg 补申请时间。
+function visiblePendingColumnCount() {
+  const matches = approvalBreakpoints.map((query) => window.matchMedia(query).matches);
+  return 3 + Number(matches[0]) + Number(matches[1]) + Number(matches[2]);
+}
+function serverPendingColumnCount() {
+  return 6;
+}
+
+// PendingTable 待审批决定队列:目标列最前,行内直接允许/拒绝——不展开就能
+// 拍板。需要逐目标授权(围栏审批)或上下文时再展开详情。行内「允许」按全部
+// 授权目标放行(与详情里默认全选一致);部分授权走展开详情。
+function PendingTable({
+  rows,
+  busy,
+  decide,
+  revision,
+  label,
+}: {
+  rows: InterceptApprovalRow[];
+  busy: boolean;
+  decide: Decide;
+  revision: number;
+  label: string;
+}) {
+  const [expanded, setExpanded] = React.useState<Set<number>>(() => new Set());
+  const columns = React.useSyncExternalStore(subscribeColumns, visiblePendingColumnCount, serverPendingColumnCount);
+  const prefix = React.useId();
+  function toggle(id: number) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  return (
+    <Table className="table-fixed" aria-label={label}>
+      <TableHeader>
+        <TableRow>
+          <TableHead className="w-10">
+            <span className="sr-only">展开详情</span>
+          </TableHead>
+          <TableHead>目标</TableHead>
+          <TableHead className="hidden w-28 sm:table-cell">工具</TableHead>
+          <TableHead className="hidden w-36 md:table-cell">来源</TableHead>
+          <TableHead className="hidden w-36 lg:table-cell">申请时间</TableHead>
+          <TableHead className="w-36 text-right">操作</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((row) => {
+          const open = expanded.has(row.id);
+          const panelID = `${prefix}-${row.id}`;
+          const authTargets = authTargetList(row);
+          return (
+            <React.Fragment key={row.id}>
+              <TableRow
+                data-state={open ? "selected" : undefined}
+                className="cursor-pointer"
+                onClick={() => toggle(row.id)}
+              >
+                <TableCell>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`${open ? "收起" : "展开"}审批 #${row.id}`}
+                    aria-expanded={open}
+                    aria-controls={open ? panelID : undefined}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggle(row.id);
+                    }}
+                  >
+                    {open ? <ChevronDownIcon /> : <ChevronRightIcon />}
+                  </Button>
+                </TableCell>
+                <TableCell>
+                  <TargetCell row={row} />
+                </TableCell>
+                <TableCell className="hidden sm:table-cell">
+                  <div className="flex flex-col gap-1">
+                    <code className="block truncate text-xs">{row.tool_name}</code>
+                    <MatchLabel row={row} />
+                  </div>
+                </TableCell>
+                <TableCell className="hidden md:table-cell">
+                  <div className="flex flex-col gap-1">
+                    <span className="truncate" title={originLabel(row)}>
+                      <ApprovalOrigin row={row} />
+                    </span>
+                    <span className="truncate text-muted-foreground text-xs">
+                      {row.agent_name || row.conv_agent_key}
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell className="hidden text-muted-foreground text-xs lg:table-cell">
+                  {fmtTime(row.created_at)}
+                </TableCell>
+                <TableCell className="text-right">
+                  <div className="flex justify-end gap-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy}
+                      title={authTargets.length ? "允许执行，并把全部目标登记为已批准资产（后续不再询问）" : undefined}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void decide(
+                          row.id,
+                          "allowed",
+                          authTargets.length ? authTargets.map((t) => t.value) : undefined,
+                        );
+                      }}
+                    >
+                      <CheckIcon className="text-success" />
+                      允许
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void decide(row.id, "denied");
+                      }}
+                    >
+                      <XIcon className="text-destructive" />
+                      拒绝
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+              {open ? (
+                <TableRow className="hover:bg-transparent has-aria-expanded:bg-transparent">
+                  <TableCell colSpan={columns} className="whitespace-normal p-0">
+                    <section id={panelID} aria-label={`审批详情 #${row.id}`}>
+                      <ApprovalDetail row={row} busy={busy} decide={decide} revision={revision} />
+                    </section>
+                  </TableCell>
+                </TableRow>
+              ) : null}
+            </React.Fragment>
+          );
+        })}
+      </TableBody>
+    </Table>
+  );
+}
+
 // approvalsTitle 审批页标题随作用域变化(项目页 / 任务页共用同一组件)。
 function approvalsTitle(taskId?: string, projectId?: number) {
   if (projectId) return "项目审批";
@@ -1100,9 +1269,9 @@ export function ApprovalRecords({ taskId, projectId }: { taskId?: string; projec
         <section className="overflow-hidden rounded-xl border">
           <div className="flex items-center gap-2 border-b bg-muted/40 px-4 py-3 font-medium text-sm">
             <ShieldAlertIcon className="size-4" />
-            待处理（{pending.length}）<span className="text-muted-foreground text-xs">展开后允许或拒绝</span>
+            待处理（{pending.length}）
           </div>
-          <ApprovalTable rows={pending} busy={deciding} decide={decide} revision={revision} label="待处理审批" />
+          <PendingTable rows={pending} busy={deciding} decide={decide} revision={revision} label="待处理审批" />
         </section>
       ) : null}
       <section className="overflow-hidden rounded-xl border">

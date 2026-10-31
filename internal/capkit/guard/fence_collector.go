@@ -63,6 +63,15 @@ func (c *fenceCollector) addHost(raw string) {
 		}
 		return
 	}
+	// user@host 剥离要在无点分支之前：root@gitlab-intranet 这类单段内网名
+	// 此前先落进无点分支被整段丢弃（@ 不是合法 label 字符）。
+	raw = strings.TrimPrefix(raw, "@")
+	if i := strings.Index(raw, "@"); i >= 0 {
+		raw = raw[i+1:]
+	}
+	if raw == "" {
+		return
+	}
 	// 裸 IPv6（可带方括号）：在 host:port 解析前接住，避免被冒号拆分。
 	if strings.Contains(raw, ":") {
 		if ip := net.ParseIP(strings.Trim(raw, "[]")); ip != nil && ip.To4() == nil {
@@ -82,10 +91,6 @@ func (c *fenceCollector) addHost(raw string) {
 		return
 	}
 	// host:port / user@host(:port) / host:port:...
-	raw = strings.TrimPrefix(raw, "@")
-	if i := strings.Index(raw, "@"); i >= 0 {
-		raw = raw[i+1:]
-	}
 	if h, _, err := net.SplitHostPort(raw); err == nil {
 		raw = h
 	} else if i := strings.LastIndexByte(raw, ':'); i > 0 && allDigits(raw[i+1:]) {
@@ -126,6 +131,33 @@ func (c *fenceCollector) addHost(raw string) {
 	if validFenceDomain(raw) {
 		c.addDomain(raw)
 		return
+	}
+}
+
+// addPositionalTarget 收命令的**位置参数**。位置参数里混着大量非目标词——
+// 服务名（hydra … ssh）、子命令（amass enum / gobuster dir）、用户名
+// （psql -U postgres）、标签值（nuclei -tags cve）——裸单词几乎总是这些，
+// 不是主机名，一律不收（宁漏勿扰，与 fence 头注释口径一致）。只有带点的
+// 形态（域名/IP/CIDR）与 URL 形态才算目标；无点的 IP 变体（16909060/
+// 0x7f000001）仍收——那是 fail-closed 的刻意覆盖。显式目标位（ssh 的
+// host 参数、openssl -connect、-u/--url 的值、URL host）继续走 addHost，
+// 单段内网名在那里仍然有效。
+func (c *fenceCollector) addPositionalTarget(raw string) {
+	if raw == "" {
+		return
+	}
+	// 先代入变量再判形态:dig +short "$d"(d=target.example.com) 的目标在
+	// 变量里,代入前看不到点。addHost 内部会再代入一次,幂等。
+	s := strings.TrimSpace(substituteVars(raw, c.vars))
+	if s == "" {
+		return
+	}
+	if strings.Contains(s, "://") || strings.HasPrefix(s, "//") || strings.Contains(s, ".") || strings.Contains(s, ":") {
+		c.addHost(s)
+		return
+	}
+	if suspiciousIPVariant(s) {
+		addIPVariant(s, c.addIP)
 	}
 }
 

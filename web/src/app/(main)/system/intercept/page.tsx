@@ -735,7 +735,13 @@ export default function InterceptPage() {
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center justify-end gap-0.5">
-                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(rule)}>
+                            <Button
+                              aria-label="编辑规则"
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7"
+                              onClick={() => openEdit(rule)}
+                            >
                               <PencilIcon className="h-3.5 w-3.5" />
                             </Button>
                             <Button

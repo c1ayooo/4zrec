@@ -65,6 +65,7 @@ import type {
   FingerprintSource,
   FingerprintStatus,
   FingerprintSyncJob,
+  ImBotSettingsInput,
   IntelAnalysis,
   IntelDraft,
   IntelKey,
@@ -954,6 +955,8 @@ export const api = {
   // ---- app settings (runtime toggles) ----
   settings: () => get<Settings>(`/settings`),
   setSettings: (patch: Partial<Settings>) => put<Settings>(`/settings`, patch),
+  // IM 接入网关配置（写入形状与回显形状不同：密钥 write-only）。保存即热更各平台循环。
+  setIMBot: (patch: ImBotSettingsInput) => put<Settings>(`/settings`, { im_bot: patch }),
   // 项目内 nuclei 二进制/模板状态（只读，不触发下载）。
   nucleiStatus: () => get<NucleiStatus>(`/nuclei/status`),
   nucleiTemplates: (
@@ -1220,7 +1223,12 @@ export const api = {
   conversationMsgDetail: (id: number, seq: number) =>
     get<{ detail: string }>(`/conversations/${id}/messages/${seq}`).then((r) => r.detail ?? ""),
   sendConversationMessage: (id: number, message: string, attachments?: ChatAttachment[]) =>
-    post<{ status: string }>(`/conversations/${id}/messages`, { message, attachments }),
+    // status=handled 是斜杠命令（/bond /new）——平台直接处理不经 LLM；
+    // new_conversation_id 由 /new 返回，前端收到后切到新会话。
+    post<{ status: string; new_conversation_id?: number }>(`/conversations/${id}/messages`, {
+      message,
+      attachments,
+    }),
   stopConversation: (id: number) => post<{ status: string }>(`/conversations/${id}/stop`, {}),
   saveAgentPrompt: (key: string, template: string, note = "") =>
     put<{ version: number }>(`/agents/${key}/prompt`, { template, note }),

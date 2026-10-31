@@ -254,6 +254,22 @@ function InterceptCard({ step, getDetail }: { step: Activity; getDetail: (seq: n
   }
 
   const inputStr = detail?.input ? JSON.stringify(detail.input).slice(0, 200) : null;
+  // 目标优先:审批只关心「命令打谁」。围栏审批读 targets,其余读服务端提取的
+  // tool_targets;都还没到时回退命令/URL,最后才退原始 JSON。
+  const targetPreview = (() => {
+    if (pending) {
+      const t = pending.targets ?? pending.tool_targets;
+      const list = [...(t?.domains ?? []), ...(t?.ips ?? [])];
+      if (list.length) return list.join("、");
+    }
+    if (detail?.input && typeof detail.input === "object") {
+      for (const key of ["command", "url"]) {
+        const v = (detail.input as Record<string, unknown>)[key];
+        if (typeof v === "string" && v.trim()) return v;
+      }
+    }
+    return inputStr;
+  })();
 
   const row = pending
     ? { ...pending, status: decided || pending.status, conv_title: "", conv_agent_key: "", rule_name: "" }
@@ -270,7 +286,11 @@ function InterceptCard({ step, getDetail }: { step: Activity; getDetail: (seq: n
               <code className="rounded bg-warning/15 px-1 font-mono text-warning">{toolName}</code>
               {pendingId && <span className="text-muted-foreground">#{pendingId}</span>}
             </div>
-            {inputStr && <p className="font-mono text-muted-foreground truncate">{inputStr}</p>}
+            {targetPreview && (
+              <p className="max-w-[48rem] truncate font-mono text-muted-foreground" title={targetPreview}>
+                {targetPreview}
+              </p>
+            )}
           </div>
         </div>
 

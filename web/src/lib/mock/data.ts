@@ -3437,6 +3437,8 @@ export const interceptPending: InterceptPending[] = [
     tool_input: { command: "mysqldump -h 203.0.113.10 -uroot northstar_prod > /tmp/dump.sql" },
     status: "pending",
     reason: "数据外泄门控：整库导出需人工审批",
+    // 服务端静态提取的展示目标(演示规则/模型审批的 tool_targets)。
+    tool_targets: { ips: ["203.0.113.10"] },
     created_at: T("2026-07-26T03:58:00Z"),
   },
 ];
@@ -3513,6 +3515,43 @@ interceptHistory.unshift({
   reason: "[模型] 将已有检查结论写入本地报告，不修改业务数据。",
   created_at: T("2026-07-26T08:00:00Z"),
   decided_at: T("2026-07-26T08:00:02Z"),
+  conv_title: "",
+  conv_agent_key: "",
+  rule_name: "",
+});
+
+// 围栏 ask 演示:结构化 targets(未授权子集)驱动逐目标授权。
+interceptHistory.unshift({
+  id: 102,
+  task_id: "t-northstar-api",
+  agent_name: "work#2",
+  tool_name: "bash",
+  tool_input: {
+    command:
+      "nuclei -l new-scope.txt -t cves/2023/ -u https://api.northstar-app.example and curl -s http://198.51.100.7/",
+  },
+  status: "pending",
+  reason:
+    "【资产围栏】目标资产不在项目授权范围内：api.northstar-app.example、198.51.100.7。若确属本次委托范围，请批准；否则请拒绝并改测授权内资产。",
+  targets: { domains: ["api.northstar-app.example"], ips: ["198.51.100.7"] },
+  created_at: T("2026-07-26T04:10:00Z"),
+  conv_title: "",
+  conv_agent_key: "",
+  rule_name: "",
+});
+
+// 模型 ask 演示:tool_targets 展示目标,审批页第一眼看到「命令打谁」。
+interceptHistory.unshift({
+  id: 103,
+  task_id: "t-northstar-web",
+  agent_name: "work#5",
+  tool_name: "WebFetch",
+  tool_input: { url: "https://docs.northstar-vendor.example/setup.html" },
+  status: "pending",
+  decision_source: "model",
+  reason: "[模型] 访问目标厂商文档站读取配置说明（只读请求）",
+  tool_targets: { domains: ["docs.northstar-vendor.example"] },
+  created_at: T("2026-07-26T04:12:00Z"),
   conv_title: "",
   conv_agent_key: "",
   rule_name: "",

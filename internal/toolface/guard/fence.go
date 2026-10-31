@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 
@@ -113,6 +114,20 @@ func fenceToolTargets(toolName string, input []byte, workDir string) fenceTarget
 	return fenceTargets{Domains: r.Domains, IPs: r.IPs, Opaque: r.Opaque, Reason: r.Reason}
 }
 
+// ToolDisplayTargets 按同一提取口径静态解析工具输入里的目标对象，返回
+// {"domains":[...],"ips":[...]}；提不出目标时返回 nil。
+//
+// 仅供审批展示（「这条命令打谁」）：规则/模型审批没有围栏的结构化 targets，
+// 审批页只能展示原始命令；用它补出展示目标。不落库、不参与授权判定——
+// 决定接口的勾选授权只认落库的 Targets（围栏未授权子集）。
+func ToolDisplayTargets(toolName string, input []byte) json.RawMessage {
+	t := fenceToolTargets(toolName, input, "")
+	if t.empty() {
+		return nil
+	}
+	return t.payload()
+}
+
 // IsPublicInfraIP 报告 ip 是否是公共基础设施地址（公共 DNS 解析器等）。
 // 表本体已随提取逻辑上收 capkit（guard.IsPublicInfraIP）；空间测绘导入等
 // 旁路继续经本别名消费。
@@ -193,6 +208,19 @@ func (f *AssetFence) evaluate(ctx context.Context, toolName string, input []byte
 		}
 	}
 	if targets.Opaque {
+		// Opaque=对象可能不完整（动态构造、运行时拼接）。但文本里可静态提取的
+		// 字面目标若全部落在授权范围内，人工裁决没有增量价值——放行并留痕；
+		// 一个字面目标都提不出来时维持 fail-closed 转人工（2026-10-29：修复
+		// heredoc 写死授权 IP 的脚本被一律转人工的误伤）。
+		if !targets.empty() && f.dbh.AuthorizedTarget(projectID, targets.Domains, targets.IPs) {
+			// 自动放行留痕：审计上与「本来就在范围内」的常规放行区分开，
+			// 排查「它为什么没问我」时能一眼看到判定依据。
+			log.Printf("[fence] Opaque 自动放行: domains=%v ips=%v (%s)", targets.Domains, targets.IPs, targets.Reason)
+			return fenceDecision{
+				ProjectID: projectID, Targets: targets, Allow: true,
+				Reason: "Opaque 命令，但全部字面目标均在授权范围内，自动放行",
+			}
+		}
 		return fenceDecision{
 			ProjectID: projectID, Targets: targets, Opaque: true,
 			Reason: targets.Reason,

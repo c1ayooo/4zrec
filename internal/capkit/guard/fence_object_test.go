@@ -58,9 +58,12 @@ func TestFenceCommandObjectExtraction(t *testing.T) {
 			opaque: true,
 		},
 		{
-			name:   "ssh 远程命令联网 fail-closed",
-			cmd:    `ssh host 'curl -s http://evil.example.com'`,
-			opaque: true,
+			// 2026-10-29 字面兜底扫描后：Opaque 仍成立，但可见目标要带出
+			// （围栏据此判「全部字面目标已授权→放行」/黑名单命中→硬阻断）。
+			name:    "ssh 远程命令联网 fail-closed",
+			cmd:     `ssh host 'curl -s http://evil.example.com'`,
+			domains: []string{"evil.example.com"},
+			opaque:  true,
 		},
 		{
 			name:    "ssh 本地远程命令不 Opaque",
@@ -68,9 +71,10 @@ func TestFenceCommandObjectExtraction(t *testing.T) {
 			domains: []string{"db01.prod"},
 		},
 		{
-			name:   "ssh ProxyCommand fail-closed",
-			cmd:    `ssh -o ProxyCommand='curl http://evil.example.com' host`,
-			opaque: true,
+			name:    "ssh ProxyCommand fail-closed",
+			cmd:     `ssh -o ProxyCommand='curl http://evil.example.com' host`,
+			domains: []string{"evil.example.com"},
+			opaque:  true,
 		},
 		{
 			name:    "解释器内联代码中的 URL 提取",
@@ -92,9 +96,11 @@ func TestFenceCommandObjectExtraction(t *testing.T) {
 			opaque: true,
 		},
 		{
-			name:   "未知命令 fail-closed",
+			// 未知命令无网络特征 → 按本地放行、不产出目标（字面兜底只对
+			// Opaque 结果补偿，结构化提取可信时不做全域扫，防版本号误收）。
+			name:   "未知命令无网络特征按本地放行",
 			cmd:    `mytool 1.2.3.4`,
-			opaque: true,
+			opaque: false,
 		},
 		{
 			name: "裸 IPv6 目标",

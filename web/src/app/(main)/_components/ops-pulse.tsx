@@ -45,12 +45,13 @@ export function OpsPulse({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "flex h-8 shrink-0 items-center gap-4 border-b px-4 text-muted-foreground text-xs lg:px-6",
+        "mx-4 mt-2.5 flex h-9 shrink-0 items-center gap-4 overflow-hidden rounded-full border bg-card px-4 text-muted-foreground text-xs shadow-xs md:mx-6",
         className,
       )}
     >
       {known && running ? (
-        <span className="flex min-w-0 items-center gap-1.5">
+        // flex-1 + truncate：任务名独占剩余宽度并截断，右侧条目因此永远不会被压窄折行。
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-success" />
           <span className="truncate text-foreground">{running}</span>
         </span>
@@ -64,7 +65,7 @@ export function OpsPulse({ className }: { className?: string }) {
       {interceptPending > 0 ? (
         <Link
           href="/system/intercept/approvals"
-          className="flex items-center gap-1 tabular-nums transition-colors hover:text-foreground"
+          className="flex shrink-0 items-center gap-1 whitespace-nowrap tabular-nums transition-colors hover:text-foreground"
         >
           拦截待审批 {interceptPending}
         </Link>
@@ -72,12 +73,14 @@ export function OpsPulse({ className }: { className?: string }) {
       {assetPending > 0 ? (
         <Link
           href="/function/approvals"
-          className="flex items-center gap-1 tabular-nums transition-colors hover:text-foreground"
+          className="flex shrink-0 items-center gap-1 whitespace-nowrap tabular-nums transition-colors hover:text-foreground"
         >
           资产待审批 {assetPending}
         </Link>
       ) : null}
-      {llm != null && <span className="ml-auto tabular-nums">{llm ? "LLM 就绪" : "LLM 未配置"}</span>}
+      {llm != null && (
+        <span className="ml-auto shrink-0 whitespace-nowrap tabular-nums">{llm ? "LLM 就绪" : "LLM 未配置"}</span>
+      )}
     </div>
   );
 }

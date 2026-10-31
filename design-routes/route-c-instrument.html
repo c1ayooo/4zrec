@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>路线 C · 仪器面板 INSTRUMENT — 4zrec 设计打样</title>
+<style>
+:root{
+  --bg:#f2f1ee;            /* 暖浅灰机身 */
+  --surface:#fbfaf8;
+  --white:#ffffff;
+  --line:#ddd9d1;
+  --line-2:#e9e6df;
+  --ink:#16150f;
+  --muted:#6d6a5f;
+  --faint:#9d9a8d;
+  --amber:#e8890c;         /* 仪器橙 */
+  --amber-deep:#c56e02;
+  --amber-soft:#fdf1e3;
+  --led-ok:#3fae6e;
+  --led-warn:#e0a30c;
+  --led-err:#d94f3e;
+  --panel-dark:#1b1c18;    /* 仪器深面板（侧栏/读出窗） */
+  --panel-dark-2:#24251f;
+  --lcd-ink:#f2b45c;       /* LCD 琥珀字 */
+  --lcd-dim:#8d8570;
+  --sans:-apple-system,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+  --mono:"JetBrains Mono","SF Mono",ui-monospace,Consolas,monospace;
+  --sh:0 1px 2px rgba(22,21,15,.06);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{font:13px/1.6 var(--sans);color:var(--ink);background:var(--bg);overflow:hidden;-webkit-font-smoothing:antialiased}
+.app{display:flex;height:100vh}
+
+/* ── 侧栏：仪器深面板 ─────────────── */
+.side{width:220px;flex:none;background:var(--panel-dark);display:flex;flex-direction:column}
+.brand{padding:18px 16px 14px;border-bottom:1px solid #2e2f28;display:flex;align-items:center;gap:10px}
+.brand .lamp{width:10px;height:10px;border-radius:50%;background:var(--amber);box-shadow:0 0 8px rgba(232,137,12,.7)}
+.brand b{color:#f0efe9;font-size:14px;letter-spacing:.04em}
+.brand span{margin-left:auto;font:9.5px var(--mono);color:var(--lcd-dim)}
+nav{flex:1;overflow:auto;padding:10px}
+.grp{margin:14px 8px 5px;font:9.5px var(--mono);letter-spacing:.24em;color:#6f7168}
+.itm{display:flex;align-items:center;gap:9px;padding:6px 11px;color:#a4a69c;cursor:pointer;font-size:13px;border-radius:6px}
+.itm:hover{color:#e8e7df;background:var(--panel-dark-2)}
+.itm.on{color:#f6f5ef;background:var(--panel-dark-2);box-shadow:inset 3px 0 0 var(--amber)}
+.itm .led{width:6px;height:6px;border-radius:50%;background:#3c3e35;flex:none}
+.itm .led.on{background:var(--led-ok);box-shadow:0 0 5px rgba(63,174,110,.8)}
+.itm .k{margin-left:auto;font:10.5px var(--mono);color:#6f7168}
+.itm .k.hot{color:var(--amber)}
+.side-foot{padding:12px 16px;border-top:1px solid #2e2f28;font:10px var(--mono);color:#6f7168}
+
+/* ── 主区 ─────────────────────────── */
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.top{height:48px;flex:none;display:flex;align-items:center;gap:14px;padding:0 18px;background:var(--white);border-bottom:1px solid var(--line)}
+.crumb{font-size:13.5px;font-weight:600}
+.crumb small{font-weight:400;color:var(--muted);margin-left:8px}
+.top .grow{flex:1}
+.btn{font:12.5px/1 var(--sans);font-weight:600;height:31px;padding:0 16px;border-radius:8px;cursor:pointer;border:1px solid var(--line);background:var(--white);color:var(--ink)}
+.btn:hover{border-color:var(--faint)}
+.btn.primary{background:var(--amber);border-color:var(--amber);color:#fff}
+.btn.primary:hover{background:var(--amber-deep)}
+.btn.sm{height:26px;font-size:12px;padding:0 12px}
+.btn.sm.ok{background:var(--ink);border-color:var(--ink);color:#f6f5ef}
+.btn.sm.ok:hover{background:#000}
+.btn.sm.danger{background:none;color:var(--led-err);border-color:#eac0ba}
+.btn.sm.danger:hover{background:#fbeae7}
+
+/* LCD 读出条 */
+.lcdstrip{flex:none;display:flex;gap:10px;margin:14px 18px 0;padding:10px 12px;background:var(--panel-dark);border-radius:10px}
+.lcd{display:flex;align-items:baseline;gap:8px;padding:4px 12px;background:#121310;border-radius:6px;font:12px var(--mono)}
+.lcd .lb{color:var(--lcd-dim);font-size:9.5px;letter-spacing:.18em}
+.lcd .val{color:var(--lcd-ink);font-weight:600;font-size:14px;font-variant-numeric:tabular-nums;text-shadow:0 0 8px rgba(242,180,92,.35)}
+.lcd .val.small{font-size:12px}
+.lcd .seg{margin-left:auto}
+.lcd.wide{flex:1}
+.livekey{display:inline-flex;align-items:center;gap:6px}
+.livekey i{width:7px;height:7px;border-radius:50%;background:var(--led-ok);box-shadow:0 0 6px rgba(63,174,110,.9);animation:pd 1.6s infinite}
+@keyframes pd{50%{opacity:.35}}
+.clock{color:var(--lcd-ink);text-shadow:0 0 8px rgba(242,180,92,.3)}
+
+.content{flex:1;overflow:auto;padding:16px 18px 24px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}
+.stat{background:var(--white);border:1px solid var(--line);border-radius:10px;padding:13px 15px;box-shadow:var(--sh);position:relative}
+.stat .lb{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--muted)}
+.stat .lb .led{width:6px;height:6px;border-radius:50%;background:var(--line)}
+.stat .lb .led.g{background:var(--led-ok)}
+.stat .lb .led.a{background:var(--amber)}
+.stat .lb .led.r{background:var(--led-err)}
+.stat .v{margin-top:7px;font:700 27px/1 var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.stat .v .u{font:500 12px var(--sans);color:var(--faint);margin-left:2px}
+.stat .v.a{color:var(--amber-deep)}
+.stat .v.r{color:var(--led-err)}
+.stat .d{margin-top:5px;font-size:11px;color:var(--faint)}
+
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 346px;gap:10px;align-items:start}
+.rcol{display:grid;gap:10px}
+.panel{background:var(--white);border:1px solid var(--line);border-radius:10px;box-shadow:var(--sh);overflow:hidden}
+.ptitle{display:flex;align-items:center;gap:9px;padding:11px 15px;border-bottom:1px solid var(--line-2);font-size:13px;font-weight:700}
+.ptitle .plate{font:700 9.5px var(--mono);letter-spacing:.12em;color:#fff;background:var(--ink);border-radius:4px;padding:2.5px 7px}
+.ptitle .meta{margin-left:auto;font:10.5px var(--mono);color:var(--faint)}
+.link{margin-left:12px;font-size:12px;font-weight:500;color:var(--amber-deep);cursor:pointer}
+.link:hover{text-decoration:underline}
+
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;padding:8px 15px;font:10px var(--mono);letter-spacing:.16em;color:var(--faint);border-bottom:1px solid var(--line-2)}
+td{padding:9px 15px;border-bottom:1px solid var(--line-2);font-variant-numeric:tabular-nums}
+tbody tr{cursor:pointer}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover{background:#f6f4ef}
+.tname{font-weight:500}
+.ttarget{font:11.5px var(--mono);color:var(--muted)}
+.pbar{width:104px;height:6px;border-radius:3px;background:var(--line-2);position:relative;overflow:hidden;display:inline-block;vertical-align:middle;border:1px solid var(--line)}
+.pbar i{position:absolute;inset:0;right:auto;background:repeating-linear-gradient(90deg,var(--ink) 0 6px,transparent 6px 8px)}
+.pbar.done i{background:var(--led-ok)}
+.pbar.fail i{background:var(--led-err)}
+.pct{font:11px var(--mono);color:var(--muted);margin-left:8px}
+.st{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:500;white-space:nowrap}
+.st .led{width:7px;height:7px;border-radius:50%}
+.st.run .led{background:var(--led-ok);box-shadow:0 0 5px rgba(63,174,110,.7);animation:pd 1.6s infinite}
+.st.done{color:var(--muted)}
+.st.done .led{background:var(--faint)}
+.st.que{color:var(--faint)}
+.st.que .led{background:var(--line)}
+.st.fail{color:var(--led-err)}
+.st.fail .led{background:var(--led-err)}
+
+/* 审批 */
+.apv{padding:12px 15px;border-bottom:1px solid var(--line-2)}
+.apv:last-child{border-bottom:none}
+.apv .t{display:flex;gap:8px;align-items:center;font-size:13px}
+.apv .t b{font-weight:600}
+.kind{font:700 9.5px var(--mono);letter-spacing:.1em;padding:2.5px 8px;border-radius:5px}
+.kind.exp{color:#fff;background:var(--led-err)}
+.kind.px{color:#fff;background:var(--amber-deep)}
+.apv .m{margin-top:4px;font:11.5px var(--mono);color:var(--muted)}
+.apv .act{margin-top:9px;display:flex;gap:8px}
+
+/* 发现 */
+.fd{display:flex;gap:10px;padding:11px 15px;border-bottom:1px solid var(--line-2);align-items:flex-start}
+.fd:last-child{border-bottom:none}
+.fd:hover{background:#f6f4ef}
+.sev{flex:none;font:600 11px var(--sans);height:21px;display:inline-flex;align-items:center;gap:6px;padding:0 9px;border-radius:6px;border:1px solid}
+.sev.crit{color:var(--led-err);border-color:#eac0ba;background:#fbeae7}
+.sev.high{color:var(--amber-deep);border-color:#f0d3ae;background:var(--amber-soft)}
+.sev.mid{color:#56606e;border-color:var(--line);background:var(--line-2)}
+.fd .t{font-size:13px;font-weight:500}
+.fd .m{font:11.5px var(--mono);color:var(--muted);margin-top:1px}
+.fd .host{margin-left:auto;font:10.5px var(--mono);color:var(--faint);white-space:nowrap;padding-top:3px}
+
+::-webkit-scrollbar{width:8px}
+::-webkit-scrollbar-thumb{background:#cfcbc2;border-radius:4px}
+::-webkit-scrollbar-track{background:transparent}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <aside class="side">
+    <div class="brand"><span class="lamp"></span><b>4zrec</b><span>v0.5.2</span></div>
+    <nav>
+      <div class="grp">导航</div>
+      <div class="itm on"><span class="led on"></span>仪表盘</div>
+      <div class="itm"><span class="led"></span>对话</div>
+      <div class="itm"><span class="led"></span>任务</div>
+      <div class="itm"><span class="led"></span>发现</div>
+      <div class="itm"><span class="led"></span>项目</div>
+      <div class="grp">信息收集</div>
+      <div class="itm"><span class="led"></span>子域名</div>
+      <div class="itm"><span class="led"></span>端口服务</div>
+      <div class="itm"><span class="led"></span>指纹</div>
+      <div class="grp">连接管理</div>
+      <div class="itm"><span class="led on"></span>SSH 会话</div>
+      <div class="itm"><span class="led"></span>代理池</div>
+      <div class="grp">流量与执行</div>
+      <div class="itm"><span class="led"></span>流量回放</div>
+      <div class="itm"><span class="led on"></span>拦截审批<span class="k hot">3</span></div>
+      <div class="grp">系统管理</div>
+      <div class="itm"><span class="led"></span>LLM 配置</div>
+      <div class="itm"><span class="led"></span>成员</div>
+    </nav>
+    <div class="side-foot">OPERATOR c1ay · PWR ON</div>
+  </aside>
+
+  <div class="main">
+    <header class="top">
+      <div class="crumb">仪表盘<small>hq-dc 项目</small></div>
+      <span class="grow"></span>
+      <button class="btn primary">＋ 新建任务</button>
+    </header>
+
+    <div class="lcdstrip">
+      <div class="lcd"><span class="livekey"><i></i></span><span class="lb">LIVE</span></div>
+      <div class="lcd"><span class="lb">TASKS</span><span class="val">06</span><span class="lb">RUN</span></div>
+      <div class="lcd"><span class="lb">APPR</span><span class="val">03</span></div>
+      <div class="lcd"><span class="lb">LLM</span><span class="val small">RDY</span></div>
+      <div class="lcd"><span class="lb">PROBE</span><span class="val small">ON</span></div>
+      <div class="lcd wide"><span class="lb">QUEUE</span><span class="val small">240MS</span><span class="seg"></span><span class="clock" id="clock">--:--:--</span></div>
+    </div>
+
+    <div class="content">
+      <div class="stats">
+        <div class="stat"><div class="lb"><span class="led g"></span>存活资产</div><div class="v">1,284</div><div class="d">今日 +46 · 较昨日 +3.7%</div></div>
+        <div class="stat"><div class="lb"><span class="led a"></span>运行任务</div><div class="v">6<span class="u">/ 队列 2</span></div><div class="d">全部代理健康</div></div>
+        <div class="stat"><div class="lb"><span class="led a"></span>未处理发现</div><div class="v a">23</div><div class="d">严重 2 · 高危 7 · 中危 14</div></div>
+        <div class="stat"><div class="lb"><span class="led r"></span>待审批</div><div class="v r">3</div><div class="d">含 exploit 下发 1</div></div>
+      </div>
+
+      <div class="grid">
+        <section class="panel">
+          <div class="ptitle"><span class="plate">QUEUE</span>任务队列<span class="meta">30s REFRESH</span><span class="link">全部 →</span></div>
+          <table>
+            <thead><tr><th>任务</th><th>目标</th><th style="width:168px">进度</th><th>状态</th></tr></thead>
+            <tbody>
+              <tr><td class="tname">nuclei 服务识别</td><td class="ttarget">192.168.8.0/22</td><td><span class="pbar"><i style="width:62%"></i></span><span class="pct">62%</span></td><td><span class="st run"><span class="led"></span>运行中</span></td></tr>
+              <tr><td class="tname">http_probe 存活探测</td><td class="ttarget">3,411 targets</td><td><span class="pbar"><i style="width:81%"></i></span><span class="pct">81%</span></td><td><span class="st run"><span class="led"></span>运行中</span></td></tr>
+              <tr><td class="tname">nmap TOP1000</td><td class="ttarget">10.6.0.0/16</td><td><span class="pbar"><i style="width:34%"></i></span><span class="pct">34%</span></td><td><span class="st run"><span class="led"></span>运行中</span></td></tr>
+              <tr><td class="tname">子域名收集 subspace</td><td class="ttarget">example.com</td><td><span class="pbar done"><i style="width:100%"></i></span><span class="pct">100%</span></td><td><span class="st done"><span class="led"></span>完成</span></td></tr>
+              <tr><td class="tname">dirsearch 目录爆破</td><td class="ttarget">app.example.com</td><td><span class="pbar"><i style="width:0%"></i></span><span class="pct">—</span></td><td><span class="st que"><span class="led"></span>排队</span></td></tr>
+              <tr><td class="tname">fscan 内网段扫描</td><td class="ttarget">10.6.0.0/16</td><td><span class="pbar fail"><i style="width:17%"></i></span><span class="pct">17%</span></td><td><span class="st fail"><span class="led"></span>失败 · 代理断开</span></td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <div class="rcol">
+          <section class="panel">
+            <div class="ptitle"><span class="plate">APPR</span>拦截审批<span class="meta" style="color:var(--led-err)">3 PENDING</span></div>
+            <div class="apv">
+              <div class="t"><span class="kind exp">EXPLOIT</span><b>漏洞利用下发</b></div>
+              <div class="m">app.example.com · SQLi /api/v1/user</div>
+              <div class="act"><button class="btn sm ok">批准</button><button class="btn sm danger">驳回</button></div>
+            </div>
+            <div class="apv">
+              <div class="t"><span class="kind px">PROXY</span><b>拦截请求放行</b></div>
+              <div class="m">POST /admin/export · ops.example.com</div>
+              <div class="act"><button class="btn sm ok">放行</button><button class="btn sm danger">丢弃</button></div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="ptitle"><span class="plate">FIND</span>新发现<span class="link">全部 →</span></div>
+            <div class="fd"><span class="sev crit">严重</span><div><div class="t">SQL 注入</div><div class="m">GET /api/v1/user?id=1</div></div><span class="host">app.example.com</span></div>
+            <div class="fd"><span class="sev high">高危</span><div><div class="t">未授权访问</div><div class="m">Actuator /env</div></div><span class="host">ops.example.com</span></div>
+            <div class="fd"><span class="sev high">高危</span><div><div class="t">Redis 弱口令</div><div class="m">6379/tcp requirepass</div></div><span class="host">10.6.2.14</span></div>
+            <div class="fd"><span class="sev mid">中危</span><div><div class="t">.git 目录泄露</div><div class="m">GET /.git/HEAD 200</div></div><span class="host">dev.example.com</span></div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+const c=document.getElementById('clock');
+const t=()=>{const d=new Date();c.textContent=[d.getHours(),d.getMinutes(),d.getSeconds()].map(n=>String(n).padStart(2,'0')).join(':');};
+t();setInterval(t,1000);
+</script>
+</body>
+</html>

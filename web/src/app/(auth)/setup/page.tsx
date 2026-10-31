@@ -64,14 +64,20 @@ export default function SetupPage() {
   return (
     <div className="flex h-dvh">
       {/* Left panel */}
-      <div className="hidden flex-col items-center justify-center bg-primary p-12 text-center lg:flex lg:w-1/3">
+      <div className="hidden flex-col items-center justify-center bg-[linear-gradient(160deg,color-mix(in_oklch,var(--primary),black_20%),color-mix(in_oklch,var(--primary),black_42%))] p-12 text-center lg:flex lg:w-1/3">
         <div className="relative flex items-center justify-center">
           <div className="absolute size-80 rounded-full border border-primary-foreground/10" />
           <div className="absolute size-60 rounded-full border border-primary-foreground/15" />
           <div className="absolute size-40 rounded-full border border-primary-foreground/20" />
           {/* eslint-disable-next-line @next/next/no-img-element */}
           {/* 方块版 logo 自带黑底白标(见 c93fc63),原样展示;剪影滤镜会把整张图糊成纯色块。 */}
-          <img src="/logo.png" alt="4zrec" width={160} height={160} className="relative rounded-4xl" />
+          <img
+            src="/logo.png"
+            alt="4zrec"
+            width={160}
+            height={160}
+            className="relative rounded-4xl ring-1 ring-primary-foreground/25"
+          />
         </div>
       </div>
 
@@ -79,7 +85,7 @@ export default function SetupPage() {
       <div className="flex w-full items-center justify-center bg-background p-8 lg:w-2/3">
         <div className="w-full max-w-md space-y-10 py-24 lg:py-32">
           <div className="space-y-4 text-center">
-            <h2 className="text-2xl font-medium tracking-tight">{unavailable ? "无法确认初始化状态" : "初始化密码"}</h2>
+            <h2 className="font-medium text-2xl tracking-tight">{unavailable ? "无法确认初始化状态" : "初始化密码"}</h2>
             <p className="mx-auto max-w-xl text-muted-foreground">
               {unavailable
                 ? "后端或数据库暂时不可用。为避免覆盖实例上已有的密码，初始化入口已临时关闭——请恢复服务后重试。"
@@ -88,7 +94,7 @@ export default function SetupPage() {
           </div>
           {unavailable ? (
             <div className="flex flex-col gap-4">
-              {error && <p className="text-center text-sm text-destructive">{error}</p>}
+              {error && <p className="text-center text-destructive text-sm">{error}</p>}
               <Button type="button" className="w-full" onClick={() => window.location.reload()}>
                 重试
               </Button>
@@ -128,7 +134,7 @@ export default function SetupPage() {
                   autoComplete="new-password"
                 />
               </div>
-              {error && <p className="text-sm text-destructive">{error}</p>}
+              {error && <p className="text-destructive text-sm">{error}</p>}
               <Button type="submit" className="w-full" disabled={loading || !username.trim() || !password || !confirm}>
                 {loading ? "保存中..." : "设置密码并登录"}
               </Button>

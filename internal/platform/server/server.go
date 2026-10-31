@@ -108,6 +108,12 @@ type Server struct {
 	// trigger queue — the drain goroutine simply proceeds to the next queued fire.
 	chatCancel map[string]context.CancelCauseFunc
 
+	// IM 接入网关：每个平台一条长驻循环（飞书/钉钉 WS、Telegram 轮询、企业微信
+	// 回调不需要循环但有发送态）。imCancels 记录各平台循环的取消函数，配置变化
+	// 时 imApplyConfig 全停重起新配置（im_hub.go）。
+	imMu      sync.Mutex
+	imCancels map[string]context.CancelFunc
+
 	// triggerQ buffers P3 trigger fires PER AGENT. A per-agent "pump" launches runs up
 	// to a concurrency limit derived from the agent's策略: serial → limit 1 (+ optional
 	// merge); parallel → limit = trigger_max_parallel (0=∞), no merge. triggerActive
@@ -281,6 +287,9 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		// 漏洞 IM 推送投递引擎。与 Scheduler 并列但独立：推送的实时性要求(3s)
 		// 与触发器的业务节奏不同，且两者失败互不牵连——推送卡住不该影响 agent 触发。
 		go newNotifier(s).Run(s.ctx)
+		// IM 接入网关：飞书/钉钉/Telegram 长连接收消息、企业微信走回调，
+		// 聊天映射到平台会话，/bond /new 与对话页同一条链路（im_hub.go）。
+		s.startIMHub()
 		// 周期采集 worker(五引擎按域采集/主动测绘流水线的定时执行,30s tick;
 		// 鉴权失败指数退避熔断,新资产入通知事件)。与 Scheduler/Notifier 并列独立。
 		go s.runReconScheduleWorker(s.ctx)
@@ -529,6 +538,8 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 	s.chatAgent.SetWebSearch(s.m.WebSearchOpts())
 	s.chatAgent.SetGuard(s.chatGuard())
 	s.chatAgent.SetTargetsEnv(s.targetsEnvForConv()) // ZREC_TARGETS:会话挂项目时注入(见 targets_env.go)
+	s.chatAgent.SetPlatformTools(s.chatPlatformTools) // 平台工具:列项目/列任务/绑定会话(按会话注入)
+	s.chatAgent.SetBindingSpec(s.chatBindingSpec)     // system prompt 注入绑定状态(每轮重读)
 	s.chatAgent.SetNonStreaming(nonStreamingResolver(cfg))
 	s.chatAgent.SetMaxTokens(maxTokensResolver(cfg))
 	s.chatAgent.SetNoaEnabled(s.m.NoaCompactionEnabled) // 实验功能:noa 上下文压缩(每 run 读)
@@ -743,6 +754,8 @@ func (s *Server) chatAgentForProfile(id int64) *agent.ChatAgent {
 	ca.SetWebSearch(s.m.WebSearchOpts())
 	ca.SetGuard(s.chatGuard())
 	ca.SetTargetsEnv(s.targetsEnvForConv())
+	ca.SetPlatformTools(s.chatPlatformTools)
+	ca.SetBindingSpec(s.chatBindingSpec)
 	ca.SetNonStreaming(nonStreamingResolver(cfg))
 	ca.SetMaxTokens(maxTokensResolver(cfg))
 	ca.SetNoaEnabled(s.m.NoaCompactionEnabled) // 实验功能:noa 上下文压缩(每 run 读)
@@ -1058,6 +1071,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/conversations/{id}/messages", s.pgSendConversationMessage)
 	mux.HandleFunc("POST /api/conversations/{id}/stop", s.pgStopConversation)
 	mux.HandleFunc("GET /api/conversations/{id}/messages/{seq}", s.pgConversationMsgDetail)
+	// IM 接入网关：企业微信接收消息回调（自带签名校验，豁免 JWT，见 auth.go）。
+	mux.HandleFunc("GET /api/im/wecom/callback", s.imWecomCallback)
+	mux.HandleFunc("POST /api/im/wecom/callback", s.imWecomCallback)
 
 	mux.HandleFunc("GET /api/agents", s.pgListAgents)
 	mux.HandleFunc("POST /api/agents", s.pgCreateAgent)
@@ -3896,6 +3912,8 @@ func (s *Server) settingsPayload() map[string]any {
 		"notify_enabled":             s.m.pg.GetBool(settingNotifyEnabled, true),
 		"notify_public_base_url":     notifyPublicBaseURL(s.m.pg),
 		"notify_digest_interval_min": notifyDigestIntervalMin(s.m.pg),
+		// IM 接入网关（对话式绑定：/bond /new）。凭据只回 *_set，不回明文。
+		"im_bot": s.imBotPayload(),
 	}
 }
 
@@ -3978,6 +3996,9 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		NotifyEnabled    *bool   `json:"notify_enabled"`
 		NotifyBaseURL    *string `json:"notify_public_base_url"`
 		NotifyDigestMins *int    `json:"notify_digest_interval_min"`
+		// IM 接入网关（飞书/钉钉/Telegram/企业微信）的凭据与开关。
+		// 保存后 imBotApply 会全停重起各平台循环，即时生效。
+		IMBot *imBotSettingsInput `json:"im_bot"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, err.Error())
@@ -4071,6 +4092,12 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.m.pg.SetSetting(settingNotifyDigestMinutes, strconv.Itoa(*req.NotifyDigestMins)); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.IMBot != nil {
+		if err := s.imBotApply(*req.IMBot); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>4zrec 前端重构 · 设计路线打样（亮色）</title>
+<style>
+:root{
+  --bg:#f4f4f2;--surface:#ffffff;--line:#e2e2df;
+  --ink:#191917;--muted:#6b6b64;--faint:#9c9c93;
+  --sans:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --mono:"JetBrains Mono","SF Mono",ui-monospace,Consolas,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{font:13px/1.6 var(--sans);color:var(--ink);background:var(--bg);display:flex;flex-direction:column;overflow:hidden}
+header{flex:none;display:flex;align-items:stretch;border-bottom:1px solid var(--line);background:var(--surface)}
+.brand{padding:11px 18px;border-right:1px solid var(--line);display:flex;flex-direction:column;justify-content:center}
+.brand b{font-size:13px}
+.brand span{font:10px var(--mono);color:var(--faint);letter-spacing:.14em}
+.tab{padding:8px 20px;border:none;background:none;color:var(--muted);font:13px var(--sans);cursor:pointer;border-right:1px solid var(--line);display:flex;flex-direction:column;justify-content:center;gap:1px;text-align:left}
+.tab b{font-weight:600;color:inherit}
+.tab small{font:10px var(--mono);letter-spacing:.08em;color:var(--faint)}
+.tab:hover{color:var(--ink);background:#fafaf8}
+.tab.on{color:var(--ink);box-shadow:inset 0 -2px 0 var(--tc,#2a6df5);background:#fafaf8}
+.hint{margin-left:auto;display:flex;align-items:center;padding:0 18px;font:10.5px var(--mono);color:var(--faint);gap:14px}
+.hint kbd{border:1px solid var(--line);border-radius:4px;padding:1px 6px;color:var(--muted);background:var(--surface)}
+.desc{flex:none;padding:8px 18px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted);background:var(--surface)}
+.desc b{color:var(--ink)}
+iframe{flex:1;border:none;width:100%;background:#f4f4f2}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><b>4zrec 前端重构</b><span>LIGHT ROUTES · 3</span></div>
+  <button class="tab on" data-r="a" style="--tc:#d9480f"><b>A · 纸感简报 PAPER</b><small>编辑排版 / 暖纸+墨色 / 朱橙点缀</small></button>
+  <button class="tab" data-r="b" style="--tc:#2a6df5"><b>B · 天青净版 CLARITY</b><small>清爽 SaaS / 冷白+钴蓝 / 轻阴影</small></button>
+  <button class="tab" data-r="c" style="--tc:#e8890c"><b>C · 仪器面板 INSTRUMENT</b><small>深侧栏+亮机身 / LCD 读出条 / LED 状态</small></button>
+  <div class="hint"><span>切换 <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></span><span>均为亮色 · 无网格背景 · 静态打样，确认后在 Next.js 落地</span></div>
+</header>
+<div class="desc" id="desc"></div>
+<iframe id="frame" src="route-a-paper.html"></iframe>
+<script>
+const routes={
+  a:{
+    file:'route-a-paper.html',
+    desc:'<b>A 纸感简报：</b>把控制台做成一份"实时更新的渗透简报"——报头双细线、衬线刊名、kicker 小标、统计用纯排版横排而非卡片，信号朱橙只做强调。炫在版式功底，最耐看、最不张扬。',
+  },
+  b:{
+    file:'route-b-clarity.html',
+    desc:'<b>B 天青净版：</b>Linear/shadcn 亮色一派的精致感——冷白底、白卡片轻阴影、单一钴蓝贯穿、胶囊态势条。最稳妥现代，团队接受度最高，但风格辨识度靠细节打磨。',
+  },
+  c:{
+    file:'route-c-instrument.html',
+    desc:'<b>C 仪器面板：</b>深色仪器侧栏 + 浅色机身，态势条做成 LCD 读出窗（琥珀数码字），状态全部 LED 化，进度条分段刻度。安全工具的"硬件仪器"隐喻，个性最强，深浅对比自带炫感。',
+  },
+};
+const frame=document.getElementById('frame'),desc=document.getElementById('desc');
+const tabs=[...document.querySelectorAll('.tab')];
+function go(r){
+  const t=routes[r];if(!t)return;
+  tabs.forEach(b=>b.classList.toggle('on',b.dataset.r===r));
+  frame.src=t.file;desc.innerHTML=t.desc;
+  location.hash=r;
+}
+tabs.forEach(b=>b.onclick=()=>go(b.dataset.r));
+addEventListener('keydown',e=>{if(e.key>='1'&&e.key<='3')go('abc'[+e.key-1])});
+const h=location.hash[1];if(h&&routes[h])go(h);else desc.innerHTML=routes.a.desc;
+</script>
+</body>
+</html>

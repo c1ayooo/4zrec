@@ -437,7 +437,7 @@ export default function ReportsPage() {
                     placeholder={t("reports.personContact")}
                     className="w-48"
                   />
-                  <Button size="icon" variant="ghost" onClick={() => removePerson(i)}>
+                  <Button aria-label="删除联系人" size="icon" variant="ghost" onClick={() => removePerson(i)}>
                     <TrashIcon className="text-muted-foreground" />
                   </Button>
                 </div>
@@ -484,10 +484,10 @@ export default function ReportsPage() {
                   <TableCell className="text-muted-foreground">{tpl.company_name || "—"}</TableCell>
                   <TableCell className="text-muted-foreground text-xs">{localeName(t, tpl.locale)}</TableCell>
                   <TableCell className="text-right">
-                    <Button size="icon" variant="ghost" onClick={() => openEditTemplate(tpl)}>
+                    <Button aria-label="编辑模板" size="icon" variant="ghost" onClick={() => openEditTemplate(tpl)}>
                       <PencilIcon className="text-muted-foreground size-4" />
                     </Button>
-                    <Button size="icon" variant="ghost" onClick={() => askDeleteTemplate(tpl.id)}>
+                    <Button aria-label="删除模板" size="icon" variant="ghost" onClick={() => askDeleteTemplate(tpl.id)}>
                       <TrashIcon className="text-muted-foreground size-4" />
                     </Button>
                   </TableCell>
@@ -777,7 +777,7 @@ export default function ReportsPage() {
                       placeholder={t("reports.personContact")}
                       className="w-44"
                     />
-                    <Button size="icon" variant="ghost" onClick={() => removeTplPerson(i)}>
+                    <Button aria-label="删除联系人" size="icon" variant="ghost" onClick={() => removeTplPerson(i)}>
                       <TrashIcon className="text-muted-foreground" />
                     </Button>
                   </div>

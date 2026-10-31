@@ -1797,3 +1797,18 @@ ALTER TABLE assets ADD COLUMN IF NOT EXISTS project_id BIGINT REFERENCES project
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS authz TEXT CHECK (authz IN ('approved','pending','rejected'));
 CREATE INDEX IF NOT EXISTS idx_assets_project ON assets(project_id) WHERE project_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_assets_pending ON assets(id) WHERE authz = 'pending';
+
+-- IM 接入:每个 IM 平台的聊天(chat)映射到一个平台会话,IM 里的 /bond /new 与
+-- 对话页操作同一条链路。conversation_id 级联删除:会话删掉映射自动消失。
+CREATE TABLE IF NOT EXISTS im_sessions (
+    platform        TEXT NOT NULL,
+    chat_id         TEXT NOT NULL,
+    conversation_id BIGINT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    user_id         TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (platform, chat_id)
+);
+DROP TRIGGER IF EXISTS trg_im_sessions_upd ON im_sessions;
+CREATE TRIGGER trg_im_sessions_upd BEFORE UPDATE ON im_sessions
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();

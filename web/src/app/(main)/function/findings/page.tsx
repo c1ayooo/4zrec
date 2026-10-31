@@ -1151,7 +1151,7 @@ export default function FindingsPage() {
                           {fmtTime(group.last_found_at)}
                         </span>
                         {group.task_id !== null && (
-                          <Button size="icon-sm" variant="ghost" asChild>
+                          <Button size="icon-sm" variant="ghost" asChild aria-label="查看任务详情">
                             <Link
                               href={`/function/tasks/detail?id=${group.task_id}`}
                               aria-label={`查看任务 #${group.task_id}`}

@@ -99,7 +99,7 @@ export function LayoutControls() {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button size="icon">
+        <Button size="icon" aria-label="偏好设置">
           <Settings />
         </Button>
       </PopoverTrigger>

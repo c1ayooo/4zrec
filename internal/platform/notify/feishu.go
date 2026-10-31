@@ -348,3 +348,9 @@ func feishuBatchLine(it Item, index int) string {
 	}
 	return line
 }
+
+// FeishuTenantToken 为需要直接调飞书开放平台 API 的模块（如 IM 接入网关）导出
+// 租户 token；缓存与失效语义同通知渠道内部实现。
+func FeishuTenantToken(ctx context.Context, appID, appSecret string, force bool) (string, error) {
+	return feishuTenantToken(ctx, appID, appSecret, force)
+}

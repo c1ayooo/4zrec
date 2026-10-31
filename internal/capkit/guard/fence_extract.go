@@ -27,11 +27,30 @@ var connectionCommands = map[string]bool{
 	"sqlmap": true, "hydra": true, "medusa": true, "smbclient": true, "smbmap": true,
 	"redis-cli": true, "psql": true, "mysql": true, "mongo": true, "mongosh": true,
 	"telnet": true, "ftp": true, "http": true, "httpie": true, "socat": true,
-	"openssl": true, "msfconsole": true, "searchsploit": true,
+	"openssl": true, "msfconsole": true,
 	"katana": true, "subfinder": true, "amass": true, "dnsx": true, "naabu": true,
 	"feroxbuster": true, "whatweb": true, "wpscan": true, "joomscan": true,
 	"dirsearch": true, "wfuzz": true, "arjun": true, "gau": true, "waybackurls": true,
 	"assetfinder": true, "chaos": true, "dnsgen": true,
+	// 数据库导出/枚举与横向移动工具(2026-10-30 补):此前 mysqldump 连远端库、
+	// crackmapexec 扫网段、impacket 凭据转储都静默过围栏。
+	"mysqldump": true, "pg_dump": true, "pg_dumpall": true,
+	"rpcclient": true, "smbget": true,
+	"crackmapexec": true, "netexec": true, "nxc": true,
+	"snmpwalk": true, "snmp-check": true, "onesixtyone": true,
+	"enum4linux": true, "enum4linux-ng": true,
+}
+
+// impacketCommand 识别 impacket 脚本族(impacket-secretsdump / -psexec /
+// -wmiexec / -GetUserSPNs…):按前缀而不是逐个枚举,新增脚本自动覆盖。
+// 目标是 user[:pass]@host 位置参数,由通用位置参数路径提取。
+func impacketCommand(cmd string) bool {
+	return strings.HasPrefix(cmd, "impacket-")
+}
+
+// isConnectionCommand 出网命令判定(含 impacket 前缀族)。
+func isConnectionCommand(cmd string) bool {
+	return connectionCommands[cmd] || impacketCommand(cmd)
 }
 
 // targetValueFlags 是“该旗标的值就是目标对象”的按命令覆盖表。它们必须优先于
@@ -39,7 +58,7 @@ var connectionCommands = map[string]bool{
 var targetValueFlags = map[string]map[string]bool{
 	"katana":      {"-u": true, "-list": true},
 	"httpx":       {"-u": true, "-l": true, "--list": true},
-	"nuclei":      {"-u": true, "-l": true, "--list": true},
+	"nuclei":      {"-u": true, "-l": true, "--list": true, "-target": true},
 	"feroxbuster": {"-u": true, "--url": true},
 	"ffuf":        {"-u": true},
 	"gobuster":    {"-u": true},
@@ -70,6 +89,12 @@ var valueFlags = map[string]bool{
 	"-p": true, "-W": true, "-R": true,
 	"-D": true, "--script": true, "-oN": true, "-oX": true, "-oG": true, "-oA": true, "-iL": true,
 	"--wordlist": true, "-w5": true, "--url": false, // --url 值按 URL 解析(特殊处理)
+	// 排除清单(nmap/masscan --exclude 10.10.10.99):被排除的地址不是要测的
+	// 目标,列出它会误导审批。
+	"--exclude": true, "--excludefile": true, "--exclude-hosts": true,
+	// hydra -l 用户名/-L 用户表、nuclei/httpx -l 目标清单(清单文件由
+	// targetFileFlags 单独读取,这里只防止文件名/用户名落进位置参数)。
+	"-l": true, "-L": true,
 }
 
 // urlValueFlags 值需按 URL 解析的旗标。
@@ -184,7 +209,7 @@ func scanCommandSegment(seg string, c *fenceCollector) {
 		c.merge(extractFenceTargetsLegacy(inner))
 		return
 	}
-	if cmd == "" || cmd == "__shell_script__" || !connectionCommands[cmd] {
+	if cmd == "" || cmd == "__shell_script__" || !isConnectionCommand(cmd) {
 		return
 	}
 	scanCommandTargets(cmd, rest, c)
@@ -227,7 +252,7 @@ func scanCommandTargets(cmd string, rest []string, c *fenceCollector) {
 			case isDNSTypeOrClass(tok):
 				// 查询类型/类
 			default:
-				c.addHost(tok)
+				c.addPositionalTarget(tok)
 			}
 			continue
 		}
@@ -270,20 +295,38 @@ func scanCommandTargets(cmd string, rest []string, c *fenceCollector) {
 		if strings.HasPrefix(tok, "-") || strings.HasPrefix(tok, "+") {
 			continue // 旗标与 dig 的 +short 等选项
 		}
-		// 位置参数:host/URL/CIDR/域名。
-		c.addHost(tok)
+		// 位置参数:host/URL/CIDR/域名。裸单词(服务名/子命令/用户名/标签值)
+		// 不是目标——见 addPositionalTarget。
+		c.addPositionalTarget(tok)
 	}
+}
+
+// commandSegment 是一个简单命令段;Piped 表示它前面是管道(|),stdin 来自
+// 上一段的输出——连接类命令此时可能从 stdin 读目标。
+type commandSegment struct {
+	Text  string
+	Piped bool
 }
 
 // splitCommands 按 ; && || | & 换行 切简单命令(引号与 $( )/反引号内不切)。
 func splitCommands(text string) []string {
-	var out []string
+	segs := splitCommandSegments(text)
+	out := make([]string, 0, len(segs))
+	for _, s := range segs {
+		out = append(out, s.Text)
+	}
+	return out
+}
+
+func splitCommandSegments(text string) []commandSegment {
+	var out []commandSegment
 	var cur strings.Builder
 	inS, inD, inBT := false, false, false
 	depth := 0
+	nextPiped := false
 	flush := func() {
 		if s := strings.TrimSpace(cur.String()); s != "" {
-			out = append(out, s)
+			out = append(out, commandSegment{Text: s, Piped: nextPiped})
 		}
 		cur.Reset()
 	}
@@ -341,6 +384,8 @@ func splitCommands(text string) []string {
 				continue
 			}
 			flush()
+			// 只有管道把输出接到下一段的 stdin;换行/;/& 不算。
+			nextPiped = c == '|'
 		default:
 			cur.WriteByte(c)
 		}
@@ -430,16 +475,54 @@ func collectVars(text string) map[string]string {
 	return out
 }
 
-// substituteVars 把 $VAR / ${VAR} 代入。
+// substituteVars 把 $VAR / ${VAR} 代入。按标识符边界扫描而不是 ReplaceAll:
+// 绑定 f 时不会把 $foo 误吃成 <val>oo(嵌套循环同名前缀变量的实际风险)。
+// 未绑定的变量原样保留,由调用方按动态占位符处理。
 func substituteVars(s string, vars map[string]string) string {
 	if len(vars) == 0 || !strings.Contains(s, "$") {
 		return s
 	}
-	for name, val := range vars {
-		s = strings.ReplaceAll(s, "${"+name+"}", val)
-		s = strings.ReplaceAll(s, "$"+name, val)
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		c := s[i]
+		if c != '$' || i+1 >= len(s) {
+			b.WriteByte(c)
+			i++
+			continue
+		}
+		if s[i+1] == '{' {
+			if j := strings.IndexByte(s[i+2:], '}'); j >= 0 {
+				name := s[i+2 : i+2+j]
+				if val, ok := vars[name]; ok {
+					b.WriteString(val)
+					i += 2 + j + 1
+					continue
+				}
+			}
+		} else if isNameStart(s[i+1]) {
+			j := i + 1
+			for j < len(s) && isNameChar(s[j]) {
+				j++
+			}
+			if val, ok := vars[s[i+1:j]]; ok {
+				b.WriteString(val)
+				i = j
+				continue
+			}
+		}
+		b.WriteByte(c)
+		i++
 	}
-	return s
+	return b.String()
+}
+
+func isNameStart(c byte) bool {
+	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+func isNameChar(c byte) bool {
+	return isNameStart(c) || (c >= '0' && c <= '9')
 }
 
 // recurseSubstitutions 提取 $(...) 与反引号内容并回调(简单配对扫描)。

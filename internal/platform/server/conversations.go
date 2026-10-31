@@ -418,6 +418,11 @@ func (s *Server) pgSendConversationMessage(w http.ResponseWriter, r *http.Reques
 		writeErr(w, 400, "消息不能为空")
 		return
 	}
+	// 斜杠命令（/bond /new /commands…）：平台直接处理，不经 LLM，指令+回复进对话流。
+	if _, isCmd := parseChatCommand(msg); isCmd {
+		s.handleConversationCommand(w, pg, c, msg)
+		return
+	}
 	agentMessage, ok := s.prepareChatMentionMessage(w, msg)
 	if !ok {
 		return
