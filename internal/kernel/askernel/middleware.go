@@ -83,7 +83,8 @@ type viewMiddleware struct {
 	compactor  *compaction.Compactor
 	noaView    NoaView
 	maxTokens  int
-	countTurns bool // increment promptState.turns on model calls (primary runs only)
+	countTurns bool   // increment promptState.turns on model calls (primary runs only)
+	notice     string // CompactionNotice: user-message nudge appended after a fresh compact boundary ("" = off)
 
 	// reactive state: one reactive-compaction attempt per run, re-armed after
 	// each successful model turn (norma hasAttemptedReactiveCompact).
@@ -101,6 +102,13 @@ func (v *viewMiddleware) BeforeModelRewriteState(ctx context.Context, state *adk
 		before := countBoundaries(v.session.dto)
 		dto := v.compactor.Pre(ctx, v.session.dto, v.ps.lastInputTokens)
 		if countBoundaries(dto) > before {
+			// A fresh boundary: the raw pre-boundary details just left the
+			// model's view — append the host's write-it-back nudge as the last
+			// user message (inside recordBoundaryLocked's range, so it persists
+			// with the post-boundary working set).
+			if v.notice != "" {
+				dto = append(dto, acllm.UserText(v.notice))
+			}
 			v.session.recordBoundaryLocked(dto)
 		}
 		v.session.dto = dto
@@ -255,6 +263,9 @@ func (r *reactiveModel) recover(ctx context.Context, err error) bool {
 	r.v.session.mu.Lock()
 	msgs, shrank := r.v.session.compactor.Reactive(ctx, r.v.session.dto)
 	if shrank {
+		if r.v.notice != "" {
+			msgs = append(msgs, acllm.UserText(r.v.notice))
+		}
 		r.v.session.recordBoundaryLocked(msgs)
 		r.v.session.dto = msgs
 	}

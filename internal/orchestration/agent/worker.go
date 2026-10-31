@@ -249,6 +249,12 @@ const workerDefaultTmpl = `你是一个网络安全平台授权渗透测试系�
 
 完成本意图后用一句话总结你做了什么、写回了哪些事实。`
 
+// workerCompactionNotice 在内置压缩刚插入边界时注入一条 user 提醒：此刻边界前的
+// 原始过程细节已离开模型视野（折进摘要），把"边发现边写回"纪律在这一刻重新拉响——
+// 只提醒、不代写，写什么/写不写由模型按既有纪律决定（planner 每轮新会话、mainagent
+// 有 transcript Resume，均不需要）。noa 接管时内核无内置压缩，此提醒自然不触发。
+const workerCompactionNotice = "【上下文刚被压缩】早前的过程细节已折叠进上方摘要，原始内容不再逐条可见。若本次 run 中还有【尚未落库】的关键观察/证据/凭据/新资产，现在立即用 record_fact / report_finding / insert_assets 写回；已有 fact 覆盖过的不要重复写。随后继续当前意图。"
+
 // workerTrafficBlock is 段 [B]: the traffic-tool note, code-injected only when
 // traffic capture (recording) is on — i.e. the traffic_* tools actually exist.
 // Gated on recording, NOT on the egress proxy: a global proxy with capture off
@@ -474,7 +480,9 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		// full output preserved on disk. 截断上限用默认(30000 字符)。
 		ToolOutputDir: cmdOutDir(runDir),
 		Compaction:    compactionConfig(w.compactionWindow()), // long tool-heavy runs stay within the window
-		Todos:         todos,                                  // 会话级临时待办（TodoWrite），纯规划用，退出即丢
+		// 压缩边界提醒：AutoCompact/Reactive 落边界的当刻注入，见 workerCompactionNotice。
+		CompactionNotice: workerCompactionNotice,
+		Todos:            todos, // 会话级临时待办（TodoWrite），纯规划用，退出即丢
 		// 空转续跑上限:worker 沿用引擎时代的 2(其余 agent 用内核默认 5)。
 		NudgeLimit:   2,
 		NonStreaming: w.nonStreaming(), // 该 profile 选非流式时按整发收发

@@ -466,6 +466,71 @@ func TestKernelCompactionBoundary(t *testing.T) {
 	}
 }
 
+// (h2) CompactionNotice: a fresh compact boundary is followed by the host's
+// notice as a user message — visible in the post-boundary model view, placed
+// after the boundary in the DTO, and persisted with the boundary working set
+// in the transcript. This is the write-it-back nudge for agents whose findings
+// must reach the blackboard at the moment the raw details leave the model's
+// view.
+func TestKernelCompactionNotice(t *testing.T) {
+	big := strings.Repeat("x", 6000)
+	read := simpleTool("Read", big, nil)
+	m := &fakeModel{}
+	m.script(toolCallMsg("r1", "Read", "{}"), schema.AssistantMessage("noted the file", nil))
+	store := transcript.NewStore(t.TempDir())
+	s := newTestSession(t, m, func(o *Options) {
+		o.Tools = []tools.CoreTool{read}
+		o.Transcript = store
+		o.Compaction = &compaction.Config{ContextWindow: 200, MaxOutputTokens: 8, KeepRecent: 2}
+		o.CompactionSummarizer = func(ctx context.Context, msgs []acllm.Message) (string, error) {
+			return "the conversation summary", nil
+		}
+		o.CompactionNotice = "WRITE-IT-BACK-NOW"
+	})
+	defer s.Close()
+
+	c := drainPrompt(s, context.Background(), "read it")
+	if c.terminal == nil || c.terminal.Reason != ReasonCompleted {
+		t.Fatalf("terminal = %+v", c.terminal)
+	}
+	// The post-boundary model view carries the notice, so the very next turn
+	// is told the context was compacted.
+	second := m.inputOf(1)
+	if !inputContains(second, "WRITE-IT-BACK-NOW") {
+		t.Errorf("post-boundary model view missing the notice")
+	}
+	// In the DTO the notice is a user message placed after the boundary.
+	s.mu.Lock()
+	dto := append([]acllm.Message(nil), s.dto...)
+	s.mu.Unlock()
+	at, bi := -1, acllm.LastBoundaryIndex(dto)
+	for i, msg := range dto {
+		if msg.Role == acllm.RoleUser && strings.Contains(msg.Text(), "WRITE-IT-BACK-NOW") {
+			at = i
+		}
+	}
+	if at < 0 {
+		t.Fatalf("notice missing from the DTO")
+	}
+	if bi >= 0 && at <= bi {
+		t.Errorf("notice at DTO[%d], want after boundary at %d", at, bi)
+	}
+	// It persists with the post-boundary working set in the transcript.
+	found := false
+	recs, err := store.Load(store.MainPath(s.SessionID()))
+	if err != nil {
+		t.Fatalf("load transcript: %v", err)
+	}
+	for _, r := range recs {
+		if r.Message != nil && strings.Contains(r.Message.Text(), "WRITE-IT-BACK-NOW") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("notice missing from the transcript")
+	}
+}
+
 // Guarded panics and Go errors both become error tool results the model can
 // react to — never a crashed run.
 func TestKernelToolPanicAndError(t *testing.T) {

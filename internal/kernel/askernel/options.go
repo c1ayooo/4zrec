@@ -95,6 +95,16 @@ type Options struct {
 	Compaction *compaction.Config
 	// CompactionSummarizer overrides the default model-backed summarizer.
 	CompactionSummarizer compaction.Summarizer
+	// CompactionNotice, when non-empty, is injected as a user message right
+	// after built-in compaction inserts a fresh compact boundary (proactive
+	// AutoCompact or the reactive 413 recovery): at that moment the raw
+	// pre-boundary details leave the model's view, so hosts use it to remind
+	// the agent to persist anything not yet written back (worker: record_fact /
+	// report_finding / insert_assets). It is a nudge, never an auto-write —
+	// what (if anything) to record stays the model's call. No-op when Noa owns
+	// the context view (noa's compression is model-driven and archives the
+	// original). Empty = off.
+	CompactionNotice string
 
 	// Noa, when non-nil, hands context management to the noa port: the kernel
 	// skips its built-in compaction and asks the takeover for the extra tools

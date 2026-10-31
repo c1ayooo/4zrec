@@ -745,5 +745,6 @@ func (s *Session) newViewMiddleware(ps *promptState, countTurns bool) *viewMiddl
 		noaView:    s.noaView,
 		maxTokens:  s.opts.MaxTokens,
 		countTurns: countTurns,
+		notice:     s.opts.CompactionNotice,
 	}
 }
